@@ -1,0 +1,117 @@
+name: 3Q Dao Dao Dao - Cloud AutoBot v3.9.32 (24/7 Farm KNB & Telegram)
+
+on:
+  schedule:
+    # Kiểm tra định kỳ mỗi 30 phút (nhờ cancel-in-progress: false nên phiên đang chạy không bao giờ bị ngắt)
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Thời gian mỗi phiên (phút, mặc định 330 phút rồi tự nối phiên mới 24/7)'
+        required: false
+        default: '330'
+      server:
+        description: 'Máy chủ (ví dụ: Tam Quốc S6, hoặc đổi server khác tại đây)'
+        required: false
+        default: 'Tam Quốc S6'
+      report_interval:
+        description: 'Chu kỳ gửi báo cáo Telegram (phút)'
+        required: false
+        default: '30'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: 3q-autobot-session
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    name: 3Q AutoBot v3.9.32 (24/7 Farm KNB + Điều Khiển Telegram)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+
+    steps:
+      - name: 📥 Tải mã nguồn từ Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Tự động giải nén nếu anh upload trực tiếp file .zip
+        run: |
+          mkdir -p screenshots
+          touch bot.log
+          for z in *.zip; do
+            if [ -f "$z" ]; then
+              echo "📦 Phát hiện file nén [$z] -> Đang tự động giải nén..."
+              unzip -o "$z"
+            fi
+          done
+
+      - name: ⚙️ Cài đặt Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 📦 Cài đặt thư viện Puppeteer siêu tốc
+        run: |
+          if [ -x "/usr/bin/google-chrome-stable" ] || [ -x "/usr/bin/google-chrome" ]; then
+            PUPPETEER_SKIP_DOWNLOAD=true npm install --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: 🔑 Kiểm tra xác thực tài khoản JoyPlay
+        env:
+          JOYPLAY_EMAIL: ${{ secrets.JOYPLAY_EMAIL }}
+          JOYPLAY_PASSWORD: ${{ secrets.JOYPLAY_PASSWORD }}
+        run: |
+          node test-auth.js
+
+      - name: 🎮 Khởi chạy AutoBot v3.9.32 (Treo 24/7 + Điều Khiển Nút Bấm Telegram)
+        env:
+          JOYPLAY_EMAIL: ${{ secrets.JOYPLAY_EMAIL }}
+          JOYPLAY_PASSWORD: ${{ secrets.JOYPLAY_PASSWORD }}
+          GAME_SERVER: ${{ github.event.inputs.server || secrets.GAME_SERVER }}
+          RUN_DURATION_MINUTES: ${{ github.event.inputs.duration || '330' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_REPORT_INTERVAL_MIN: ${{ github.event.inputs.report_interval || '30' }}
+          HEADLESS: 'true'
+        run: |
+          if [ -x "/usr/bin/google-chrome-stable" ]; then
+            export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
+          elif [ -x "/usr/bin/google-chrome" ]; then
+            export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome"
+          fi
+          node runner.js
+
+      - name: 💾 Lưu lại cài đặt Bật/Tắt đã chỉnh qua Telegram & Tự động nối tiếp phiên mới 24/7
+        if: always() && github.event_name != 'cancelled'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "3Q-AutoBot"
+          git config user.email "autobot@users.noreply.github.com"
+          if ! git diff --quiet config.json 2>/dev/null; then
+            git add config.json
+            git commit -m "chore: lưu cài đặt Bật/Tắt mới nhất từ Telegram" || true
+            git push origin HEAD || true
+          fi
+          gh workflow run auto.yml || true
+
+      - name: 📸 Lưu nhật ký & ảnh chụp màn hình phiên chạy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobot-report-${{ github.run_number }}
+          path: |
+            screenshots/
+            bot.log
+          if-no-files-found: ignore
+          retention-days: 3
