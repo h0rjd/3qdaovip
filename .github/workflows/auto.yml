@@ -1,4 +1,4 @@
-name: 3Q Dao Dao Dao - Cloud AutoBot v3.9.32 (24/7 Farm KNB & Telegram)
+name: 3Q Dao Dao Dao - Cloud AutoBot v3.9.34 (24/7 Farm KNB & Telegram)
 
 on:
   schedule:
@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   run-bot:
-    name: 3Q AutoBot v3.9.32 (24/7 Farm KNB + Điều Khiển Telegram)
+    name: 3Q AutoBot v3.9.34 (24/7 Farm KNB + Điều Khiển Telegram)
     runs-on: ubuntu-24.04
     timeout-minutes: 350
 
@@ -46,12 +46,20 @@ jobs:
         run: |
           mkdir -p screenshots
           touch bot.log
+          HAS_NEW_RUNNER=0
+          if [ -f "runner.js" ] && grep -q "stopRequested" runner.js; then
+            cp runner.js /tmp/runner.js.new
+            HAS_NEW_RUNNER=1
+          fi
           for z in *.zip; do
             if [ -f "$z" ]; then
               echo "📦 Phát hiện file nén [$z] -> Đang tự động giải nén..."
               unzip -o "$z"
             fi
           done
+          if [ "$HAS_NEW_RUNNER" = "1" ] && ! grep -q "stopRequested" runner.js; then
+            cp /tmp/runner.js.new runner.js
+          fi
 
       - name: ⚙️ Cài đặt Node.js 22
         uses: actions/setup-node@v4
@@ -66,14 +74,7 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
-      - name: 🔑 Kiểm tra xác thực tài khoản JoyPlay
-        env:
-          JOYPLAY_EMAIL: ${{ secrets.JOYPLAY_EMAIL }}
-          JOYPLAY_PASSWORD: ${{ secrets.JOYPLAY_PASSWORD }}
-        run: |
-          node test-auth.js
-
-      - name: 🎮 Khởi chạy AutoBot v3.9.32 (Treo 24/7 + Điều Khiển Nút Bấm Telegram)
+      - name: 🎮 Khởi chạy AutoBot v3.9.34 (Treo 24/7 + Điều Khiển Nút Bấm Telegram)
         env:
           JOYPLAY_EMAIL: ${{ secrets.JOYPLAY_EMAIL }}
           JOYPLAY_PASSWORD: ${{ secrets.JOYPLAY_PASSWORD }}
@@ -82,6 +83,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_REPORT_INTERVAL_MIN: ${{ github.event.inputs.report_interval || '30' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           HEADLESS: 'true'
         run: |
           if [ -x "/usr/bin/google-chrome-stable" ]; then
@@ -92,7 +94,7 @@ jobs:
           node runner.js
 
       - name: 💾 Lưu lại cài đặt Bật/Tắt đã chỉnh qua Telegram & Tự động nối tiếp phiên mới 24/7
-        if: always() && github.event_name != 'cancelled'
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -103,7 +105,11 @@ jobs:
             git commit -m "chore: lưu cài đặt Bật/Tắt mới nhất từ Telegram" || true
             git push origin HEAD || true
           fi
-          gh workflow run auto.yml || true
+          if [ -f ".bot_stopped" ]; then
+            echo "🛑 Bot đã nhận lệnh Dừng Hẳn (.bot_stopped) -> Không tự động nối phiên mới."
+          else
+            gh workflow run auto.yml || true
+          fi
 
       - name: 📸 Lưu nhật ký & ảnh chụp màn hình phiên chạy
         if: always()
