@@ -1,9 +1,9 @@
 name: 3Q Dao Dao Dao - Cloud AutoBot v3.9.34 (24/7 Farm KNB & Telegram)
 
 on:
-  schedule:
-    # Kiểm tra định kỳ mỗi 30 phút (nhờ cancel-in-progress: false nên phiên đang chạy không bao giờ bị ngắt)
-    - cron: '*/30 * * * *'
+  # schedule:
+  #   # Tắt cron 30p để tránh GitHub tự Cancel các phiên xếp hàng gây báo đỏ giao diện Actions
+  #   - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
       duration:
