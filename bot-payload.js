@@ -8456,7 +8456,7 @@
             if (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1800) return false;
 
             // Nhịp độ chu kỳ: 0.5s - quét siêu tốc, phản ứng tức thì với cướp và cầu cứu
-            if (!bot.canDo("rescue_knb_cycle", 0.5)) return false;
+            if (!bot.canDo("rescue_knb_cycle", 0.15)) return false;
 
             bot.state.rescueChecking = true;
             bot.state.rescueCheckingStartTime = Date.now();
@@ -8495,7 +8495,20 @@
                 window.__HOST_LIST_LISTENER_ATTACHED__ = true;
                 window.Dispatcher.addEventListener("evt_HostHostListSc", function () {
                     window.__LAST_HOST_LIST_SC_TIME__ = Date.now();
-                });
+                }, { name: "HostListTracker" });
+            }
+
+            if (window.Dispatcher && !window.__HOST_VIEW_LISTENER_ATTACHED__) {
+                window.__HOST_VIEW_LISTENER_ATTACHED__ = true;
+                window.Dispatcher.addEventListener("evt_HostViewSc", function (evtName, data) {
+                    if (data && data._role_show) {
+                        const hRid = Number(data._role_show._rid || data._role_show.rid || (data._role_show.getRoleId ? data._role_show.getRoleId() : 0));
+                        if (hRid > 0) {
+                            if (!window.__HOST_VIEW_DATA_MAP__) window.__HOST_VIEW_DATA_MAP__ = {};
+                            window.__HOST_VIEW_DATA_MAP__[hRid] = { data: data, time: Date.now() };
+                        }
+                    }
+                }, { name: "HostViewTracker" });
             }
 
             const requestRefreshHostList = (isRefresh = true) => {
@@ -8512,7 +8525,7 @@
                 }
             };
 
-            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 350) => {
+            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 250) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
                 const prevFirstRid = (hl.otherHostList && hl.otherHostList[0]) ? getHouseRid(hl.otherHostList[0]) : 0;
@@ -8520,7 +8533,7 @@
                 requestRefreshHostList(isRefresh);
                 const start = Date.now();
                 while (Date.now() - start < maxWaitMs) {
-                    await bot.sleep(20);
+                    await bot.sleep(15);
                     if ((window.__LAST_HOST_LIST_SC_TIME__ || 0) >= reqTime && hl.otherHostList && hl.otherHostList.length > 0) {
                         return hl.otherHostList;
                     }
@@ -8541,20 +8554,24 @@
                 } else if (hl.reqViewOherHome) {
                     hl.reqViewOherHome(rid);
                 } else if (gm.HostViewCs) {
-                    gm.RPCReq.send(gm.HostViewCs.protocol, { _rid: rid });
+                    gm.RPCReq.send(gm.HostViewCs.protocol, { _type: 10552, _rid: rid });
                 } else {
                     const rpc = gm.RPCReq || (window.G_Mapping && window.G_Mapping.RPCReq);
                     if (rpc) rpc.send(10552, { _rid: rid });
                 }
             };
 
-            const waitViewHomeData = async (rid, maxWaitMs = 450) => {
+            const waitViewHomeData = async (rid, maxWaitMs = 250) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
+                const reqTime = Date.now();
                 requestViewHome(rid);
                 const start = Date.now();
                 while (Date.now() - start < maxWaitMs) {
-                    await bot.sleep(20);
+                    const cached = window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid];
+                    if (cached && cached.time >= reqTime) {
+                        return cached.data;
+                    }
                     const oh = hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData;
                     if (oh) {
                         const curRid = getHouseRid(oh);
@@ -8562,8 +8579,9 @@
                             return oh;
                         }
                     }
+                    await bot.sleep(15);
                 }
-                const finalOh = hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData;
+                const finalOh = (window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid]) ? window.__HOST_VIEW_DATA_MAP__[rid].data : (hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData);
                 if (finalOh && getHouseRid(finalOh) === Number(rid)) {
                     return finalOh;
                 }
@@ -8787,7 +8805,7 @@
                     bot.state.lastBattleEndTime = Date.now() + 600;
                     return true;
                 } else {
-                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 60000;
+                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 35000;
                     return false;
                 }
             };
