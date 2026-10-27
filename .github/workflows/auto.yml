@@ -91,6 +91,7 @@ jobs:
           elif [ -x "/usr/bin/google-chrome" ]; then
             export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome"
           fi
+          pkill -f chrome || true
           node runner.js
 
       - name: 💾 Lưu lại cài đặt Bật/Tắt đã chỉnh qua Telegram & Tự động nối tiếp phiên mới 24/7
