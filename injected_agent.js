@@ -8491,6 +8491,13 @@
                 return (rs.getName ? rs.getName() : (rs._name || rs.name)) || `ID ${fallbackRid || 0}`;
             };
 
+            if (window.Dispatcher && !window.__HOST_LIST_LISTENER_ATTACHED__) {
+                window.__HOST_LIST_LISTENER_ATTACHED__ = true;
+                window.Dispatcher.addEventListener("evt_HostHostListSc", function () {
+                    window.__LAST_HOST_LIST_SC_TIME__ = Date.now();
+                });
+            }
+
             const requestRefreshHostList = (isRefresh = true) => {
                 const tVal = isRefresh ? 1 : 0;
                 if (hlClass && typeof hlClass.reqOtherHomeList === "function") {
@@ -8505,14 +8512,18 @@
                 }
             };
 
-            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 250) => {
+            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 350) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
                 const prevFirstRid = (hl.otherHostList && hl.otherHostList[0]) ? getHouseRid(hl.otherHostList[0]) : 0;
+                const reqTime = Date.now();
                 requestRefreshHostList(isRefresh);
                 const start = Date.now();
                 while (Date.now() - start < maxWaitMs) {
                     await bot.sleep(20);
+                    if ((window.__LAST_HOST_LIST_SC_TIME__ || 0) >= reqTime && hl.otherHostList && hl.otherHostList.length > 0) {
+                        return hl.otherHostList;
+                    }
                     if (hl.otherHostList && hl.otherHostList.length > 0) {
                         const curFirstRid = getHouseRid(hl.otherHostList[0]);
                         if (!isRefresh || curFirstRid !== prevFirstRid) {
@@ -8776,7 +8787,7 @@
                     bot.state.lastBattleEndTime = Date.now() + 600;
                     return true;
                 } else {
-                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 90000;
+                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 60000;
                     return false;
                 }
             };
