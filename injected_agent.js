@@ -8576,7 +8576,7 @@
                 const robSec = Number(otherHome._rob_sec || 0);
                 const houseDeRes = Number(otherHome._de_Res !== undefined ? otherHome._de_Res : (otherHome._de_res || 0));
 
-                const isOccupied = (houseDeRes === 1) || (robSec > 0 && (curServerTime - robSec <= lootShowTime)) || (robRid > 0 && robSec > 0);
+                const isOccupied = (robRid > 0 && robRid !== myRid && (robSec === 0 || curServerTime - robSec <= lootShowTime)) || (houseDeRes === 1 && robRid > 0);
 
                 if (isOccupied) {
                     if (robRid > 0 && robRid === myRid) {
@@ -8776,7 +8776,7 @@
                     bot.state.lastBattleEndTime = Date.now() + 600;
                     return true;
                 } else {
-                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 45000;
+                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 90000;
                     return false;
                 }
             };
@@ -8918,20 +8918,13 @@
                         const targetRid = getHouseRid(house);
                         if (!targetRid || targetRid === myRid) continue;
 
-                        const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
-                        if (deRes === 0) {
-                            // Nhà yên bình, không bị chiếm đóng -> tính vào số nhà đã quét và bỏ qua ngay 0ms!
-                            bot.state.totalRescueScanned++;
-                            continue;
-                        }
-
-                        // Nhà bốc lửa (_de_res === 1 hoặc 2) -> Kiểm tra và giải cứu ngay!
                         const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                         if (Date.now() < skipUntil) continue;
 
                         const houseName = getHouseName(house, targetRid);
-                        bot.log(`🔥 [Farm KNB] Phát hiện gia viên [${houseName}] đang bốc lửa (_de_res = ${deRes})! Đang giải cứu ngay...`);
-                        const handled = await inspectAndRescueTarget(targetRid, houseName, "Hàng Xóm Bốc Lửa");
+                        const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
+                        const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : "Hàng Xóm (Soi Cướp)";
+                        const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
                         if (handled) return didSomething;
                     }
                 }
