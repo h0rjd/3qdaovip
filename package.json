@@ -1,0 +1,25 @@
+{
+  "name": "3q-autobot-github",
+  "version": "3.9.32",
+  "description": "Treo Bot Tự Động Hóa 3Q Đào Đào Đào v3.9.32 (Farm KNB Giải Cứu Gia Viên + Báo cáo Telegram 24/7) trên GitHub Actions & Local",
+  "main": "runner.js",
+  "scripts": {
+    "start": "node runner.js",
+    "test-auth": "node test-auth.js",
+    "test-telegram": "node test-telegram.js"
+  },
+  "keywords": [
+    "3q-dao-dao-dao",
+    "autobot-v3.9.32",
+    "farm-knb",
+    "github-actions",
+    "telegram-report",
+    "puppeteer"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^23.4.0",
+    "puppeteer-core": "^25.14.0"
+  }
+}

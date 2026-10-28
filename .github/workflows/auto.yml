@@ -63,6 +63,9 @@ jobs:
 
       - name: 📦 Cài đặt thư viện Puppeteer siêu tốc
         run: |
+          if [ ! -f "package.json" ]; then
+            echo '{"name":"3q-autobot","version":"3.9.34","dependencies":{"puppeteer":"^23.4.0","puppeteer-core":"^25.14.0"}}' > package.json
+          fi
           if [ -x "/usr/bin/google-chrome-stable" ] || [ -x "/usr/bin/google-chrome" ]; then
             PUPPETEER_SKIP_DOWNLOAD=true npm install --no-audit --no-fund
           else
