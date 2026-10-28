@@ -9019,22 +9019,40 @@
                     bot.hookBattleController();
                 }
 
-                const hostList = await waitRefreshHostList(true, 250);
+                const hostList = await waitRefreshHostList(true, 180);
                 if (Array.isArray(hostList) && hostList.length > 0) {
+                    if (bot.state.spotCheckCounter === undefined) bot.state.spotCheckCounter = 0;
+                    bot.state.spotCheckCounter++;
+                    const allowSpotCheck = (bot.state.spotCheckCounter % 25 === 0);
+
                     for (let hIdx = 0; hIdx < hostList.length; hIdx++) {
                         const house = hostList[hIdx];
                         if (!house) continue;
+                        bot.state.totalRescueScanned++;
                         const targetRid = getHouseRid(house);
                         if (!targetRid || targetRid === myRid) continue;
 
                         const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                         if (Date.now() < skipUntil) continue;
 
-                        const houseName = getHouseName(house, targetRid);
                         const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
-                        const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : "Hàng Xóm (Soi Cướp)";
-                        const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
-                        if (handled) return didSomething;
+                        const houseName = getHouseName(house, targetRid);
+
+                        // ƯU TIÊN TUYỆT ĐỐI 1: Nhà bốc lửa (_de_res === 1 hoặc _de_res === 2) -> SOI & TRẢM CƯỚP NGAY (+50 KNB)
+                        if (deRes === 1 || deRes === 2) {
+                            const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : "Hàng Xóm Bị Chiếm Đóng";
+                            bot.log(`🔥 [Farm KNB] Phát hiện gia viên [${houseName}] đang bốc lửa (_de_res = ${deRes})! Đang giải cứu ngay...`);
+                            const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
+                            if (handled) return didSomething;
+                        } 
+                        // ƯU TIÊN 2: Kiểm tra chéo (Spot-Check) mỗi 25 lượt làm mới để tránh sai sót
+                        else if (allowSpotCheck && hIdx === 0) {
+                            const handled = await inspectAndRescueTarget(targetRid, houseName, "Spot-Check An Toàn");
+                            if (handled) return didSomething;
+                        } else {
+                            // Nhà yên bình (_de_res === 0) -> Bỏ qua 0ms, không tốn packet 10552, tăng tốc độ làm mới gấp 20 lần!
+                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 20000;
+                        }
                     }
                 }
 

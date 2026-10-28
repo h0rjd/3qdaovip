@@ -2032,7 +2032,29 @@ async function run() {
                 if (cycle % 3 === 0) {
                     const totalRescued = sessionState.baseRescuedCount + Number(st.rescuedCount || 0);
                     const totalKnb = sessionState.baseRescuedKnb + Number(st.rescuedKnbTotal || 0);
-                    writeLog(`[Trạng Thái] ${st.roleName || '---'} | Ải: ${st.stage || 1} | LC: ${formatNum(st.basePower || st.power)} | KNB: ${formatNum(st.jade)} | Giải cứu: ${totalRescued} lượt (+${totalKnb} KNB)`);
+                    const totalScanned = (sessionState.baseInspectedHomes || 0) + Number(st.inspectedHomesCount || st.totalRescueScanned || 0);
+                    const elapsedMin = Math.max(0.1, (Date.now() - sessionState.startTime) / 60000);
+                    const scanSpeed = Math.round(totalScanned / elapsedMin);
+                    writeLog(`[Trạng Thái] ${st.roleName || '---'} | Ải: ${st.stage || 1} | LC: ${formatNum(st.basePower || st.power)} | KNB: ${formatNum(st.jade)} | Giải cứu: ${totalRescued} lượt (+${totalKnb} KNB) | Đã quét: ${totalScanned.toLocaleString()} nhà (~${scanSpeed} nhà/p)`);
+
+                    if (process.env.GITHUB_STEP_SUMMARY && cycle % 6 === 0) {
+                        try {
+                            const summaryMd = [
+                                `## ⚡ 3Q AutoBot v3.9.35 - Trạng Thái Farm KNB Realtime`,
+                                `| Chỉ số | Chi tiết |`,
+                                `| :--- | :--- |`,
+                                `| 👤 **Nhân vật** | **${st.roleName || '---' }** (Server: ${CONFIG.server}) |`,
+                                `| ⚔️ **Lực chiến** | ${formatNum(st.basePower || st.power)} |`,
+                                `| 💎 **KNB hiện có** | **${formatNum(st.jade)}** |`,
+                                `| 🌾 **Đã giải cứu** | **${totalRescued} lượt (+${totalKnb.toLocaleString()} KNB)** |`,
+                                `| 🔍 **Tổng gia viên đã quét** | **${totalScanned.toLocaleString()}** gia viên |`,
+                                `| ⚡ **Tốc độ rà soát** | **~${scanSpeed.toLocaleString()}** nhà/phút |`,
+                                `| ⏱️ **Thời gian hoạt động** | ${Math.floor(elapsedMin)} phút ${Math.round((elapsedMin % 1) * 60)} giây |`,
+                                `| 📡 **Cập nhật lần cuối** | ${new Date().toLocaleTimeString('vi-VN\)} |`
+                            ].join('\n\);
+                            fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, 'utf8\);
+                        } catch (eSummary) {}
+                    }
                 }
 
                 // Cập nhật ảnh màn hình cho GUI mỗi 20 giây (hoặc 2 phút trên GitHub Actions)
