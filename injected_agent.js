@@ -8778,27 +8778,40 @@
                 }
             };
 
-            const waitViewHomeData = async (rid, maxWaitMs = 250) => {
+            const waitViewHomeData = async (rid, maxWaitMs = 650) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
+
+                // 1. Kiểm tra ngay dữ liệu đã nạp sẵn trong bộ nhớ đệm (từ pipelining trong 15s qua)
+                const cachedFresh = window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid];
+                if (cachedFresh && (Date.now() - cachedFresh.time < 15000)) {
+                    return cachedFresh.data;
+                }
+
+                // 2. Kiểm tra otherHomeData hiện tại của HomeLandModel
+                const currentOh = hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData;
+                if (currentOh && getHouseRid(currentOh) === Number(rid)) {
+                    return currentOh;
+                }
+
+                // 3. Nếu chưa có, gửi HostViewCs và đợi phản hồi
                 const reqTime = Date.now();
                 requestViewHome(rid);
                 const start = Date.now();
                 while (Date.now() - start < maxWaitMs) {
                     const cached = window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid];
-                    if (cached && cached.time >= reqTime) {
+                    if (cached && (cached.time >= reqTime || Date.now() - cached.time < 15000)) {
                         return cached.data;
                     }
                     const oh = hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData;
-                    if (oh) {
-                        const curRid = getHouseRid(oh);
-                        if (curRid === Number(rid)) {
-                            return oh;
-                        }
+                    if (oh && getHouseRid(oh) === Number(rid)) {
+                        return oh;
                     }
                     await bot.sleep(15);
                 }
-                const finalOh = (window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid]) ? window.__HOST_VIEW_DATA_MAP__[rid].data : (hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData);
+                const finalOh = (window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid])
+                    ? window.__HOST_VIEW_DATA_MAP__[rid].data
+                    : (hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData);
                 if (finalOh && getHouseRid(finalOh) === Number(rid)) {
                     return finalOh;
                 }

@@ -46,19 +46,14 @@ jobs:
         run: |
           mkdir -p screenshots
           touch bot.log
-          HAS_NEW_RUNNER=0
-          if [ -f "runner.js" ] && grep -q "stopRequested" runner.js; then
-            cp runner.js /tmp/runner.js.new
-            HAS_NEW_RUNNER=1
-          fi
-          for z in *.zip; do
-            if [ -f "$z" ]; then
-              echo "📦 Phát hiện file nén [$z] -> Đang tự động giải nén..."
-              unzip -o "$z"
-            fi
-          done
-          if [ "$HAS_NEW_RUNNER" = "1" ] && ! grep -q "stopRequested" runner.js; then
-            cp /tmp/runner.js.new runner.js
+          # Chỉ giải nén nếu trong repo chưa có injected_agent.js (tránh đè file mới bằng zip cũ)
+          if [ ! -f "injected_agent.js" ]; then
+            for z in *.zip; do
+              if [ -f "$z" ]; then
+                echo "📦 Phát hiện file nén [$z] -> Đang tự động giải nén..."
+                unzip -o "$z"
+              fi
+            done
           fi
 
       - name: ⚙️ Cài đặt Node.js 22
