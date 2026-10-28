@@ -2050,9 +2050,9 @@ async function run() {
                                 `| 🔍 **Tổng gia viên đã quét** | **${totalScanned.toLocaleString()}** gia viên |`,
                                 `| ⚡ **Tốc độ rà soát** | **~${scanSpeed.toLocaleString()}** nhà/phút |`,
                                 `| ⏱️ **Thời gian hoạt động** | ${Math.floor(elapsedMin)} phút ${Math.round((elapsedMin % 1) * 60)} giây |`,
-                                `| 📡 **Cập nhật lần cuối** | ${new Date().toLocaleTimeString('vi-VN\)} |`
-                            ].join('\n\);
-                            fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, 'utf8\);
+                                `| 📡 **Cập nhật lần cuối** | ${new Date().toLocaleTimeString("vi-VN")} |`
+                            ].join("\n");
+                            fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, "utf8");
                         } catch (eSummary) {}
                     }
                 }
