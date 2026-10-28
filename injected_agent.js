@@ -8578,14 +8578,32 @@
                 }, { name: "HostListTracker" });
             }
 
-            if (window.Dispatcher && !window.__HOST_VIEW_LISTENER_ATTACHED__) {
-                window.__HOST_VIEW_LISTENER_ATTACHED__ = true;
-                window.Dispatcher.addEventListener("evt_HostViewSc", function (evtName, data) {
-                    if (data && data._role_show) {
-                        const hRid = Number(data._role_show._rid || data._role_show.rid || (data._role_show.getRoleId ? data._role_show.getRoleId() : 0));
+            // Hook trực tiếp vào setOtherHomeData để bắt gói HostViewSc 100% không trượt
+            if (mm && mm.HomeLandModel && !window.__SET_OTHER_HOME_DATA_HOOKED__) {
+                window.__SET_OTHER_HOME_DATA_HOOKED__ = true;
+                const origSetOther = mm.HomeLandModel.setOtherHomeData;
+                mm.HomeLandModel.setOtherHomeData = function (data) {
+                    if (data) {
+                        const rs = data._role_show;
+                        const hRid = rs ? Number(rs._rid || rs.rid || (rs.getRoleId ? rs.getRoleId() : 0)) : 0;
                         if (hRid > 0) {
                             if (!window.__HOST_VIEW_DATA_MAP__) window.__HOST_VIEW_DATA_MAP__ = {};
                             window.__HOST_VIEW_DATA_MAP__[hRid] = { data: data, time: Date.now() };
+                        }
+                    }
+                    if (typeof origSetOther === "function") return origSetOther.apply(this, arguments);
+                };
+            }
+
+            if (window.Dispatcher && !window.__HOST_VIEW_LISTENER_ATTACHED__) {
+                window.__HOST_VIEW_LISTENER_ATTACHED__ = true;
+                window.Dispatcher.addEventListener("other_city_update", function () {
+                    const oh = (hl.getOtherHomeData ? hl.getOtherHomeData() : hl._otherHomeData);
+                    if (oh) {
+                        const curRid = getHouseRid(oh);
+                        if (curRid > 0) {
+                            if (!window.__HOST_VIEW_DATA_MAP__) window.__HOST_VIEW_DATA_MAP__ = {};
+                            window.__HOST_VIEW_DATA_MAP__[curRid] = { data: oh, time: Date.now() };
                         }
                     }
                 }, { name: "HostViewTracker" });
@@ -8628,16 +8646,15 @@
             };
 
             const requestViewHome = (rid) => {
-                try { hl._otherHomeData = null; } catch (e) { }
-                if (hlClass && typeof hlClass.reqViewOherHome === "function") {
-                    hlClass.reqViewOherHome(rid);
-                } else if (hl.reqViewOherHome) {
-                    hl.reqViewOherHome(rid);
-                } else if (gm.HostViewCs) {
-                    gm.RPCReq.send(gm.HostViewCs.protocol, { _type: 10552, _rid: rid });
-                } else {
-                    const rpc = gm.RPCReq || (window.G_Mapping && window.G_Mapping.RPCReq);
-                    if (rpc) rpc.send(10552, { _rid: rid });
+                const targetId = Number(rid);
+                if (!targetId || targetId <= 0) return;
+                try {
+                    if (hl) hl._otherHomeData = null;
+                } catch (e) { }
+                const rpc = gm.RPCReq || (window.G_Mapping && window.G_Mapping.RPCReq) || window.RPCReq;
+                const proto = (gm.HostViewCs && gm.HostViewCs.protocol) ? gm.HostViewCs.protocol : 10552;
+                if (rpc && typeof rpc.send === "function") {
+                    rpc.send(proto, { _rid: targetId });
                 }
             };
 
@@ -8671,21 +8688,23 @@
             // Hàm kiểm tra chi tiết & đánh giải cứu 1 mục tiêu
             const inspectAndRescueTarget = async (targetRid, fallbackName, sourceLabel) => {
                 if (!targetRid || Number(targetRid) <= 0 || Number(targetRid) === myRid) return false;
-                const otherHome = await waitViewHomeData(targetRid, 500);
-                bot.state.totalRescueScanned++;
-                if (!otherHome) return false;
+                const otherHome = await waitViewHomeData(targetRid, 650);
+                if (!otherHome) {
+                    bot.log(`⏳ [Farm KNB] Chưa nhận được dữ liệu chi tiết từ gia viên [${fallbackName || targetRid}] (thử lại sau)`);
+                    return false;
+                }
 
                 const viewedRid = getHouseRid(otherHome) || Number(targetRid);
-                if (viewedRid !== Number(targetRid)) return false;
-
                 const curServerTime = (mm.ServerTimeModel && mm.ServerTimeModel.getServerTime)
                     ? mm.ServerTimeModel.getServerTime()
                     : Math.floor(Date.now() / 1000);
                 const robRid = Number(otherHome._rob_rid || 0);
                 const robSec = Number(otherHome._rob_sec || 0);
-                const houseDeRes = Number(otherHome._de_Res !== undefined ? otherHome._de_Res : (otherHome._de_res || 0));
+                const victimName = getHouseName(otherHome, targetRid) || fallbackName || `ID ${targetRid}`;
+                const robberName = otherHome._rob_name || (robRid > 0 ? `Kẻ địch (ID: ${robRid})` : "Kẻ chiếm đóng");
 
-                const isOccupied = (robRid > 0 && robRid !== myRid && (robSec === 0 || curServerTime - robSec <= lootShowTime)) || (houseDeRes === 1 && robRid > 0);
+                const isOccupied = (robRid > 0 && robRid !== myRid && (robSec === 0 || curServerTime - robSec <= lootShowTime));
+                bot.log(`🔍 [Farm KNB • Chi Tiết] Gia viên [${victimName}] (ID: ${targetRid}): Cướp = ${robRid > 0 ? `[${robberName}] (ID: ${robRid})` : "Không có kẻ chiếm đóng"}, robSec = ${robSec}`);
 
                 if (isOccupied) {
                     if (robRid > 0 && robRid === myRid) {
