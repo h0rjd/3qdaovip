@@ -939,19 +939,21 @@ async function launchAndEnterGame(sessionState) {
     }
 
     writeLog(`[Browser] Đang khởi chạy Chromium (${CONFIG.headless ? 'Chạy Ngầm Headless' : 'Hiển thị Cửa sổ Game'})...`);
+    const launchArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--no-zygote',
+        '--window-size=450,850'
+    ];
+    if (process.platform === 'linux') {
+        launchArgs.push('--use-gl=angle', '--use-angle=swiftshader', '--enable-webgl');
+    }
     const launchOpts = {
         headless: CONFIG.headless ? 'new' : false,
         timeout: 90000,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-            '--window-size=450,850'
-        ],
+        args: launchArgs,
         defaultViewport: {
             width: 450,
             height: 850,
@@ -1587,6 +1589,17 @@ function startLocalGuiServer(sessionState, getActivePage) {
                     sessionState.restartBrowserRequested = true;
                     writeLog(`🔄 [GUI Control] Đã yêu cầu tải lại phiên trình duyệt game...`);
                     return sendJson(res, { ok: true, message: 'Đang khởi động lại cửa sổ game...' });
+                }
+
+                if (act === 'eval') {
+                    const page = getActivePage();
+                    if (!page || page.isClosed()) return sendJson(res, { ok: false, error: 'No page' });
+                    try {
+                        const result = await page.evaluate(body.code);
+                        return sendJson(res, { ok: true, result });
+                    } catch (eEval) {
+                        return sendJson(res, { ok: false, error: eEval.message });
+                    }
                 }
 
                 return sendJson(res, { ok: false, error: 'Unknown action' }, 400);

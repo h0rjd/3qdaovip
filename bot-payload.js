@@ -1287,12 +1287,8 @@
         },
 
         showToast: function (msg) {
+            // Chạy ngầm hoàn toàn - KHÔNG bắn toast lên RollTips của game để tránh làm phiền màn hình người chơi
             try {
-                const gm = window.G_Mapping;
-                const rt = (gm && gm.RollTips) || window.RollTips;
-                if (rt && typeof rt.show === "function") {
-                    rt.show(msg);
-                }
                 if (typeof window !== "undefined" && window.ModernQAUI && typeof window.ModernQAUI.showToast === "function") {
                     window.ModernQAUI.showToast(msg);
                 }
@@ -1377,7 +1373,16 @@
                             if (msg.includes("75") || msg.includes("Lv.75") || lower.includes("cấp 75") ||
                                 lower.includes("đã nhận") || lower.includes("không xác định") ||
                                 lower.includes("chưa hoàn thành") || lower.includes("nhận trùng") ||
-                                msg.includes("已领取") || msg.includes("未知错误")) {
+                                lower.includes("treo mỏ") || lower.includes("thu hoạch") ||
+                                lower.includes("mỏ khoáng") || lower.includes("chiếm mỏ") ||
+                                lower.includes("đào mỏ") || lower.includes("khoáng") ||
+                                lower.includes("giải cứu") || lower.includes("chi viện") ||
+                                lower.includes("50 knb") || lower.includes("+50") ||
+                                (lower.includes("knb") && (lower.includes("nhận") || lower.includes("+"))) ||
+                                lower.includes("chúc mừng nhận") ||
+                                msg.includes("已领取") || msg.includes("未知错误") ||
+                                msg.includes("矿") || msg.includes("挂机") || msg.includes("收获") ||
+                                msg.includes("援助") || msg.includes("解救") || msg.includes("元宝")) {
                                 return;
                             }
                         }
@@ -1760,7 +1765,11 @@
                             "ItemGetView",
                             "RewardTipPopView",
                             "CommonRewardConfirmView",
-                            "RewardTipsView"
+                            "RewardTipsView",
+                            "GainView",
+                            "GetRewardView",
+                            "RewardFlyView",
+                            "ItemFlyView"
                         ]);
 
                         const isMineOrRankRewardToSuppress = function (viewName) {
@@ -3837,24 +3846,10 @@
 
                         const origShowView = BattleResultViewClass.prototype.showView;
                         BattleResultViewClass.prototype.showView = function () {
-                            if (origShowView) origShowView.apply(this, arguments);
-                            try {
-                                if (this.battleData) bot.lastBattleData = this.battleData;
-                                // Giữ nguyên _bgClose = false theo thiết kế game gốc để click ngoài màn hình không làm mất bảng kết quả
-                                this._bgClose = false;
-                                if (this._closeBtn && typeof this._closeBtn.addClickListener === "function") {
-                                    this._closeBtn.addClickListener(() => {
-                                        bot.state.viewingBattleData = false;
-                                        this.closeView();
-                                    });
-                                }
-                            } catch (e) { }
-
-                            // KHÔNG tự động đóng khi người chơi đang xem kết quả hoặc muốn xem dữ liệu thông số!
-                            // Tuyệt đối KHÔNG tự động đóng nếu người chơi đang mở giao diện Tháp (ClimbtowerView) hoặc đang xem bảng dữ liệu
                             const bType = (this.battleData && this.battleData._type) || (this._args && this._args.battleData && this._args.battleData._type) || (this._args && this._args.arrayType) || 0;
 
                             // TẮT HOÀN TOÀN BẢNG THẮNG/THUA & QUÀ 50 KNB CỦA GIẢI CỨU GIA VIÊN (Revolt = 106 / CityFight = 105)
+                            // Xử lý ẩn ngay lập tức TRƯỚC KHI RENDER để loại bỏ triệt để nhấp nháy trên màn hình người chơi
                             if (Number(bType) === 106 || Number(bType) === 105) {
                                 try {
                                     if (this.view) {
@@ -3872,9 +3867,22 @@
                                             self.closeView();
                                         }
                                     } catch (eOk) { }
-                                }, 20);
+                                }, 10);
                                 return;
                             }
+
+                            if (origShowView) origShowView.apply(this, arguments);
+                            try {
+                                if (this.battleData) bot.lastBattleData = this.battleData;
+                                // Giữ nguyên _bgClose = false theo thiết kế game gốc để click ngoài màn hình không làm mất bảng kết quả
+                                this._bgClose = false;
+                                if (this._closeBtn && typeof this._closeBtn.addClickListener === "function") {
+                                    this._closeBtn.addClickListener(() => {
+                                        bot.state.viewingBattleData = false;
+                                        this.closeView();
+                                    });
+                                }
+                            } catch (e) { }
 
                             const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104 || !canNativeSkipBattle(bType);
                             const vm = bot.getViewManager();
@@ -4319,6 +4327,26 @@
                     rtTarget.show = function (msg) {
                         if (typeof msg === "string") {
                             const lower = msg.toLowerCase();
+                            // CHẶN 100% CÁC THÔNG BÁO GÂY KHÓ CHỊU KHI CHẠY NGẦM: Treo mỏ, thu hoạch mỏ, giải cứu (+50 KNB)
+                            if (
+                                lower.includes("treo mỏ") ||
+                                lower.includes("thu hoạch") ||
+                                lower.includes("mỏ khoáng") ||
+                                lower.includes("chiếm mỏ") ||
+                                lower.includes("đào mỏ") ||
+                                lower.includes("khoáng") ||
+                                lower.includes("giải cứu") ||
+                                lower.includes("chi viện") ||
+                                lower.includes("50 knb") ||
+                                lower.includes("+50") ||
+                                (lower.includes("knb") && (lower.includes("nhận") || lower.includes("+"))) ||
+                                lower.includes("chúc mừng nhận") ||
+                                msg.includes("已领取") || msg.includes("未知错误") ||
+                                msg.includes("矿") || msg.includes("挂机") || msg.includes("收获") ||
+                                msg.includes("援助") || msg.includes("解救") || msg.includes("元宝")
+                            ) {
+                                return; // Hoàn toàn im lặng, không văng chữ lên màn hình
+                            }
                             if (lower.includes("chưa tổng kết") || lower.includes("tổng kết") || msg.includes("未结算")) {
                                 bot.rescueUnsettledBattle(msg);
                                 return;
@@ -8703,7 +8731,13 @@
                 const victimName = getHouseName(otherHome, targetRid) || fallbackName || `ID ${targetRid}`;
                 const robberName = otherHome._rob_name || (robRid > 0 ? `Kẻ địch (ID: ${robRid})` : "Kẻ chiếm đóng");
 
-                const isOccupied = (robRid > 0 && robRid !== myRid && (robSec === 0 || curServerTime - robSec <= lootShowTime));
+                if (robRid > 0 && robSec > 0 && curServerTime - robSec >= 21600) {
+                    bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1800000;
+                    bot.state.skipRescueReason[targetRid] = "expired_robber";
+                    return false;
+                }
+
+                const isOccupied = (robRid > 0 && robRid !== myRid && (robSec === 0 || curServerTime - robSec < 21600));
                 bot.log(`🔍 [Farm KNB • Chi Tiết] Gia viên [${victimName}] (ID: ${targetRid}): Cướp = ${robRid > 0 ? `[${robberName}] (ID: ${robRid})` : "Không có kẻ chiếm đóng"}, robSec = ${robSec}`);
 
                 if (isOccupied) {
@@ -8884,12 +8918,13 @@
                         await bot.sleep(150);
                         bot.state.rescuedCount = (bot.state.rescuedCount || 0) + 1;
                         bot.state.rescuedKnbTotal = (bot.state.rescuedKnbTotal || 0) + 50;
+                        bot.state.suppressRescueRewardUntil = Date.now() + 3000;
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 180000;
                         bot.state.skipRescueReason[targetRid] = "rescued";
                         delete bot.state.rescueAttempts[targetRid];
 
                         bot.log(`💎 [Farm KNB] 🎉 GIẢI CỨU THÀNH CÔNG [${victimName}] (Đánh đuổi [${robberName}])! +50 KNB (Tổng: ${bot.state.rescuedKnbTotal.toLocaleString()} KNB • ${bot.state.rescuedCount} lượt)!`);
-                        bot.showToast(`🎉 Giải cứu thành công! +50 KNB (Tổng: ${bot.state.rescuedKnbTotal} KNB)`);
+                        // Hoàn toàn chạy ngầm: không gọi bot.showToast để loại bỏ triệt để toast phiền toái trên màn hình
                         if (typeof bot.updateStats === "function") bot.updateStats();
                         didSomething = true;
                     } else {
@@ -9057,21 +9092,10 @@
                         const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
                         const houseName = getHouseName(house, targetRid);
 
-                        // ƯU TIÊN TUYỆT ĐỐI 1: Nhà bốc lửa (_de_res === 1 hoặc _de_res === 2) -> SOI & TRẢM CƯỚP NGAY (+50 KNB)
-                        if (deRes === 1 || deRes === 2) {
-                            const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : "Hàng Xóm Bị Chiếm Đóng";
-                            bot.log(`🔥 [Farm KNB] Phát hiện gia viên [${houseName}] đang bốc lửa (_de_res = ${deRes})! Đang giải cứu ngay...`);
-                            const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
-                            if (handled) return didSomething;
-                        } 
-                        // ƯU TIÊN 2: Kiểm tra chéo (Spot-Check) mỗi 25 lượt làm mới để tránh sai sót
-                        else if (allowSpotCheck && hIdx === 0) {
-                            const handled = await inspectAndRescueTarget(targetRid, houseName, "Spot-Check An Toàn");
-                            if (handled) return didSomething;
-                        } else {
-                            // Nhà yên bình (_de_res === 0) -> Bỏ qua 0ms, không tốn packet 10552, tăng tốc độ làm mới gấp 20 lần!
-                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 20000;
-                        }
+                        // Quét và kiểm tra chi tiết toàn bộ các gia viên trong danh sách
+                        const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : (deRes === 2 ? "Hàng Xóm Bị Chiếm Đóng" : "Quét Hàng Xóm");
+                        const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
+                        if (handled) return didSomething;
                     }
                 }
 
