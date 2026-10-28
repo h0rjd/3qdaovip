@@ -635,9 +635,16 @@
 
         isReady: function () {
             try {
+                if (bot.state.kickedByOtherDevice) return false;
                 const vm = bot.getViewManager();
                 if (!vm) return false;
-                if (vm.getView && vm.getView("LoginView")) return false;
+                if (vm.getView && vm.getView("LoginView")) {
+                    const lv = vm.getView("LoginView");
+                    if (lv && (lv.visible !== false && (!lv.node || lv.node.active !== false))) {
+                        return false;
+                    }
+                }
+                if (vm.isOpenView && vm.isOpenView("LoginView")) return false;
                 if (vm.getView && (vm.getView("MainUIView") || vm.getView("MainUI_2025View"))) {
                     bot.state.hasLoggedInOnce = true;
                     return true;
@@ -2266,17 +2273,33 @@
                 }
 
                 // ====================================================================
-                // ANTI-KICK & AUTO-RECONNECT GUARD (Chống sập WebSocket & chặn popup thông báo)
+                // ANTI-KICK & NHƯỜNG MÁY THÔNG MINH (Không tranh chấp khi Điện thoại đăng nhập)
                 // ====================================================================
                 if (nwProto && !nwProto.__QA_KICK_GUARD__) {
                     nwProto.__QA_KICK_GUARD__ = true;
 
-                    // 1. Chặn onLoginKickSc: Khi máy chủ gửi mã kick (_res: 0 hoặc 3), phiên cũ đã bị hủy trên server.
-                    // Nếu gửi LoginReconnectCs (10114) sẽ bị server trả lại LoginKickSc (_res: 0) lặp vô tận!
-                    // Do đó phải chuyển sang tái xác thực phiên đăng nhập ngầm bằng LoginLoginCs (10101).
+                    // 1. Hook onLoginKickSc: Khi máy chủ gửi mã kick (_res: 3 hoặc 0 do đăng nhập từ thiết bị khác)
                     const origKick = nwProto.onLoginKickSc;
                     nwProto.onLoginKickSc = function (event, data) {
+                        const resCode = data && data._res != null ? data._res : 0;
                         bot.log(`🛡️ [Anti-Kick] Nhận thông điệp kick từ máy chủ: ${JSON.stringify(data || {})}`);
+
+                        // Nếu tài khoản bị đăng nhập từ thiết bị khác (Điện thoại / PC khác):
+                        // Server game gửi _res: 3 hoặc 0 khi có thiết bị khác đăng nhập
+                        const isPhoneLogin = (resCode === 3 || resCode === 0);
+                        if (isPhoneLogin) {
+                            bot.state.kickedByOtherDevice = true;
+                            bot.log(`📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC khác (Mã kick: ${resCode})! Nhường quyền điều khiển ngay...`);
+                            this.kickData = data;
+                            this._needFullRelogin = false;
+                            this._isCanReconnect = false;
+                            this.isManualClose = true;
+                            this.isReconnecting = false;
+                            try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
+                            // Tuyệt đối KHÔNG gọi reconnect ngầm để nhường máy cho điện thoại
+                            return;
+                        }
+
                         if (!bot.state.hasLoggedInOnce) {
                             if (origKick) return origKick.apply(this, arguments);
                             return;
@@ -2285,17 +2308,16 @@
                         this._needFullRelogin = true;
                         this._isCanReconnect = true;
                         this.isManualClose = false;
-                        // Đặt isEnterGame = false & isReconnecting = false để onLoginTimeSc gửi LoginLoginCs (10101) ngay lập tức
                         this.isEnterGame = false;
                         this.isReconnecting = false;
-                        bot.scheduleSafeReconnect(this, "kick_" + (data && data._res != null ? data._res : 0), 2200);
+                        bot.scheduleSafeReconnect(this, "kick_" + resCode, 2200);
                     };
 
                     // 1b. Hook onLoginTimeSc: Bảo đảm khi _needFullRelogin bật thì gửi LoginLoginCs (10101) trực tiếp không bị kẹt ở _waitingList
                     const origLoginTimeSc = nwProto.onLoginTimeSc;
                     if (origLoginTimeSc) {
                         nwProto.onLoginTimeSc = function (event, data) {
-                            if (this._needFullRelogin && bot.state.hasLoggedInOnce) {
+                            if (this._needFullRelogin && bot.state.hasLoggedInOnce && !bot.state.kickedByOtherDevice) {
                                 this.isEnterGame = false;
                                 this.isReconnecting = false;
                             }
@@ -2343,9 +2365,16 @@
                         };
                     }
 
-                    // 2. Hook onClose: Tự động khôi phục ngầm, tuyệt đối không để gọi showErrorTips(DescUtil.getDesc(0x17))
+                    // 2. Hook onClose: Tự động khôi phục ngầm, nhưng nếu bị Điện thoại kick thì nhường ngay
                     const origOnClose = nwProto.onClose;
                     nwProto.onClose = function () {
+                        if (bot.state.kickedByOtherDevice) {
+                            this._isCanReconnect = false;
+                            this.isManualClose = true;
+                            this.isReconnecting = false;
+                            try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
+                            return;
+                        }
                         if (bot.state.hasLoggedInOnce) {
                             this._reconnectFailStreak = (this._reconnectFailStreak || 0) + 1;
                             const hadKick = !!this.kickData || !!this._needFullRelogin || (this._reconnectFailStreak >= 2);
@@ -2370,6 +2399,7 @@
                     const origMaxReconnect = nwProto.onMaxReconnect;
                     if (origMaxReconnect) {
                         nwProto.onMaxReconnect = function () {
+                            if (bot.state.kickedByOtherDevice) return;
                             if (bot.state.hasLoggedInOnce) {
                                 this._reconnectCount = 0;
                                 this.isReconnecting = false;
@@ -2383,15 +2413,31 @@
                         };
                     }
 
-                    // 3. Hook showErrorTips: Triệt tiêu mọi thông báo lỗi mạng bắt khởi động lại game sau khi đã đăng nhập
+                    // 3. Hook showErrorTips: Nếu là thông báo kick/đăng nhập khác thì Nhường Máy ngay, nếu lỗi rớt mạng thì kết nối lại ngầm
                     const origShowErrorTips = nwProto.showErrorTips;
                     nwProto.showErrorTips = function (tip) {
+                        const tipStr = String(tip || "");
+                        const isKickTip = tipStr.includes("vui lòng đăng nhập lại") || 
+                                          tipStr.includes("thiết bị khác") || 
+                                          tipStr.includes("trùng lặp") || 
+                                          tipStr.includes("phiên khác");
+                        if (isKickTip) {
+                            bot.state.kickedByOtherDevice = true;
+                            bot.log(`📱 [Nhường Máy] Phát hiện thông báo ngắt kết nối: "${tipStr}" -> Nhường điện thoại ngay...`);
+                            this._isCanReconnect = false;
+                            this.isManualClose = true;
+                            this.isReconnecting = false;
+                            try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
+                            return;
+                        }
+
                         if (!bot.state.hasLoggedInOnce) {
                             if (origShowErrorTips) return origShowErrorTips.apply(this, arguments);
                             return;
                         }
-                        bot.log(`🛡️ [Anti-Kick] Đã chặn hộp thoại thông báo mạng: "${tip || ""}" -> Tự động kết nối lại ngầm!`);
+                        bot.log(`🛡️ [Anti-Kick] Đã chặn hộp thoại thông báo mạng: "${tipStr}" -> Tự động kết nối lại ngầm!`);
                         this._isCanReconnect = true;
+                        this.isManualClose = false;
                         this.isReconnecting = false;
                         bot.scheduleSafeReconnect(this, "error_tips", 2000);
                     };
@@ -11772,21 +11818,23 @@
             if (bot.state.hasLoggedInOnce && bot.isReady()) {
                 bot.checkAndDismissRestartAlert();
             }
+            const isKicked = !!bot.state.kickedByOtherDevice;
             return {
                 stats: bot.updateStats(),
-                isDisconnected: bot.isDisconnected(),
-                ready: bot.isReady()
+                isDisconnected: isKicked || bot.isDisconnected(),
+                ready: !isKicked && bot.isReady(),
+                kickedByOtherDevice: isKicked
             };
         },
 
         isDisconnected: function () {
             try {
-                if (!bot.state.hasLoggedInOnce || !bot.isReady()) return false;
+                if (bot.state.kickedByOtherDevice) return true;
                 const nw = (window.G_Mapping && window.G_Mapping.NetWork && window.G_Mapping.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
                 if (nw && typeof nw.isClose === "function") {
                     const closed = nw.isClose();
                     const isConnecting = !!(nw._wsClient && typeof nw._wsClient.isConnecting === "function" && nw._wsClient.isConnecting());
-                    if (closed && !isConnecting) {
+                    if (closed && !isConnecting && bot.state.hasLoggedInOnce && !bot.state.kickedByOtherDevice) {
                         bot.scheduleSafeReconnect(nw, "watchdog_disconnect", 1800);
                     }
                     return closed;

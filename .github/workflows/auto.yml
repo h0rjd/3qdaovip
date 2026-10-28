@@ -106,6 +106,15 @@ jobs:
             git commit -m "chore: lưu cài đặt Bật/Tắt mới nhất từ Telegram" || true
             git push origin HEAD || true
           fi
+          if [ -f ".yield_until" ]; then
+            git add .yield_until
+            git commit -m "chore: lưu trạng thái nhường máy sang phiên kế tiếp" || true
+            git push origin HEAD || true
+          elif git ls-files --error-unmatch .yield_until 2>/dev/null; then
+            git rm .yield_until
+            git commit -m "chore: hoàn tất nhường máy, dọn cờ chờ" || true
+            git push origin HEAD || true
+          fi
           if [ -f ".bot_stopped" ]; then
             echo "🛑 Bot đã nhận lệnh Dừng Hẳn (.bot_stopped) -> Không tự động nối phiên mới."
           else
