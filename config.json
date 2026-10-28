@@ -1,0 +1,69 @@
+{
+  "account": {
+    "email": "dungby5@gmail.com",
+    "password": "ntdung12",
+    "server_name": "Tam Quốc S6"
+  },
+  "accounts": [
+    {
+      "email": "dungby5@gmail.com",
+      "password": "ntdung12",
+      "server_name": "Tam Quốc S6"
+    }
+  ],
+  "settings": {
+    "show_browser": true,
+    "skip_ads": true,
+    "skip_battle": true,
+    "speed_hack": 2,
+    "yield_on_kick": true,
+    "yield_wait_minutes": 10
+  },
+  "telegram": {
+    "bot_token": "8918744112:AAHy6EyEud73Ta3D42awSlJlDzRaFhCcjXk",
+    "chat_id": "7182418544",
+    "report_interval_min": 30
+  },
+  "toggles": {
+    "auto_stage": false,
+    "auto_tower": false,
+    "auto_hero_up": false,
+    "auto_dispatch": false,
+    "auto_host": false,
+    "auto_rescue_knb": true,
+    "auto_star_up": false,
+    "auto_manual": false,
+    "auto_rank": true,
+    "auto_treasure": false,
+    "auto_arena": true,
+    "auto_afk": true,
+    "auto_defjz": true,
+    "auto_yyzq_core": true,
+    "auto_split_purple_shard": true,
+    "auto_touhu": true,
+    "auto_feidao": false,
+    "auto_hongbao": false,
+    "auto_act_task": true,
+    "auto_daily_rewards": true,
+    "auto_buy_gold": true,
+    "auto_free_lottery": true,
+    "auto_longmach": false,
+    "auto_skvs": true,
+    "auto_guild_mine": true,
+    "mod_skin": true,
+    "mod_headframe_title": true
+  },
+  "intervals": {
+    "stage_interval_sec": 40,
+    "dispatch_interval_sec": 300,
+    "host_interval_sec": 180,
+    "manual_interval_sec": 60,
+    "afk_interval_sec": 3000,
+    "treasure_interval_sec": 5
+  },
+  "treasure_filter": {
+    "auto_equip_higher_power": true,
+    "auto_sell_inferior": true,
+    "min_quality_keep": 4
+  }
+}

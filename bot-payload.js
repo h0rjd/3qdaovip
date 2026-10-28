@@ -657,8 +657,52 @@
             return false;
         },
 
+        triggerEmergencyYield: function (reason) {
+            if (bot.state.kickedByOtherDevice) return;
+            bot.state.kickedByOtherDevice = true;
+            window.__BOT_HARD_STOPPED__ = true;
+            bot.log("📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC khác (" + (reason || "Kick") + ")! Cắt mạng & dừng hoạt động ngay...");
+
+            // 1. Dừng mọi vòng lặp và scheduler
+            try { bot.stopScheduleLoop(); } catch (e) { }
+            if (window.__AUTO_RESCUE_INTERVAL__) {
+                try { clearInterval(window.__AUTO_RESCUE_INTERVAL__); } catch (e) { }
+                window.__AUTO_RESCUE_INTERVAL__ = null;
+            }
+            if (window.__QA_PENDING_MAIN_START__) {
+                try { clearTimeout(window.__QA_PENDING_MAIN_START__); } catch (e) { }
+                window.__QA_PENDING_MAIN_START__ = null;
+            }
+
+            // 2. Cắt đứt kết nối mạng ngay lập tức để giải phóng hoàn toàn socket máy chủ cho điện thoại
+            try {
+                const gm = window.G_Mapping;
+                const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                if (nw) {
+                    nw.isManualClose = true;
+                    nw._isCanReconnect = false;
+                    nw.isReconnecting = false;
+                    if (nw.heartBeat && typeof nw.heartBeat.stop === 'function') nw.heartBeat.stop();
+                    if (nw.socket && typeof nw.socket.close === 'function') nw.socket.close();
+                    if (nw._wsClient && typeof nw._wsClient.close === 'function') nw._wsClient.close();
+                }
+            } catch (e) { }
+
+            // 3. Gửi callback khẩn cấp ra runner.js để đóng cửa sổ Chromium lập tức (<50ms)
+            if (typeof window.pyOnBotLog === 'function') {
+                try {
+                    window.pyOnBotLog({
+                        kickNow: true,
+                        time: new Date().toLocaleTimeString(),
+                        msg: "📱 [Nhường Máy] Khẩn cấp: Đóng browser ngay lập tức (" + (reason || "kick") + ")"
+                    });
+                } catch (e) { }
+            }
+        },
+
         scheduleSafeReconnect: function (nw, reason, delayMs) {
             try {
+                if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return false;
                 const gm = window.G_Mapping;
                 const net = nw || (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
                 if (!net || !bot.state.hasLoggedInOnce) return false;
@@ -677,6 +721,7 @@
                 const waitMs = Math.max(1200, Number(delayMs) || 1800);
                 setTimeout(() => {
                     bot.state._reconnectPending = false;
+                    if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return;
                     try {
                         const stillConnected = !!(net._wsClient && typeof net._wsClient.isConnected === "function" && net._wsClient.isConnected());
                         if (stillConnected) return;
@@ -2184,6 +2229,7 @@
                     let lastSendTime = 0;
                     const lastProtoTimes = window.__LAST_PROTO_TIMES__ = window.__LAST_PROTO_TIMES__ || {};
                     nwProto.sendMessage = function (t, e, o) {
+                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return;
                         window.__LAST_OUT_PROTO__ = t;
                         const now = Date.now();
 
@@ -2288,15 +2334,8 @@
                         // Server game gửi _res: 3 hoặc 0 khi có thiết bị khác đăng nhập
                         const isPhoneLogin = (resCode === 3 || resCode === 0);
                         if (isPhoneLogin) {
-                            bot.state.kickedByOtherDevice = true;
-                            bot.log(`📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC khác (Mã kick: ${resCode})! Nhường quyền điều khiển ngay...`);
                             this.kickData = data;
-                            this._needFullRelogin = false;
-                            this._isCanReconnect = false;
-                            this.isManualClose = true;
-                            this.isReconnecting = false;
-                            try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
-                            // Tuyệt đối KHÔNG gọi reconnect ngầm để nhường máy cho điện thoại
+                            bot.triggerEmergencyYield("Mã kick " + resCode);
                             return;
                         }
 
@@ -2422,12 +2461,7 @@
                                           tipStr.includes("trùng lặp") || 
                                           tipStr.includes("phiên khác");
                         if (isKickTip) {
-                            bot.state.kickedByOtherDevice = true;
-                            bot.log(`📱 [Nhường Máy] Phát hiện thông báo ngắt kết nối: "${tipStr}" -> Nhường điện thoại ngay...`);
-                            this._isCanReconnect = false;
-                            this.isManualClose = true;
-                            this.isReconnecting = false;
-                            try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
+                            bot.triggerEmergencyYield("Thông báo lỗi: " + tipStr);
                             return;
                         }
 
@@ -11806,7 +11840,7 @@
 
                 if (nw && typeof nw.isClose === "function" && nw.isClose()) {
                     const isConnecting = !!(nw._wsClient && typeof nw._wsClient.isConnecting === "function" && nw._wsClient.isConnecting());
-                    if (!isConnecting) {
+                    if (!isConnecting && !bot.state.kickedByOtherDevice && !window.__BOT_HARD_STOPPED__) {
                         bot.scheduleSafeReconnect(nw, "watchdog_alert", 1800);
                     }
                 }

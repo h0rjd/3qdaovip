@@ -978,22 +978,39 @@ async function launchAndEnterGame(sessionState) {
     }
 
     const page = await browser.newPage();
+    sessionState.currentBrowser = browser;
+    sessionState.currentPage = page;
     await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148');
 
     await page.exposeFunction('pyOnBotLog', (entry) => {
-        if (!entry || !entry.msg) return;
-        const m = String(entry.msg);
-        writeLog(`[AutoBot] ${entry.time || ''} ${m}`);
-        if (
+        if (!entry) return;
+        const m = String(entry.msg || '');
+        if (m) writeLog(`[AutoBot] ${entry.time || ''} ${m}`);
+        const isKick = entry.kickNow === true ||
             m.includes('[Nhường Máy]') ||
             m.includes('close_after_kick') ||
             m.includes('Nhận thông điệp kick từ máy chủ') ||
             m.includes('vui lòng đăng nhập lại') ||
             m.includes('thiết bị khác') ||
             m.includes('trùng lặp') ||
-            m.includes('phiên khác')
-        ) {
+            m.includes('phiên khác');
+        if (isKick) {
             sessionState.kickDetectedFromLog = true;
+            const br = sessionState.activeBrowser || sessionState.currentBrowser;
+            if (br && !sessionState.closingBrowserForYield) {
+                sessionState.closingBrowserForYield = true;
+                writeLog(`📱 [Nhường Máy] Nhận tín hiệu KICK khẩn cấp từ game -> Đóng Chromium ngay lập tức để giải phóng kết nối cho Điện thoại!`);
+                (async () => {
+                    try {
+                        if (br) await br.close();
+                    } catch (e) {}
+                    if (sessionState.activeBrowser === br) sessionState.activeBrowser = null;
+                    if (sessionState.currentBrowser === br) sessionState.currentBrowser = null;
+                    sessionState.activePage = null;
+                    sessionState.currentPage = null;
+                    sessionState.closingBrowserForYield = false;
+                })();
+            }
         }
     });
 
@@ -1114,10 +1131,11 @@ async function launchAndEnterGame(sessionState) {
 
     if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
         writeLog("[Login] 🛑 Đã nhận lệnh Dừng -> Không bấm Vào Game nữa!");
-        return { browser, page };
+        return { browser, page, inGame: false };
     }
 
-    if (loginReady === "LOGIN_VIEW" || !loginReady) {
+    let inGame = (loginReady === "IN_GAME");
+    if (!inGame) {
         writeLog(`[Server] Đang chọn máy chủ: [${CONFIG.server}] và kích hoạt Vào Game...`);
         const selectRes = await page.evaluate((targetSrv, sInfo) => {
             function safeReq(name) {
@@ -1207,7 +1225,7 @@ async function launchAndEnterGame(sessionState) {
         }
 
         writeLog("[Game] Đang đợi vào sảnh chính...");
-        let inGame = false;
+        inGame = false;
         for (let i = 0; i < 45; i++) {
             if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
                 writeLog("[Login] 🛑 Nhận lệnh Dừng trong lúc đợi vào sảnh -> Ngắt ngay lập tức!");
@@ -1290,7 +1308,7 @@ async function launchAndEnterGame(sessionState) {
     }
 
     // Kiểm tra trạng thái thực tế xem đã thực sự vào game chưa (hay bị kẹt màn hình đăng nhập / alert do điện thoại đang login)
-    let pageState = { hasRole: inGame, isLoginView: false, alertText: "" };
+    let pageState = { hasRole: !!inGame, isLoginView: false, alertText: "" };
     try {
         pageState = await page.evaluate(() => {
             function safeReq(name) {
@@ -1917,6 +1935,8 @@ async function run() {
         if (session && session.inGame) {
             activeBrowser = session.browser;
             activePage = session.page;
+            sessionState.activeBrowser = activeBrowser;
+            sessionState.activePage = activePage;
         }
 
         if (sessionState.stopRequested || sessionState.maintenanceDetected) {
@@ -1928,7 +1948,13 @@ async function run() {
 
         while (Date.now() < endTime) {
             cycle++;
-            await new Promise(r => setTimeout(r, 10000)); // Chu kỳ kiểm tra mỗi 10 giây
+            // Chu kỳ kiểm tra 10 giây, phản ứng ngay lập tức trong 250ms nếu bị KICK, nhận lệnh dừng hoặc yield
+            for (let s = 0; s < 40; s++) {
+                if (sessionState.kickDetectedFromLog || sessionState.manualYieldRequested || sessionState.stopRequested || sessionState.maintenanceDetected || !activeBrowser || (activePage && activePage.isClosed())) {
+                    break;
+                }
+                await new Promise(r => setTimeout(r, 250));
+            }
 
             if (sessionState.stopRequested || sessionState.maintenanceDetected) {
                 const actRes = await handleHardStopOrMaintenance();
@@ -2030,6 +2056,10 @@ async function run() {
                 } catch (eClose) {}
                 activeBrowser = null;
                 activePage = null;
+                sessionState.activeBrowser = null;
+                sessionState.activePage = null;
+                sessionState.currentBrowser = null;
+                sessionState.currentPage = null;
 
                 const kickHtml = buildTelegramReportHtml(
                     `📱 [NHƯỜNG MÁY] ĐÃ TẠM DỪNG ${waitMin} PHÚT`,
@@ -2075,10 +2105,11 @@ async function run() {
                 writeLog(`🔄 [Nhường Máy] Đã hết ${waitMin} phút nhường máy! Đang đăng nhập lại mới 100%...`);
                 let resumed = await safeLaunchAndEnterGame(sessionState);
 
-                // Nếu sau 15p nhường máy mà điện thoại vẫn đang chơi:
+                // Nếu sau thời gian nhường máy mà điện thoại vẫn đang chơi:
                 while ((!resumed || !resumed.inGame) && !sessionState.stopRequested && !sessionState.maintenanceDetected && Date.now() < endTime) {
-                    writeLog(`📱 [Nhường Máy] Điện thoại vẫn đang online! Tiếp tục nhường máy thêm 10 phút...`);
-                    const reWaitEnd = Date.now() + (10 * 60 * 1000);
+                    const reWaitMin = 5;
+                    writeLog(`📱 [Nhường Máy] Điện thoại vẫn đang online! Tiếp tục nhường máy thêm ${reWaitMin} phút (hoặc bấm "▶️ Chạy Lại Ngay" trên GUI/Telegram)...`);
+                    const reWaitEnd = Date.now() + (reWaitMin * 60 * 1000);
                     sessionState.isYielding = true;
                     sessionState.yieldEndTime = reWaitEnd;
                     try { fs.writeFileSync(yieldFile, String(reWaitEnd), 'utf8'); } catch (e) {}
@@ -2087,26 +2118,41 @@ async function run() {
                         `📱 [NHƯỜNG MÁY] ĐIỆN THOẠI VẪN ĐANG ONLINE`,
                         sessionState.lastKnownStats || {},
                         sessionState,
-                        `⚠️ <i>Bot kiểm tra thấy tài khoản vẫn đang online trên Điện thoại -> Tiếp tục nhường máy thêm 10 phút (hoặc bấm ▶️ Chạy Lại Ngay khi đã chơi xong).</i>`
+                        `⚠️ <i>Bot kiểm tra thấy tài khoản vẫn đang online trên Điện thoại -> Tiếp tục nhường máy thêm <b>${reWaitMin} phút</b> (hoặc bấm nút "▶️ Chạy Lại Ngay" bên dưới khi anh đã chơi xong).</i>`
                     );
                     await sendTelegramMessage(stillOnlineHtml, null, sessionState);
 
+                    let lastCountdownLog = Date.now();
                     while (Date.now() < reWaitEnd && Date.now() < endTime && !sessionState.forceResumeFromYield && !sessionState.stopRequested) {
                         await new Promise(r => setTimeout(r, 2000));
+                        if (Date.now() - lastCountdownLog >= 60000) {
+                            lastCountdownLog = Date.now();
+                            const remSec = Math.max(0, Math.round((reWaitEnd - Date.now()) / 1000));
+                            writeLog(`⏳ [Nhường Máy] Đang nhường Điện thoại... Còn ${Math.floor(remSec / 60)}p ${remSec % 60}s sẽ tự động đăng nhập lại (bấm "▶️ Chạy Lại Ngay" trên GUI/Telegram nếu đã chơi xong).`);
+                        }
                     }
                     sessionState.isYielding = false;
                     sessionState.yieldEndTime = 0;
                     sessionState.forceResumeFromYield = false;
                     try { fs.unlinkSync(yieldFile); } catch (e) {}
 
-                    if (sessionState.stopRequested || sessionState.maintenanceDetected || Date.now() >= endTime) break;
-                    writeLog(`🔄 [Nhường Máy] Hết 10 phút, thử kết nối lại...`);
+                    if (sessionState.stopRequested || sessionState.maintenanceDetected) {
+                        const actRes = await handleHardStopOrMaintenance();
+                        if (actRes === 'EXIT_WORKFLOW') break;
+                        continue;
+                    }
+
+                    if (Date.now() >= endTime) break;
+
+                    writeLog(`🔄 [Nhường Máy] Thử đăng nhập lại sau ${reWaitMin} phút nhường máy...`);
                     resumed = await safeLaunchAndEnterGame(sessionState);
                 }
 
                 if (resumed && resumed.inGame) {
                     activeBrowser = resumed.browser;
                     activePage = resumed.page;
+                    sessionState.activeBrowser = activeBrowser;
+                    sessionState.activePage = activePage;
                     const resumeSnap = path.join(CONFIG.screenshotDir, 'latest.png');
                     try { await activePage.screenshot({ path: resumeSnap }); } catch (e) {}
                     const resumeHtml = buildTelegramReportHtml(
