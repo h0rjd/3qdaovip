@@ -1224,17 +1224,15 @@ async function launchAndEnterGame(sessionState) {
             await page.click('#GameCanvas', { offset: { x: 225, y: 650 } });
         }
 
-        writeLog("[Game] Đang đợi vào sảnh chính...");
-        inGame = false;
-        for (let i = 0; i < 45; i++) {
+        writeLog("[Game] Đang đợi tải tài nguyên và chuyển tiếp vào sảnh...");
+        for (let i = 0; i < 8; i++) {
             if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
                 writeLog("[Login] 🛑 Nhận lệnh Dừng trong lúc đợi vào sảnh -> Ngắt ngay lập tức!");
-                return { browser, page };
+                return { browser, page, inGame: false };
             }
             await new Promise(r => setTimeout(r, 2000));
             try {
-                inGame = await page.evaluate((retryLogin) => {
-                    if (window.__BOT_HARD_STOPPED__) return false;
+                const hasPlayer = await page.evaluate(() => {
                     function safeReq(name) {
                         if (typeof window.__require === "function") {
                             try {
@@ -1248,107 +1246,22 @@ async function launchAndEnterGame(sessionState) {
                     }
                     const mm = safeReq("ModelManager");
                     if (mm && mm.PlayerModel) {
-                        const rInfo = typeof mm.PlayerModel.getRoleInfo === "function"
-                            ? mm.PlayerModel.getRoleInfo()
-                            : mm.PlayerModel.roleInfo;
-                        if (rInfo && (rInfo.roleId || rInfo.rid || rInfo.name || rInfo.roleName || rInfo.level)) {
-                            return true;
-                        }
-                    }
-                    if (retryLogin && !window.__BOT_HARD_STOPPED__) {
-                        const vm = safeReq("ViewManager");
-                        const pUtils = safeReq("PlatformUtils");
-                        const loginView = vm && typeof vm.getView === "function" ? vm.getView("LoginView") : null;
-                        if (loginView && typeof loginView.loginHandler === "function") {
-                            if (pUtils) pUtils.isLogining = false;
-                            try { loginView.checkHasAgree = function () { return true; }; } catch (e) {}
-                            try { loginView.loginHandler(); } catch (e) {}
-                        }
-                    }
-                    return false;
-                }, (i === 6 || i === 14 || i === 24));
-                if (inGame) break;
-            } catch (e) {}
-        }
-
-        if (!inGame && !(sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested))) {
-            writeLog("[Warning] Chưa nhận diện được PlayerModel, thử click tiếp tục...");
-            await page.click('#GameCanvas', { offset: { x: 225, y: 700 } });
-            await new Promise(r => setTimeout(r, 5000));
-            try {
-                inGame = await page.evaluate(() => {
-                    function safeReq(name) {
-                        if (typeof window.__require === "function") {
-                            try {
-                                const mod = window.__require(name);
-                                if (mod) return mod[name] || mod.default || mod;
-                            } catch (e) {}
-                        }
-                        if (window[name]) return window[name];
-                        if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
-                        return null;
-                    }
-                    const mm = safeReq("ModelManager");
-                    if (mm && mm.PlayerModel) {
-                        const rInfo = typeof mm.PlayerModel.getRoleInfo === "function"
-                            ? mm.PlayerModel.getRoleInfo()
-                            : mm.PlayerModel.roleInfo;
-                        if (rInfo && (rInfo.roleId || rInfo.rid || rInfo.name || rInfo.roleName || rInfo.level)) {
-                            return true;
-                        }
+                        const rInfo = typeof mm.PlayerModel.getRoleInfo === "function" ? mm.PlayerModel.getRoleInfo() : mm.PlayerModel.roleInfo;
+                        if (rInfo && (rInfo.roleId || rInfo.rid || rInfo.name || rInfo.roleName || rInfo.level)) return true;
                     }
                     return false;
                 });
+                if (hasPlayer) break;
             } catch (e) {}
         }
+        try {
+            await page.click('#GameCanvas', { offset: { x: 225, y: 700 } });
+            await new Promise(r => setTimeout(r, 2000));
+        } catch (e) {}
     }
 
     if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
         return { browser, page, inGame: false };
-    }
-
-    // Kiểm tra trạng thái thực tế xem đã thực sự vào game chưa (hay bị kẹt màn hình đăng nhập / alert do điện thoại đang login)
-    let pageState = { hasRole: !!inGame, isLoginView: false, alertText: "" };
-    try {
-        pageState = await page.evaluate(() => {
-            function safeReq(name) {
-                if (typeof window.__require === "function") {
-                    try {
-                        const mod = window.__require(name);
-                        if (mod) return mod[name] || mod.default || mod;
-                    } catch (e) {}
-                }
-                if (window[name]) return window[name];
-                if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
-                return null;
-            }
-            const vm = safeReq("ViewManager");
-            const mm = safeReq("ModelManager");
-            let hasRole = false;
-            if (mm && mm.PlayerModel) {
-                const ri = typeof mm.PlayerModel.getRoleInfo === "function" ? mm.PlayerModel.getRoleInfo() : mm.PlayerModel.roleInfo;
-                if (ri && (ri.roleId || ri.rid || ri.name || ri.roleName)) hasRole = true;
-            }
-            let alertText = "";
-            if (vm) {
-                const alertViews = ["AlertView", "AlertPopUpTipsView", "AlertPopUpTipsView2", "AlertView2"];
-                for (let vName of alertViews) {
-                    const isVis = (typeof vm.isOpenView === "function" && vm.isOpenView(vName)) || (typeof vm.isShow === "function" && vm.isShow(vName));
-                    if (isVis) {
-                        const vObj = vm.getView ? vm.getView(vName) : null;
-                        alertText = String((vObj && (vObj.text || (vObj.view && vObj.view.text))) || "");
-                        break;
-                    }
-                }
-            }
-            const isLoginView = !hasRole && (vm && typeof vm.isOpenView === "function" && vm.isOpenView("LoginView"));
-            return { hasRole, isLoginView, alertText };
-        });
-    } catch (e) {}
-
-    if (!inGame && !pageState.hasRole) {
-        writeLog(`[Login] ⚠️ Chưa vào được sảnh chính sau 90s (alert: "${pageState.alertText || 'none'}", isLoginView: ${pageState.isLoginView})!`);
-        return { browser, page, inGame: false, pageState };
     }
 
     const payloadFile = fs.existsSync(path.join(__dirname, 'injected_agent.js'))
@@ -1398,29 +1311,8 @@ async function safeLaunchAndEnterGame(sessionState, maxAttempts = 3) {
         try {
             writeLog(`[Session] Đang khởi tạo phiên đăng nhập (Lần thử ${attempt}/${maxAttempts})...`);
             const session = await launchAndEnterGame(sessionState);
-            if (session && session.inGame) {
+            if (session && session.browser) {
                 return session;
-            }
-            if (session && !session.inGame) {
-                const pState = session.pageState || {};
-                const isMaint = pState.alertText && (pState.alertText.includes("bảo trì") || pState.alertText.includes("máy chủ đang"));
-                if (isMaint) {
-                    sessionState.maintenanceDetected = true;
-                    sessionState.stopReason = pState.alertText;
-                    try { if (session.browser) await session.browser.close(); } catch (e) {}
-                    return { browser: null, page: null, inGame: false, isMaintenance: true };
-                }
-                try { if (session.browser) await session.browser.close(); } catch (e) {}
-                if (attempt < maxAttempts) {
-                    writeLog(`⚠️ [Login] Chưa vào được sảnh chính, dọn dẹp Chromium và thử lại sau 6s...`);
-                    try {
-                        const { execSync } = require('child_process');
-                        execSync('pkill -f chrome || true');
-                    } catch (eKill) {}
-                    await new Promise(r => setTimeout(r, 6000));
-                } else {
-                    return { browser: null, page: null, inGame: false, phoneBusy: true, pageState: pState };
-                }
             }
         } catch (err) {
             writeLog(`⚠️ [Session] Lỗi khởi tạo phiên lần ${attempt}: ${err.message}`);
@@ -1890,49 +1782,8 @@ async function run() {
             } catch (e) {}
         }
 
-        let session = await safeLaunchAndEnterGame(sessionState);
-        while ((!session || !session.inGame) && !sessionState.stopRequested && !sessionState.maintenanceDetected && Date.now() < endTime) {
-            if (CONFIG.settings.yield_on_kick) {
-                const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 15);
-                writeLog(`📱 [Nhường Máy] Chưa vào được sảnh chính (tài khoản đang online trên Điện thoại). Tạm nghỉ ${waitMin} phút để nhường máy...`);
-                const waitEnd = Date.now() + (waitMin * 60 * 1000);
-                sessionState.isYielding = true;
-                sessionState.yieldEndTime = waitEnd;
-                try { fs.writeFileSync(yieldFile, String(waitEnd), 'utf8'); } catch (e) {}
-
-                const kickHtml = buildTelegramReportHtml(
-                    `📱 [NHƯỜNG MÁY] TÀI KHOẢN ĐANG ONLINE TRÊN ĐIỆN THOẠI`,
-                    sessionState.lastKnownStats || {},
-                    sessionState,
-                    `⚠️ <b>Phát hiện tài khoản đang được mở trên Điện thoại!</b>\n🛑 Bot chủ động tạm nghỉ <b>${waitMin} phút</b> để nhường máy.\n🔄 <i>Sau ${waitMin} phút Bot sẽ tự động vào lại (hoặc bấm "▶️ Chạy Lại Ngay" khi anh đã chơi xong)!</i>`
-                );
-                await sendTelegramMessage(kickHtml, null, sessionState);
-
-                let lastCountdownLog = Date.now();
-                while (Date.now() < waitEnd && Date.now() < endTime && !sessionState.forceResumeFromYield && !sessionState.stopRequested) {
-                    await new Promise(r => setTimeout(r, 2000));
-                    if (Date.now() - lastCountdownLog >= 60000) {
-                        lastCountdownLog = Date.now();
-                        const remSec = Math.max(0, Math.round((waitEnd - Date.now()) / 1000));
-                        writeLog(`⏳ [Nhường Máy] Đang nhường Điện thoại... Còn ${Math.floor(remSec / 60)}p ${remSec % 60}s sẽ tự động đăng nhập lại.`);
-                    }
-                }
-                sessionState.isYielding = false;
-                sessionState.yieldEndTime = 0;
-                sessionState.forceResumeFromYield = false;
-                try { fs.unlinkSync(yieldFile); } catch (e) {}
-
-                if (sessionState.stopRequested || sessionState.maintenanceDetected || Date.now() >= endTime) break;
-                writeLog(`🔄 [Nhường Máy] Hết thời gian chờ, đang thử vào lại game...`);
-                session = await safeLaunchAndEnterGame(sessionState);
-            } else {
-                writeLog(`⚠️ [Login] Thử lại đăng nhập sau 15s...`);
-                await new Promise(r => setTimeout(r, 15000));
-                session = await safeLaunchAndEnterGame(sessionState);
-            }
-        }
-
-        if (session && session.inGame) {
+        const session = await safeLaunchAndEnterGame(sessionState);
+        if (session && session.browser) {
             activeBrowser = session.browser;
             activePage = session.page;
             sessionState.activeBrowser = activeBrowser;
@@ -2102,53 +1953,11 @@ async function run() {
                     break;
                 }
 
-                writeLog(`🔄 [Nhường Máy] Đã hết ${waitMin} phút nhường máy! Đang đăng nhập lại mới 100%...`);
-                let resumed = await safeLaunchAndEnterGame(sessionState);
+                writeLog(`🔄 [Nhường Máy] ${sessionState.forceResumeFromYield ? "Nhận lệnh Chạy Lại Ngay" : "Đã hết " + waitMin + " phút nhường máy"}! Đang đăng nhập lại mới 100%...`);
+                sessionState.forceResumeFromYield = false;
 
-                // Nếu sau thời gian nhường máy mà điện thoại vẫn đang chơi:
-                while ((!resumed || !resumed.inGame) && !sessionState.stopRequested && !sessionState.maintenanceDetected && Date.now() < endTime) {
-                    const reWaitMin = 5;
-                    writeLog(`📱 [Nhường Máy] Điện thoại vẫn đang online! Tiếp tục nhường máy thêm ${reWaitMin} phút (hoặc bấm "▶️ Chạy Lại Ngay" trên GUI/Telegram)...`);
-                    const reWaitEnd = Date.now() + (reWaitMin * 60 * 1000);
-                    sessionState.isYielding = true;
-                    sessionState.yieldEndTime = reWaitEnd;
-                    try { fs.writeFileSync(yieldFile, String(reWaitEnd), 'utf8'); } catch (e) {}
-
-                    const stillOnlineHtml = buildTelegramReportHtml(
-                        `📱 [NHƯỜNG MÁY] ĐIỆN THOẠI VẪN ĐANG ONLINE`,
-                        sessionState.lastKnownStats || {},
-                        sessionState,
-                        `⚠️ <i>Bot kiểm tra thấy tài khoản vẫn đang online trên Điện thoại -> Tiếp tục nhường máy thêm <b>${reWaitMin} phút</b> (hoặc bấm nút "▶️ Chạy Lại Ngay" bên dưới khi anh đã chơi xong).</i>`
-                    );
-                    await sendTelegramMessage(stillOnlineHtml, null, sessionState);
-
-                    let lastCountdownLog = Date.now();
-                    while (Date.now() < reWaitEnd && Date.now() < endTime && !sessionState.forceResumeFromYield && !sessionState.stopRequested) {
-                        await new Promise(r => setTimeout(r, 2000));
-                        if (Date.now() - lastCountdownLog >= 60000) {
-                            lastCountdownLog = Date.now();
-                            const remSec = Math.max(0, Math.round((reWaitEnd - Date.now()) / 1000));
-                            writeLog(`⏳ [Nhường Máy] Đang nhường Điện thoại... Còn ${Math.floor(remSec / 60)}p ${remSec % 60}s sẽ tự động đăng nhập lại (bấm "▶️ Chạy Lại Ngay" trên GUI/Telegram nếu đã chơi xong).`);
-                        }
-                    }
-                    sessionState.isYielding = false;
-                    sessionState.yieldEndTime = 0;
-                    sessionState.forceResumeFromYield = false;
-                    try { fs.unlinkSync(yieldFile); } catch (e) {}
-
-                    if (sessionState.stopRequested || sessionState.maintenanceDetected) {
-                        const actRes = await handleHardStopOrMaintenance();
-                        if (actRes === 'EXIT_WORKFLOW') break;
-                        continue;
-                    }
-
-                    if (Date.now() >= endTime) break;
-
-                    writeLog(`🔄 [Nhường Máy] Thử đăng nhập lại sau ${reWaitMin} phút nhường máy...`);
-                    resumed = await safeLaunchAndEnterGame(sessionState);
-                }
-
-                if (resumed && resumed.inGame) {
+                const resumed = await safeLaunchAndEnterGame(sessionState);
+                if (resumed && resumed.browser) {
                     activeBrowser = resumed.browser;
                     activePage = resumed.page;
                     sessionState.activeBrowser = activeBrowser;
@@ -2156,52 +1965,17 @@ async function run() {
                     const resumeSnap = path.join(CONFIG.screenshotDir, 'latest.png');
                     try { await activePage.screenshot({ path: resumeSnap }); } catch (e) {}
                     const resumeHtml = buildTelegramReportHtml(
-                        `🔄 [TỰ ĐỘNG CHẠY TIẾP] BOT ĐÃ VÀO LẠI GAME`,
-                        sessionState.lastKnownStats,
+                        `🟢 [KẾT NỐI LẠI] ĐÃ VÀO LẠI GAME SAU KHI NHƯỜNG MÁY`,
+                        sessionState.lastKnownStats || {},
                         sessionState,
-                        `✅ <i>AutoBot v3.9.34 đã đăng nhập lại thành công và tiếp tục chạy theo cài đặt hiện tại!</i>`
+                        `✅ <i>Điện thoại đã nghỉ, Bot đã tự động đăng nhập lại sảnh chính thành công và tiếp tục treo 24/7!</i>`
                     );
-                    await sendTelegramMessage(resumeHtml, resumeSnap, sessionState);
+                    await sendTelegramMessage(resumeHtml, fs.existsSync(resumeSnap) ? resumeSnap : null, sessionState);
                     sessionState.lastReportTime = Date.now();
                 }
                 continue;
             }
 
-            // 2. WATCHDOG: Kiểm tra mất kết nối hoặc kẹt ngoài sảnh chính > 40s
-            const isDisconnected = !!(status && status.isDisconnected);
-            const isNotReady = !status || !status.ready || !status.stats || !status.stats.roleName || status.stats.roleName === "Đang tải..." || Number(status.stats.power || 0) === 0;
-
-            if (isDisconnected || isNotReady) {
-                sessionState.notReadyStreak = (sessionState.notReadyStreak || 0) + 1;
-                if (sessionState.notReadyStreak >= 4) { // 40 giây liên tục không sẵn sàng / mất kết nối
-                    writeLog(`🔄 [Watchdog] Phát hiện mất kết nối hoặc kẹt ngoài sảnh chính quá 40s -> Tự động khôi phục phiên...`);
-                    sessionState.notReadyStreak = 0;
-                    sessionState.kickDetectedFromLog = false;
-                    if (sessionState.lastKnownStats) {
-                        sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
-                        sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
-                        sessionState.baseInspectedHomes += Number(sessionState.lastKnownStats.inspectedHomesCount || sessionState.lastKnownStats.totalRescueScanned || 0);
-                    }
-                    try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
-                    activeBrowser = null;
-                    activePage = null;
-
-                    if (CONFIG.settings.yield_on_kick) {
-                        sessionState.kickDetectedFromLog = true;
-                    } else {
-                        const reSession = await safeLaunchAndEnterGame(sessionState);
-                        if (reSession && reSession.inGame) {
-                            activeBrowser = reSession.browser;
-                            activePage = reSession.page;
-                        }
-                    }
-                    continue;
-                }
-            } else {
-                sessionState.notReadyStreak = 0;
-            }
-
-            // 3. CẬP NHẬT CHỈ SỐ STATS & GỬI BÁO CÁO
             if (status && status.stats) {
                 const st = status.stats;
                 if (st.roleName && st.roleName !== "Đang tải...") {
