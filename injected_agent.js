@@ -633,6 +633,85 @@
             return "";
         },
 
+        getCandidateHeroCount: function (cand) {
+            if (!cand) return 6;
+            try {
+                // 1. Kiểm tra _array trong cand hoặc _role_show (danh sách tướng trong đội hình chiến đấu)
+                const arr = cand._array || (cand._role_show && cand._role_show._array);
+                if (Array.isArray(arr) && arr.length > 0) {
+                    const validHeroes = arr.filter(it => it && (Number(it._id || it.id || it._hero_id || 0) > 0) && (it._idx === undefined || (Number(it._idx) > 0 && Number(it._idx) < 30)));
+                    if (validHeroes.length > 0) return validHeroes.length;
+                }
+                // 2. Kiểm tra _hero_list
+                const hList = cand._hero_list || (cand._role_show && cand._role_show._hero_list);
+                if (Array.isArray(hList) && hList.length > 0) {
+                    const valid = hList.filter(it => it && (Number(it._id || it.id || it) > 0));
+                    if (valid.length > 0) return valid.length;
+                }
+                // 3. Kiểm tra _shows
+                const sList = cand._shows || (cand._role_show && cand._role_show._shows);
+                if (Array.isArray(sList) && sList.length > 0) {
+                    const valid = sList.filter(it => it && (Number(it._id || it.id || it) > 0));
+                    if (valid.length > 0) return valid.length;
+                }
+            } catch (e) { }
+            return 6;
+        },
+
+        decideBettingTeam: function (item1, item2, label = "1v1") {
+            const role1 = (item1 && item1._role_show) ? item1._role_show : item1;
+            const role2 = (item2 && item2._role_show) ? item2._role_show : item2;
+
+            const p1 = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(role1) : 0;
+            const p2 = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(role2) : 0;
+            const name1 = (typeof bot.getCandidateName === "function" ? bot.getCandidateName(role1) : "") || "Cửa Trái";
+            const name2 = (typeof bot.getCandidateName === "function" ? bot.getCandidateName(role2) : "") || "Cửa Phải";
+
+            const count1 = (typeof bot.getCandidateHeroCount === "function") ? bot.getCandidateHeroCount(item1) : 6;
+            const count2 = (typeof bot.getCandidateHeroCount === "function") ? bot.getCandidateHeroCount(item2) : 6;
+
+            const maxP = Math.max(p1, p2, 1);
+            const diffPercent = Math.abs(p1 - p2) / maxP; // Chênh lệch phần trăm LC
+
+            let chosenSide = 1;
+            let reason = "";
+
+            // Coi là "ngang lực chiến" nếu chênh lệch <= 5% (hoặc bằng nhau)
+            const isPowerClose = diffPercent <= 0.05;
+
+            if (isPowerClose && count1 !== count2) {
+                // Lực chiến ngang nhau nhưng có 1 bên ít tướng hơn -> cược bên ít tướng (meta dồn đồ tinh nhuệ 1-2 carry)
+                if (count1 < count2) {
+                    chosenSide = 1;
+                    reason = `LC ngang nhau (~${bot.formatNumber(p1)} vs ~${bot.formatNumber(p2)}) nhưng bên Trái ít tướng hơn (${count1} tướng vs ${count2} tướng • Dồn lực tinh nhuệ)`;
+                } else {
+                    chosenSide = 2;
+                    reason = `LC ngang nhau (~${bot.formatNumber(p1)} vs ~${bot.formatNumber(p2)}) nhưng bên Phải ít tướng hơn (${count2} tướng vs ${count1} tướng • Dồn lực tinh nhuệ)`;
+                }
+            } else {
+                // Lực chiến chênh lệch rõ rệt hoặc số tướng bằng nhau -> Cược bên có Lực Chiến mạnh hơn
+                if (p1 >= p2) {
+                    chosenSide = 1;
+                    reason = `Lực chiến mạnh hơn (${bot.formatNumber(p1)} vs ${bot.formatNumber(p2)}) [${count1} tướng vs ${count2} tướng]`;
+                } else {
+                    chosenSide = 2;
+                    reason = `Lực chiến mạnh hơn (${bot.formatNumber(p2)} vs ${bot.formatNumber(p1)}) [${count2} tướng vs ${count1} tướng]`;
+                }
+            }
+
+            const chosenName = chosenSide === 1 ? name1 : name2;
+            const chosenPower = chosenSide === 1 ? p1 : p2;
+            const chosenCount = chosenSide === 1 ? count1 : count2;
+
+            return {
+                side: chosenSide,
+                name: chosenName,
+                power: chosenPower,
+                heroCount: chosenCount,
+                reason: reason
+            };
+        },
+
         getMyFullPower: function () {
             try {
                 const snap = bot.state.savedFullMainArray || window.__SAVED_FULL_MAIN_ARRAY__;
@@ -11494,21 +11573,20 @@
                                     const betAmount = Math.floor(availableChip / 10) * 10;
 
                                     if (userSide === 0 && betAmount >= 10 && bot.tryDo("skvs_vsing_bet", 8)) {
-                                        const role1 = vsData._array_list[0]._role_show;
-                                        const role2 = vsData._array_list[1]._role_show;
+                                        const item1 = vsData._array_list[0];
+                                        const item2 = vsData._array_list[1];
+                                        const decision = (typeof bot.decideBettingTeam === "function")
+                                            ? bot.decideBettingTeam(item1, item2, "Long Hổ")
+                                            : {
+                                                side: (bot.getCandidatePower(item1._role_show) >= bot.getCandidatePower(item2._role_show) ? 1 : 2),
+                                                name: (bot.getCandidateName(item1._role_show) || "Cửa Trái"),
+                                                power: bot.getCandidatePower(item1._role_show),
+                                                reason: "LC mạnh hơn"
+                                            };
 
-                                        const p1 = bot.getCandidatePower(role1);
-                                        const p2 = bot.getCandidatePower(role2);
-                                        const name1 = bot.getCandidateName(role1) || "Cửa Trái";
-                                        const name2 = bot.getCandidateName(role2) || "Cửa Phải";
-
-                                        const chosenSide = p1 >= p2 ? 1 : 2;
-                                        const chosenName = chosenSide === 1 ? name1 : name2;
-                                        const chosenPower = chosenSide === 1 ? p1 : p2;
-
-                                        bot.log(`⚔️ [Long Hổ] Đoán 1v1: Đặt Cửa ${chosenSide === 1 ? "Trái" : "Phải"} [${chosenName}] (LC: ${bot.formatNumber(chosenPower)}) - CƯỢC MAX: ${betAmount} xu / ${availableChip} xu`);
-                                        sm.reqVsingGuess(chosenSide, betAmount);
-                                        vsData._side = chosenSide;
+                                        bot.log(`⚔️ [Long Hổ] Đoán 1v1: Đặt Cửa ${decision.side === 1 ? "Trái" : "Phải"} [${decision.name}] - Lý do: ${decision.reason} - CƯỢC MAX: ${betAmount} xu / ${availableChip} xu`);
+                                        sm.reqVsingGuess(decision.side, betAmount);
+                                        vsData._side = decision.side;
                                         vsData._chip = Math.max(0, availableChip - betAmount);
                                     }
                                 }
@@ -11537,20 +11615,21 @@
                             const betAmount = Math.floor(availableChip / 10) * 10;
 
                             if (warData && (warData._side || 0) === 0 && betAmount >= 10 && Array.isArray(warData._role_show) && warData._role_show.length >= 2 && bot.tryDo("tianshi_vsing_bet", 8)) {
-                                const role1 = warData._role_show[0];
-                                const role2 = warData._role_show[1];
-                                const p1 = bot.getCandidatePower(role1);
-                                const p2 = bot.getCandidatePower(role2);
-                                const name1 = bot.getCandidateName(role1) || "Cửa Trái";
-                                const name2 = bot.getCandidateName(role2) || "Cửa Phải";
-                                const chosenSide = p1 >= p2 ? 1 : 2;
-                                const chosenName = chosenSide === 1 ? name1 : name2;
-                                const chosenPower = chosenSide === 1 ? p1 : p2;
+                                const item1 = (warData._array_list && warData._array_list[0]) || warData._role_show[0];
+                                const item2 = (warData._array_list && warData._array_list[1]) || warData._role_show[1];
+                                const decision = (typeof bot.decideBettingTeam === "function")
+                                    ? bot.decideBettingTeam(item1, item2, "Long Hổ Liên SV")
+                                    : {
+                                        side: (bot.getCandidatePower(warData._role_show[0]) >= bot.getCandidatePower(warData._role_show[1]) ? 1 : 2),
+                                        name: (bot.getCandidateName(warData._role_show[0]) || "Cửa Trái"),
+                                        power: bot.getCandidatePower(warData._role_show[0]),
+                                        reason: "LC mạnh hơn"
+                                    };
 
-                                bot.log(`⚔️ [Long Hổ Liên SV] Đoán 1v1: Đặt Cửa ${chosenSide === 1 ? "Trái" : "Phải"} [${chosenName}] (LC: ${bot.formatNumber(chosenPower)}) - CƯỢC MAX: ${betAmount} xu / ${availableChip} xu`);
+                                bot.log(`⚔️ [Long Hổ Liên SV] Đoán 1v1: Đặt Cửa ${decision.side === 1 ? "Trái" : "Phải"} [${decision.name}] - Lý do: ${decision.reason} - CƯỢC MAX: ${betAmount} xu / ${availableChip} xu`);
                                 if (typeof tsm.reqTianshiSetWarGuess === "function") {
-                                    tsm.reqTianshiSetWarGuess(chosenSide, betAmount);
-                                    warData._side = chosenSide;
+                                    tsm.reqTianshiSetWarGuess(decision.side, betAmount);
+                                    warData._side = decision.side;
                                 }
                             }
                         }
