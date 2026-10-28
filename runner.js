@@ -1301,7 +1301,7 @@ async function launchAndEnterGame(sessionState) {
     await page.screenshot({ path: snapStart });
     try { fs.copyFileSync(snapStart, latestSnap); } catch (e) {}
 
-    return { browser, page, inGame: true, pageState };
+    return { browser, page, inGame: true };
 }
 
 // Khởi chạy an toàn với cơ chế thử lại và tự động phát hiện Điện thoại / Bảo trì
@@ -1747,9 +1747,11 @@ async function run() {
         try { fs.unlinkSync(path.join(__dirname, '.bot_stopped')); } catch (e) {}
         writeLog(`▶️ [Resume] Nhận lệnh chạy lại sau khi dừng -> Đang khởi tạo lại phiên game...`);
         const resumed = await safeLaunchAndEnterGame(sessionState);
-        if (resumed && resumed.inGame) {
+        if (resumed && (resumed.browser || resumed.inGame)) {
             activeBrowser = resumed.browser;
             activePage = resumed.page;
+            sessionState.activeBrowser = activeBrowser;
+            sessionState.activePage = activePage;
         }
         return 'RESUMED';
     }
@@ -1826,9 +1828,14 @@ async function run() {
                 activeBrowser = null;
                 activePage = null;
                 const reSession = await safeLaunchAndEnterGame(sessionState);
-                if (reSession && reSession.inGame) {
+                if (reSession && (reSession.browser || reSession.inGame)) {
                     activeBrowser = reSession.browser;
                     activePage = reSession.page;
+                    sessionState.activeBrowser = activeBrowser;
+                    sessionState.activePage = activePage;
+                } else {
+                    writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 10s trước khi thử lại...");
+                    await new Promise(r => setTimeout(r, 10000));
                 }
                 continue;
             }
@@ -1849,9 +1856,14 @@ async function run() {
                 activeBrowser = null;
                 activePage = null;
                 const reSession = await safeLaunchAndEnterGame(sessionState);
-                if (reSession && reSession.inGame) {
+                if (reSession && (reSession.browser || reSession.inGame)) {
                     activeBrowser = reSession.browser;
                     activePage = reSession.page;
+                    sessionState.activeBrowser = activeBrowser;
+                    sessionState.activePage = activePage;
+                } else {
+                    writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 10s trước khi thử lại...");
+                    await new Promise(r => setTimeout(r, 10000));
                 }
                 continue;
             }
