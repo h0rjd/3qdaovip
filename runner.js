@@ -2042,7 +2042,7 @@ async function run() {
                     );
                     await sendTelegramMessage(html, startSnap, sessionState);
                 }
-                if (cycle % 3 === 0) {
+                if (cycle % 30 === 0) {
                     const totalRescued = sessionState.baseRescuedCount + Number(st.rescuedCount || 0);
                     const totalKnb = sessionState.baseRescuedKnb + Number(st.rescuedKnbTotal || 0);
                     const totalScanned = (sessionState.baseInspectedHomes || 0) + Number(st.inspectedHomesCount || st.totalRescueScanned || 0);

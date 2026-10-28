@@ -5126,6 +5126,23 @@
                             } catch (errRival) { }
                         }, { uuid: "__QA_HERO_RIVAL_CTX__" });
 
+                        // 8.1d: Lắng nghe QueryPlayerInfoSc (11802) lấy chính xác LC kẻ cướp từ hồ sơ người chơi
+                        disp.addEventListener("evt_QueryPlayerInfoSc", function (e, t) {
+                            try {
+                                const data = (t && t._rival !== undefined) ? t : (e && e._rival !== undefined ? e : (t || e));
+                                if (!data || !data._rival) return;
+                                const rs = data._rival;
+                                const rRid = rs ? Number(rs.getRoleId ? rs.getRoleId() : (rs._rid || rs.rid || 0)) : 0;
+                                if (rRid > 0) {
+                                    const pwr = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : 0;
+                                    if (pwr > 0) {
+                                        if (!window.__ROBBER_POWER_CACHE__) window.__ROBBER_POWER_CACHE__ = {};
+                                        window.__ROBBER_POWER_CACHE__[rRid] = { power: pwr, time: Date.now(), role_show: rs };
+                                    }
+                                }
+                            } catch (errQ) { }
+                        }, { uuid: "__QA_QUERY_PLAYER_CTX__" });
+
                         // 8.2: Bắt trực tiếp thông báo lỗi từ server (LoginNoticeSc - 10104 / LoginNoticeArgSc - 10105)
                         const handleServerNotice = function (e, t) {
                             try {
@@ -6806,7 +6823,7 @@
                     bot.state.currentScoutComboIdx = idx + 1;
                     bot.state.totalScoutCombos = combos.length;
                     bot.state.lastScoutArraySetTime = Date.now();
-                    bot.log(`🔻 [Farm KNB • Hạ LC] Đang áp dụng đội hình dò [Mốc ${idx + 1}/${combos.length}] (${combo.count} tướng • ~${(combo.estPower / 1000000).toFixed(1)}M LC) để quét đối thủ yếu hơn!`);
+                    // Đã tắt log chi tiết hạ LC để log màn hình gọn gàng theo yêu cầu
 
                     await bot.sleep(130);
                     const waitStart = Date.now();
@@ -8822,10 +8839,7 @@
             const inspectAndRescueTarget = async (targetRid, fallbackName, sourceLabel) => {
                 if (!targetRid || Number(targetRid) <= 0 || Number(targetRid) === myRid) return false;
                 const otherHome = await waitViewHomeData(targetRid, 650);
-                if (!otherHome) {
-                    bot.log(`⏳ [Farm KNB] Chưa nhận được dữ liệu chi tiết từ gia viên [${fallbackName || targetRid}] (thử lại sau)`);
-                    return false;
-                }
+                if (!otherHome) return false;
 
                 const viewedRid = getHouseRid(otherHome) || Number(targetRid);
                 const curServerTime = (mm.ServerTimeModel && mm.ServerTimeModel.getServerTime)
@@ -8843,17 +8857,15 @@
                 }
 
                 const isOccupied = (robRid > 0 && robRid !== myRid && (robSec === 0 || curServerTime - robSec < 21600));
-                bot.log(`🔍 [Farm KNB • Chi Tiết] Gia viên [${victimName}] (ID: ${targetRid}): Cướp = ${robRid > 0 ? `[${robberName}] (ID: ${robRid})` : "Không có kẻ chiếm đóng"}, robSec = ${robSec}`);
 
                 if (isOccupied) {
+                    bot.log(`⚔️ [Farm KNB • ${sourceLabel}] Phát hiện gia viên [${victimName}] (ID: ${targetRid}) đang bị cướp bởi [${robberName}]! Đang kiểm tra đối thủ...`);
+
                     if (robRid > 0 && robRid === myRid) {
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1800000;
                         bot.state.skipRescueReason[targetRid] = "self";
                         return false;
                     }
-
-                    const victimName = getHouseName(otherHome, targetRid) || fallbackName || "Hàng xóm";
-                    const robberName = otherHome._rob_name || (robRid > 0 ? `Kẻ địch (ID: ${robRid})` : "Kẻ chiếm đóng");
 
                     const failTs = bot.state.failedRescueRids[robRid] || 0;
                     if (Date.now() - failTs < STRONG_ROBBER_SKIP_MS) {
@@ -8867,33 +8879,40 @@
                     const myFullPower = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats.fullPower) || Number(bot.stats.power) || 260000000);
 
                     // 1. Kiểm tra Lực Chiến của chủ nhà (Victim):
-                    // Nếu chủ nhà có LC lớn hơn 105% LC của mình, kẻ chiếm đóng họ chắc chắn rất mạnh -> Bỏ qua
-                    if (victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 1.05) {
-                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC ${bot.formatNumber(victimPower)} > LC của mình (${bot.formatNumber(myFullPower)}) -> Kẻ cướp chắc chắn mạnh hơn, bỏ qua!`);
+                    // Nếu chủ nhà có LC lớn hơn 95% LC của mình, kẻ chiếm đóng họ chắc chắn rất mạnh -> Bỏ qua
+                    if (victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 0.95) {
+                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC lớn (${bot.formatNumber(victimPower)}) -> Kẻ cướp chắc chắn mạnh hơn LC của mình (${bot.formatNumber(myFullPower)}), bỏ qua để an toàn!`);
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
                         bot.state.skipRescueReason[targetRid] = "victim_too_strong";
                         return false;
                     }
 
-                    // 2. Kiểm tra Lực Chiến của Kẻ Chiếm Đóng (Robber) qua HeroRivalCs (10334):
+                    // 2. Kiểm tra Lực Chiến của Kẻ Chiếm Đóng (Robber) qua QueryCs (11801) & HeroRivalCs (10334):
                     let robberPower = 0;
                     const cachedRobber = window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid];
                     if (cachedRobber && Date.now() - cachedRobber.time < 600000) {
                         robberPower = cachedRobber.power;
                     } else {
                         try {
+                            const pm = (window.ModelManager && window.ModelManager.PlayerModel) || (gm && gm.PlayerModel);
+                            if (pm && typeof pm.reqQueryPlayer === "function") {
+                                pm.reqQueryPlayer(robRid);
+                            } else {
+                                const rpc = gm.RPCReq || (window.G_Mapping && window.G_Mapping.RPCReq);
+                                if (rpc) rpc.send(11801, { _rid: robRid });
+                            }
                             const rpc = gm.RPCReq || (window.G_Mapping && window.G_Mapping.RPCReq);
                             if (rpc && robRid > 0) {
                                 const rivalProto = (gm.HeroRivalCs && gm.HeroRivalCs.protocol) || 10334;
                                 rpc.send(rivalProto, { _rid: robRid, _type: 106, _id: 2 });
-                                const rWaitStart = Date.now();
-                                while (Date.now() - rWaitStart < 140) {
-                                    if (window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid]) {
-                                        robberPower = window.__ROBBER_POWER_CACHE__[robRid].power;
-                                        break;
-                                    }
-                                    await bot.sleep(15);
+                            }
+                            const rWaitStart = Date.now();
+                            while (Date.now() - rWaitStart < 250) {
+                                if (window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid]) {
+                                    robberPower = window.__ROBBER_POWER_CACHE__[robRid].power;
+                                    break;
                                 }
+                                await bot.sleep(15);
                             }
                         } catch (eRival) { }
                     }
@@ -8915,7 +8934,7 @@
                         window.__QA_PENDING_MAIN_START__ = null;
                     }
 
-                    bot.log(`⚔️ [Farm KNB • ${sourceLabel}] Phát hiện gia viên [${victimName}] đang bị chiếm bởi [${robberName}]! Đang giải cứu (+50 KNB)...`);
+                    bot.log(`⚔️ [Farm KNB • ${sourceLabel}] Chuẩn bị giải cứu [${victimName}] (Đánh đuổi [${robberName}]) (+50 KNB)...`);
 
                     // 1. Luôn khôi phục 100% full đội hình mạnh nhất trước khi vào trận để chắc chắn chiến thắng
                     if (bot.state.isScoutLowPowerActive && typeof bot.restoreFullCombatArray === "function") {
@@ -9264,9 +9283,9 @@
                     }
                 }
 
-                if (bot.canDo("rescue_scan_status_log", 15)) {
+                if (bot.canDo("rescue_scan_status_log", 60)) {
                     bot.markDone("rescue_scan_status_log");
-                    bot.log(`🌾 [Farm KNB] Đã rà soát ${bot.state.totalRescueScanned.toLocaleString()} gia viên • Đã giải cứu: ${bot.state.rescuedCount || 0} lượt (+${(bot.state.rescuedKnbTotal || 0).toLocaleString()} KNB). Đang rà soát tiếp...`);
+                    bot.log(`📊 [Farm KNB] Đã quét: ${bot.state.totalRescueScanned.toLocaleString()} nhà | Giải cứu: ${bot.state.rescuedCount || 0} lượt (+${(bot.state.rescuedKnbTotal || 0).toLocaleString()} KNB) | KNB: ${bot.formatNumber(bot.stats.jade || 0)}`);
                 }
 
             } catch (e) {
