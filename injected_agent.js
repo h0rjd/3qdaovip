@@ -1204,7 +1204,16 @@
                 if (!self.fightDate && fm && typeof fm.getFightState === "function") {
                     self.fightDate = fm.getFightState(aType);
                 }
-                const fd = self.fightDate;
+                let fd = self.fightDate;
+                if (!fd && fm && fm.fightList) {
+                    for (let k in fm.fightList) {
+                        if (fm.fightList[k]) {
+                            fd = fm.fightList[k];
+                            self.fightDate = fd;
+                            break;
+                        }
+                    }
+                }
                 if (fd) {
                     if (!fd.battleData && self.battleData) fd.battleData = self.battleData;
                     if (!fd._args && self._args) fd._args = self._args;
@@ -1219,6 +1228,7 @@
                 }
                 if (self.quickEnd) {
                     try { self.quickEnd.setVisible(true); } catch (e) { }
+                    try { self.quickEnd.setTouchable(true); } catch (e) { }
                 }
 
                 if (self.checkSkip) {
@@ -1254,10 +1264,15 @@
                 bot.state.lastBattleEndTime = Date.now() + 2500;
                 bot.log(`⚔️ [Skip-Battle] Bỏ qua trận đấu (Type: ${aType || "unknown"}, WarID: ${warId || "unknown"})`);
 
+                // 1. Dispatch event battle_Next trực tiếp vào FightManager / BattleController
                 if (disp && evType && evType.battle_Next && fd) {
                     disp.dispatchEvent(evType.battle_Next, fd);
-                    return true;
                 }
+                // 2. Kích hoạt song song nút Bỏ Qua trên UI
+                if (self.quickEnd && typeof self.quickEnd.callClickListener === "function") {
+                    try { self.quickEnd.callClickListener(); } catch (eClk) { }
+                }
+                return true;
             } catch (eSkip) {
                 console.warn("[doBattleSkip error]", eSkip);
             }
@@ -1270,6 +1285,13 @@
 
                 // 1. Tìm instance BattleSecnesView đang active trên màn hình
                 let bsv = window.__CURRENT_BATTLE_SCENES_VIEW__;
+                const vm = bot.getViewManager();
+                if (!bsv || !bsv.view || !bsv.view.parent || bsv.view.visible === false) {
+                    const bbv = vm && typeof vm.getView === "function" ? vm.getView("BattleBeginView") : null;
+                    if (bbv && bbv.ctlView && bbv.ctlView.BattleSecnesView) {
+                        bsv = bbv.ctlView.BattleSecnesView;
+                    }
+                }
                 if (!bsv || !bsv.view || !bsv.view.parent || bsv.view.visible === false) {
                     const jzView = window.__CURRENT_BATTLE_JZ_VIEW__;
                     if (jzView && jzView.ctlView && jzView.ctlView.BattleSecnesView) {
@@ -1311,7 +1333,7 @@
                         try { bsv.quickEnd.setTouchable(true); } catch (e) { }
                     }
 
-                    if (bot.canDo("auto_battle_watchdog_skip", 1.2)) {
+                    if (bot.canDo("auto_battle_watchdog_skip", 0.4)) {
                         bot.markDone("auto_battle_watchdog_skip");
                         bot.doBattleSkip(bsv);
                     }
@@ -2917,6 +2939,18 @@
                     vm.__QA_HOOKED__ = true;
                     const origOpen = vm.open;
                     vm.open = function (viewName, args, cb) {
+                        if (viewName === "BattleBeginView" && bot.settings && bot.settings.skip_battle) {
+                            setTimeout(() => {
+                                try {
+                                    const vmInst = bot.getViewManager();
+                                    const bbv = vmInst && typeof vmInst.getView === "function" ? vmInst.getView("BattleBeginView") : null;
+                                    const bsv = bbv && bbv.ctlView && bbv.ctlView.BattleSecnesView;
+                                    if (bsv) {
+                                        bot.doBattleSkip(bsv);
+                                    }
+                                } catch (e) { }
+                            }, 120);
+                        }
                         // Màn hình chuẩn bị trận và xếp trận của người chơi KHÔNG BAO GIỜ bị chặn
                         if (viewName === "BattlePrepareView" || viewName === "TeamArrayView" || (args && args.isSelfArray)) {
                             return origOpen.apply(this, arguments);
@@ -3028,34 +3062,22 @@
                                     if (t) {
                                         t.isBackGroud = true;
                                         t.hideMainBottom = false;
-                                        let res;
-                                        if (origCheckConfig) {
-                                            res = origCheckConfig.apply(this, arguments);
-                                        }
-                                        const fmInst = window.FightManager || (gm && gm.FightManager);
+                                    }
+                                }
+                                let res;
+                                if (origCheckConfig) {
+                                    res = origCheckConfig.apply(this, arguments);
+                                }
+                                if (canNativeSkipBattle(e) && bot.settings.skip_battle) {
+                                    try {
                                         const vmInst = bot.getViewManager();
-                                        if (fmInst) {
-                                            if (t.battleData && t.battleData._id && typeof fmInst.requestWarClose === "function") {
-                                                fmInst.requestWarClose(t.battleData._id);
-                                            }
-                                            if (typeof fmInst.removeFight === "function") {
-                                                try { fmInst.removeFight(e); } catch (err) { }
-                                            }
-                                            if (fmInst.fightList && fmInst.fightList[e]) {
-                                                delete fmInst.fightList[e];
-                                            }
-                                            if (fmInst.copyRequstStatus) {
-                                                fmInst.copyRequstStatus[e] = 0;
-                                            }
-                                        }
                                         if (vmInst && typeof vmInst.close === "function") {
                                             vmInst.close("BattlePrepareView");
                                             vmInst.close("TeamArrayView");
                                         }
-                                        return res;
-                                    }
+                                    } catch (errVm) { }
                                 }
-                                if (origCheckConfig) return origCheckConfig.apply(this, arguments);
+                                return res;
                             };
 
                             const origHasSkip = bcProto.hasSkipBattle;
@@ -3862,6 +3884,17 @@
                                     if (typeof this.setSpeedBtnState === "function") this.setSpeedBtnState(3);
                                 }
                             } catch (eSpd) { }
+
+                            // AUTO SKIP: Kích hoạt bỏ qua trận đấu ngay tức thì sau khi UI sẵn sàng
+                            if (bot.settings && bot.settings.skip_battle) {
+                                setTimeout(() => {
+                                    try {
+                                        if (self.view && (self.view.visible !== false)) {
+                                            bot.doBattleSkip(self);
+                                        }
+                                    } catch (err) { }
+                                }, 80);
+                            }
                         };
 
                         const origBsvDestroy = BattleSecnesViewClass.prototype.onDestroy;
@@ -3873,6 +3906,34 @@
                         };
                     }
                 } catch (e) { }
+
+                // Hook 2.695: BattleBeginView - Tự động bỏ qua trận đấu ngay khi BattleSecnesView được mở
+                try {
+                    let bbvMod = null;
+                    if (typeof window.__require === "function") {
+                        try { bbvMod = window.__require("BattleBeginView"); } catch (e) { }
+                    }
+                    const BattleBeginViewClass = (bbvMod && (bbvMod.BattleBeginView || bbvMod.default || bbvMod)) || (gm && gm.BattleBeginView) || window.BattleBeginView;
+                    if (BattleBeginViewClass && BattleBeginViewClass.prototype && !BattleBeginViewClass.prototype.__QA_BBV_HOOKED__) {
+                        BattleBeginViewClass.prototype.__QA_BBV_HOOKED__ = true;
+                        const origShowBsv = BattleBeginViewClass.prototype.showBattleSecnesView;
+                        BattleBeginViewClass.prototype.showBattleSecnesView = function () {
+                            const res = origShowBsv ? origShowBsv.apply(this, arguments) : null;
+                            const self = this;
+                            if (bot.settings && bot.settings.skip_battle) {
+                                setTimeout(() => {
+                                    try {
+                                        const bsv = self.ctlView && self.ctlView.BattleSecnesView;
+                                        if (bsv) {
+                                            bot.doBattleSkip(bsv);
+                                        }
+                                    } catch (err) { }
+                                }, 100);
+                            }
+                            return res;
+                        };
+                    }
+                } catch (eBbv) { }
 
                 // Hook 2.68: BatteJingzhouView - Đảm bảo bỏ qua trận đấu Bí Cảnh Tần Lĩnh an toàn 100% không văng lỗi
                 try {
@@ -4052,7 +4113,6 @@
                             if (origShowView) origShowView.apply(this, arguments);
                             try {
                                 if (this.battleData) bot.lastBattleData = this.battleData;
-                                // Giữ nguyên _bgClose = false theo thiết kế game gốc để click ngoài màn hình không làm mất bảng kết quả
                                 this._bgClose = false;
                                 if (this._closeBtn && typeof this._closeBtn.addClickListener === "function") {
                                     this._closeBtn.addClickListener(() => {
@@ -4060,7 +4120,35 @@
                                         this.closeView();
                                     });
                                 }
+                                if (this.view && typeof this.view.addClickListener === "function" && !this.view.__QA_CLICK_DISMISS__) {
+                                    this.view.__QA_CLICK_DISMISS__ = true;
+                                    this.view.addClickListener(() => {
+                                        bot.state.viewingBattleData = false;
+                                        this.closeView();
+                                    });
+                                }
                             } catch (e) { }
+
+                            // Tự động đóng bảng kết quả nếu bật skip_battle
+                            if (bot.settings && bot.settings.skip_battle && !isBossOrDefJz) {
+                                const self = this;
+                                setTimeout(() => {
+                                    try {
+                                        if (bot.state.viewingBattleData) return;
+                                        const curVm = bot.getViewManager();
+                                        if (curVm && typeof curVm.isOpenView === "function" && (curVm.isOpenView("BattledataView") || curVm.isOpenView("PanelBattleData"))) {
+                                            return;
+                                        }
+                                        if (bot.isViewVisible(self)) {
+                                            if (self._curPageClass && typeof self._curPageClass.okClick === "function") {
+                                                self._curPageClass.okClick();
+                                            } else if (typeof self.closeView === "function") {
+                                                self.closeView();
+                                            }
+                                        }
+                                    } catch (e) { }
+                                }, 800);
+                            }
 
                             const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104 || !canNativeSkipBattle(bType);
                             const vm = bot.getViewManager();
@@ -4346,7 +4434,7 @@
 
                 // Hook 3: Bổ sung song song 2 nút [LƯU TRẬN] và [KHIÊU CHIẾN] cho BattlePrepareView / TeamArrayView
                 function hookArrayDualButtons(targetClass) {
-                    if (!targetClass || !targetClass.prototype || targetClass.prototype.__QA_DUAL_BTN__) return;
+                    if (!targetClass || !targetClass.prototype || targetClass.prototype.hasOwnProperty("__QA_DUAL_BTN__")) return;
                     targetClass.prototype.__QA_DUAL_BTN__ = true;
 
                     const origInitData = targetClass.prototype.initData;
@@ -4406,6 +4494,22 @@
                     const origEnterBtnFunc = targetClass.prototype.enterBtnFunc;
                     targetClass.prototype.enterBtnFunc = function () {
                         try {
+                            if (this.__enter_busy__ && Date.now() - this.__enter_busy__ < 1200) {
+                                return; // Chống spam click gây khưng giật UI
+                            }
+                            this.__enter_busy__ = Date.now();
+                            if (this.enterBtn && typeof this.enterBtn.setTouchable === "function") {
+                                try { this.enterBtn.setTouchable(false); } catch (e) { }
+                                setTimeout(() => {
+                                    try {
+                                        if (this.enterBtn && typeof this.enterBtn.setTouchable === "function") {
+                                            this.enterBtn.setTouchable(true);
+                                        }
+                                        this.__enter_busy__ = 0;
+                                    } catch (e) { }
+                                }, 1200);
+                            }
+
                             const mm = window.ModelManager || (gm && gm.ModelManager);
                             if (this._args) {
                                 if (this._args.arrayType === 1 && !this._args.copyId && mm && mm.MainUIModel) {
