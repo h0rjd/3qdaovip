@@ -2953,7 +2953,7 @@
                                         bot.doBattleSkip(bsv);
                                     }
                                 } catch (e) { }
-                            }, 120);
+                            }, 50);
                         }
                         // Màn hình chuẩn bị trận và xếp trận của người chơi KHÔNG BAO GIỜ bị chặn
                         if (viewName === "BattlePrepareView" || viewName === "TeamArrayView" || (args && args.isSelfArray)) {
@@ -3861,7 +3861,7 @@
                                             bot.doBattleSkip(self);
                                         }
                                     } catch (err) { }
-                                }, 350);
+                                }, 80);
                             }
                         };
 
@@ -3883,7 +3883,7 @@
                                 }
                             } catch (eSpd) { }
 
-                            // AUTO SKIP: Kích hoạt bỏ qua trận đấu ngay tức thì sau khi UI sẵn sàng
+                            // AUTO SKIP: Kích hoạt bỏ qua trận đấu ngay tức thì sau khi UI sẵn sàng (50ms)
                             if (bot.settings && bot.settings.skip_battle) {
                                 setTimeout(() => {
                                     try {
@@ -3891,7 +3891,7 @@
                                             bot.doBattleSkip(self);
                                         }
                                     } catch (err) { }
-                                }, 80);
+                                }, 50);
                             }
                         };
 
@@ -3927,7 +3927,7 @@
                                             bot.doBattleSkip(bsv);
                                         }
                                     } catch (err) { }
-                                }, 100);
+                                }, 50);
                             }
                             return res;
                         };
@@ -4123,14 +4123,21 @@
                                     this.view.__QA_CLICK_DISMISS__ = true;
                                     this.view.addClickListener(() => {
                                         bot.state.viewingBattleData = false;
-                                        this.closeView();
+                                        if (this._curPageClass && typeof this._curPageClass.okClick === "function") {
+                                            this._curPageClass.okClick();
+                                        } else {
+                                            this.closeView();
+                                        }
                                     });
                                 }
                             } catch (e) { }
 
-                            const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104 || !canNativeSkipBattle(bType);
+                            // Chỉ giữ lại DefJz (9 - cần chọn buff) và Boss thế giới (4, 6, 10, 103, 104)
+                            // Toàn bộ các chế độ còn lại (Ải 1, Tháp 2, Phụ bản 3, Đấu trường 101, Gia viên 105/106, Tháp nguyên tố 12..16)
+                            // đều tự động đóng ngay sau 0.3s (300ms) chuẩn chỉ!
+                            const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104;
 
-                            // Tự động đóng bảng kết quả nếu bật skip_battle
+                            // Tự động đóng bảng kết quả ngay sau 0.3s (300ms) nếu bật skip_battle
                             if (bot.settings && bot.settings.skip_battle && !isBossOrDefJz) {
                                 const self = this;
                                 setTimeout(() => {
@@ -4148,7 +4155,7 @@
                                             }
                                         }
                                     } catch (e) { }
-                                }, 600);
+                                }, 300);
                             }
                             const vm = bot.getViewManager();
                             const isTowerUIOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("ClimbtowerView");
