@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         3Q Đào Đào Đào - AutoBot v3.9.35 (Farm KNB + 1-Click Clean Daily + Phone Conflict-Free)
+// @name         3Q Đào Đào Đào - AutoBot v3.0 Final (Bản Chính Thức - Siêu Mượt, Skip Battle & Chống Khưng Giật)
 // @namespace    https://joyplay.vn/
 // @version      3.9.35
-// @description  AutoBot v3.9.32: Tích hợp chế độ Farm KNB Giải Cứu Gia Viên (50 KNB/lượt không giới hạn), kiểm tra & trảm quân chiếm đóng.
+// @description  AutoBot v3.0 Final: Tích hợp đầy đủ Auto Vượt Ải, Farm KNB (+50 KNB/lượt không giới hạn), Skip Battle tức thì, chống giật lag khi khiêu chiến.
 // @author       Antigravity
 // @match        *://3qdao.joyplay.vn/*
 // @match        *://*.joyplay.vn/*
@@ -1194,6 +1194,8 @@
         doBattleSkip: function (battleSecnesView) {
             const self = battleSecnesView || window.__CURRENT_BATTLE_SCENES_VIEW__;
             if (!self || !self.view) return false;
+            if (self.__is_skipping__) return false;
+            self.__is_skipping__ = true;
             try {
                 const aType = (self._args && self._args.arrayType) || 0;
                 const gm = window.G_Mapping;
@@ -1264,12 +1266,14 @@
                 bot.state.lastBattleEndTime = Date.now() + 2500;
                 bot.log(`⚔️ [Skip-Battle] Bỏ qua trận đấu (Type: ${aType || "unknown"}, WarID: ${warId || "unknown"})`);
 
+                let dispatched = false;
                 // 1. Dispatch event battle_Next trực tiếp vào FightManager / BattleController
                 if (disp && evType && evType.battle_Next && fd) {
                     disp.dispatchEvent(evType.battle_Next, fd);
+                    dispatched = true;
                 }
-                // 2. Kích hoạt song song nút Bỏ Qua trên UI
-                if (self.quickEnd && typeof self.quickEnd.callClickListener === "function") {
+                // 2. Kích hoạt nút Bỏ Qua trên UI nếu chưa dispatch
+                if (!dispatched && self.quickEnd && typeof self.quickEnd.callClickListener === "function") {
                     try { self.quickEnd.callClickListener(); } catch (eClk) { }
                 }
                 return true;
@@ -3870,12 +3874,6 @@
                             if (this.quickEnd) {
                                 this.quickEnd.setVisible(true);
                                 this.quickEnd.setTouchable(true);
-                                if (!this.quickEnd.__QA_CLICK_HOOKED__) {
-                                    this.quickEnd.__QA_CLICK_HOOKED__ = true;
-                                    this.quickEnd.addClickListener(() => {
-                                        bot.doBattleSkip(self);
-                                    });
-                                }
                             }
                             try {
                                 const mm = window.ModelManager;
@@ -3899,6 +3897,7 @@
 
                         const origBsvDestroy = BattleSecnesViewClass.prototype.onDestroy;
                         BattleSecnesViewClass.prototype.onDestroy = function () {
+                            this.__is_skipping__ = false;
                             if (window.__CURRENT_BATTLE_SCENES_VIEW__ === this) {
                                 window.__CURRENT_BATTLE_SCENES_VIEW__ = null;
                             }
@@ -4129,6 +4128,8 @@
                                 }
                             } catch (e) { }
 
+                            const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104 || !canNativeSkipBattle(bType);
+
                             // Tự động đóng bảng kết quả nếu bật skip_battle
                             if (bot.settings && bot.settings.skip_battle && !isBossOrDefJz) {
                                 const self = this;
@@ -4147,10 +4148,8 @@
                                             }
                                         }
                                     } catch (e) { }
-                                }, 800);
+                                }, 600);
                             }
-
-                            const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104 || !canNativeSkipBattle(bType);
                             const vm = bot.getViewManager();
                             const isTowerUIOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("ClimbtowerView");
 
@@ -4493,11 +4492,18 @@
 
                     const origEnterBtnFunc = targetClass.prototype.enterBtnFunc;
                     targetClass.prototype.enterBtnFunc = function () {
+                        // Re-entrancy guard: nếu chính chuỗi gọi hiện tại đang trong enterBtnFunc (super call từ BattlePrepareView -> ArrayBaseView)
+                        if (this.__in_enter_call__) {
+                            return origEnterBtnFunc ? origEnterBtnFunc.apply(this, arguments) : null;
+                        }
+
+                        if (this.__enter_busy__ && Date.now() - this.__enter_busy__ < 1000) {
+                            return; // Chống spam click gây khưng giật UI
+                        }
+                        this.__enter_busy__ = Date.now();
+                        this.__in_enter_call__ = true;
+
                         try {
-                            if (this.__enter_busy__ && Date.now() - this.__enter_busy__ < 1200) {
-                                return; // Chống spam click gây khưng giật UI
-                            }
-                            this.__enter_busy__ = Date.now();
                             if (this.enterBtn && typeof this.enterBtn.setTouchable === "function") {
                                 try { this.enterBtn.setTouchable(false); } catch (e) { }
                                 setTimeout(() => {
@@ -4507,7 +4513,7 @@
                                         }
                                         this.__enter_busy__ = 0;
                                     } catch (e) { }
-                                }, 1200);
+                                }, 1000);
                             }
 
                             const mm = window.ModelManager || (gm && gm.ModelManager);
@@ -4548,7 +4554,11 @@
                                     return this.requestBatte();
                                 }
                             }
-                        } catch (e) { }
+                        } catch (e) {
+                            console.warn("[enterBtnFunc Error]", e);
+                        } finally {
+                            this.__in_enter_call__ = false;
+                        }
 
                         return origEnterBtnFunc ? origEnterBtnFunc.apply(this, arguments) : null;
                     };
@@ -9626,9 +9636,10 @@
                         recordUniqueScan(targetRid);
 
                         const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
-                        // CHỈ THẨM ĐỊNH NHÀ BỐC LỬA / BỊ CHIẾM (_de_res === 1 || 2)
-                        // BỎ QUA 0ms TUYỆT ĐỐI NHÀ YÊN BÌNH (_de_res === 0) ĐỂ KHÔNG SPAM PACKET VÀ KHÔNG BỊ TRỄ
-                        if (deRes === 1 || deRes === 2) {
+                        const deLuck = Number(house._de_luck !== undefined ? house._de_luck : 0);
+                        // CHỈ THẨM ĐỊNH NHÀ BỐC LỬA / BỊ CHIẾM (_de_res === 1 || 2 hoặc _de_luck === 1 || 2)
+                        // BỎ QUA 0ms TUYỆT ĐỐI NHÀ YÊN BÌNH (_de_res === 0 && _de_luck === 0)
+                        if (deRes === 1 || deRes === 2 || deLuck === 1 || deLuck === 2) {
                             const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                             const reason = bot.state.skipRescueReason[targetRid] || "";
                             // Nếu nhà đang bốc lửa: CHỈ bỏ qua nếu chính mình vừa giải cứu xong (rescued) hoặc kẻ cướp quá mạnh (robber_too_strong)
@@ -12996,7 +13007,7 @@
     bot.loadSettings();
     bot.hookGameEngine();
     bot.updateStats();
-    bot.log("🚀 [D-AUTO] Hệ thống Tự Động Hóa Thông Minh v3.9.31 (Khôi phục đăng nhập ổn định) đã khởi động!");
+    bot.log("🚀 [D-AUTO] Hệ thống Tự Động Hóa Thông Minh v3.0 Final (Bản Chính Thức) đã khởi động trơn tru!");
     bot.log("⚡ [Tính Năng] Quà Ngày & Mốc: BẬT | Bỏ qua QC: BẬT | Mở 2 Đội Mỏ: BẬT | Bypass All Locks: BẬT | Thu Hoạch Mỏ: BẬT | Skip Battle: BẬT | Gia Viên: BẬT | Cây Tiền/Shop Free: BẬT | Mod Skin & Khung: BẬT | Speed 2.0x: BẬT");
 
     window.__dauto_syncLogsToNative = function () {
@@ -13740,7 +13751,7 @@
                         <div class="header-title-box">
                             <span style="font-size: 16px;">⚡</span>
                             <span class="header-title">3Q ĐÀO ĐÀO ĐÀO</span>
-                            <span class="header-badge">v3.9.35 PRO</span>
+                            <span class="header-badge">v3.0 FINAL</span>
                         </div>
                         <button class="btn-icon" id="btn-close-hud" title="Thu nhỏ">✕</button>
                     </div>

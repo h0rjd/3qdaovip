@@ -1,5 +1,5 @@
 /**
- * 3Q Đào Đào Đào - Local GUI & Cloud AutoBot Runner v3.9.32 (Puppeteer + Live GUI Dashboard + Interactive Telegram Control)
+ * 3Q Đào Đào Đào - Local GUI & Cloud AutoBot Runner v3.0 Final (Puppeteer + Live GUI Dashboard + Interactive Telegram Control)
  * Tích hợp:
  * - Bảng Điều Khiển GUI Trực Quan tại http://127.0.0.1:3939 (Theo dõi KNB, Cứu Trợ, Màn hình Game trực tiếp & Bật/Tắt 22 tính năng)
  * - Treo liên tục 24/7 trên Máy tính (macOS / Windows) hoặc GitHub Actions
@@ -582,7 +582,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                     } catch (e) {}
                                 }
                                 const html = buildTelegramReportHtml(
-                                    '🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v3.9.34',
+                                    '🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v3.0 Final',
                                     sessionState.lastKnownStats,
                                     sessionState
                                 );
@@ -1270,7 +1270,7 @@ async function launchAndEnterGame(sessionState) {
     const payloadFile = fs.existsSync(path.join(__dirname, 'injected_agent.js'))
         ? path.join(__dirname, 'injected_agent.js')
         : path.join(__dirname, 'bot-payload.js');
-    writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v3.9.34)...`);
+    writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v3.0 Final)...`);
     const botPayloadCode = fs.readFileSync(payloadFile, 'utf8');
 
     await page.evaluate((code, cfg) => {
@@ -1296,7 +1296,7 @@ async function launchAndEnterGame(sessionState) {
         }
     }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles });
 
-    writeLog("[Bot] ✅ AutoBot v3.9.34 (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
+    writeLog("[Bot] ✅ AutoBot v3.0 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
     await new Promise(r => setTimeout(r, 4000));
 
     const snapStart = path.join(CONFIG.screenshotDir, '03_bot_started.png');
@@ -1377,7 +1377,7 @@ function startLocalGuiServer(sessionState, getActivePage) {
                     res.end(fs.readFileSync(guiHtmlPath, 'utf8'));
                 } else {
                     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-                    res.end('3Q AutoBot GUI v3.9.34 is running.');
+                    res.end('3Q AutoBot GUI v3.0 Final is running.');
                 }
                 return;
             }
@@ -1679,7 +1679,7 @@ function startLocalGuiServer(sessionState, getActivePage) {
 // ============================================================================
 async function run() {
     writeLog("====================================================================");
-    writeLog("🚀 KHỞI ĐỘNG 3Q ĐÀO ĐÀO ĐÀO - AUTOBOT GUI & CLOUD v3.9.34 (ANTI-LAG STOP & BYPASS)");
+    writeLog("🚀 KHỞI ĐỘNG 3Q ĐÀO ĐÀO ĐÀO - AUTOBOT GUI & CLOUD v3.0 Final (ANTI-LAG STOP & BYPASS)");
     writeLog(`🎯 Tài khoản: ${CONFIG.email} | Máy chủ: ${CONFIG.server} | Chế độ: ${isGitHubActions ? `Cloud (${CONFIG.durationMinutes}p)` : 'Treo 24/7 Liên Tục (GUI)'}`);
     writeLog(`📡 Báo cáo & Điều khiển Telegram: Mỗi ${CONFIG.telegram.report_interval_min} phút | Nhường máy khi vào ĐT: ${CONFIG.settings.yield_on_kick ? `BẬT (Nghỉ ${CONFIG.settings.yield_wait_minutes}p rồi tự chạy tiếp)` : 'TẮT'}`);
     writeLog("====================================================================");
@@ -2044,7 +2044,7 @@ async function run() {
                         fs.copyFileSync(startSnap, latestSnap);
                     } catch (e) {}
                     const html = buildTelegramReportHtml(
-                        '🚀 3Q AUTOBOT v3.9.34 - ĐÃ VÀO GAME & BẮT ĐẦU TREO 24/7',
+                        '🚀 3Q AUTOBOT v3.0 Final - ĐÃ VÀO GAME & BẮT ĐẦU TREO 24/7',
                         st,
                         sessionState,
                         '✅ <i>Anh có thể điều khiển trực tiếp trên cửa sổ GUI (http://127.0.0.1:3939) hoặc bấm các nút bên dưới trên Telegram!</i>'
@@ -2062,7 +2062,7 @@ async function run() {
                     if (process.env.GITHUB_STEP_SUMMARY && cycle % 6 === 0) {
                         try {
                             const summaryMd = [
-                                `## ⚡ 3Q AutoBot v3.9.35 - Trạng Thái Farm KNB Realtime`,
+                                `## ⚡ 3Q AutoBot v3.0 Final - Trạng Thái Farm KNB Realtime`,
                                 `| Chỉ số | Chi tiết |`,
                                 `| :--- | :--- |`,
                                 `| 👤 **Nhân vật** | **${st.roleName || '---' }** (Server: ${CONFIG.server}) |`,

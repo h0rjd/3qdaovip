@@ -1,7 +1,7 @@
 {
   "name": "3q-autobot-github",
-  "version": "3.9.32",
-  "description": "Treo Bot Tự Động Hóa 3Q Đào Đào Đào v3.9.32 (Farm KNB Giải Cứu Gia Viên + Báo cáo Telegram 24/7) trên GitHub Actions & Local",
+  "version": "3.0.0",
+  "description": "Treo Bot Tự Động Hóa 3Q Đào Đào Đào v3.0 Final (Bản Chính Thức - Farm KNB + Auto Trực Chiến + Báo cáo Telegram 24/7) trên GitHub Actions & Local",
   "main": "runner.js",
   "scripts": {
     "start": "node runner.js",
