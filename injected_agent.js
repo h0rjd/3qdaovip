@@ -6794,27 +6794,28 @@
                     return res;
                 };
 
-                // Phân bổ 20 mốc bao phủ toàn bộ 1->5 tướng, tập trung dày nhất ở 3 tướng & 4 tướng (60M-120M LC - vùng nhiều nhà bị cướp nhất):
-                // - 1 tướng (acc nhỏ): 2 mốc đại diện
-                // - 2 tướng (42M-65M LC): 5 mốc
-                // - 3 tướng (66M-96M LC): 6 mốc (Trọng tâm #1)
-                // - 4 tướng (98M-118M LC): 5 mốc (Trọng tâm #2 - nơi Mốc 14/16 nổ 4 nhà liên tiếp)
-                // - 5 tướng yếu (120M-128M LC): 2 mốc thấp nhất của 5 tướng (nơi Mốc 15/16 nổ 2 nhà)
-                const fiveSorted = (byCount[5] || []).slice().sort((a, b) => a.estPower - b.estPower);
-                const selected = []
-                    .concat(sampleEvenly(byCount[1], 2))
-                    .concat(sampleEvenly(byCount[2], 5))
-                    .concat(sampleEvenly(byCount[3], 6))
-                    .concat(sampleEvenly(byCount[4], 5))
-                    .concat(fiveSorted.slice(0, 2));
+                // Phân bổ các mốc dò nhà: CHỈ TẬP TRUNG NGHIÊM NGẶT Ở 2 ĐẾN 4 TƯỚNG (40M - 120M LC)
+                // Theo cơ chế game, ở mốc 2-4 tướng đối thủ ghép cặp chỉ có 40M-120M LC, kẻ cướp chỉ 50M-130M LC.
+                // Khi vào trận ta khôi phục full 6 tướng (297M LC) chắc chắn chiến thắng 100%!
+                // TUYỆT ĐỐI LOẠI BỎ:
+                // - 1 tướng: Acc clone/bỏ hoang, không có cướp hoặc robSec = 0
+                // - 5 tướng & Full 6 tướng: Ghép cặp đối thủ lớn, kẻ cướp từ 350M-800M+ LC không thể đánh lại!
+                let selected = []
+                    .concat(sampleEvenly(byCount[2], 6))
+                    .concat(sampleEvenly(byCount[3], 8))
+                    .concat(sampleEvenly(byCount[4], 6));
 
-                const fullCombo = {
-                    heroes: snap.heroes.map(h => ({ _idx: Number(h._idx), _id: Number(h._id) })),
-                    count: snap.heroes.length,
-                    estPower: (snap && snap.rolePower) || 250000000,
-                    key: "full_formation"
-                };
-                selected.push(fullCombo);
+                // Fallback nếu tài khoản chưa đủ 4 tướng (tài khoản mới):
+                if (selected.length === 0) {
+                    for (let c = 2; c <= 4; c++) {
+                        if (byCount[c] && byCount[c].length > 0) {
+                            selected.push(...sampleEvenly(byCount[c], 6));
+                        }
+                    }
+                }
+                if (selected.length === 0 && byCount[1] && byCount[1].length > 0) {
+                    selected.push(...byCount[1]);
+                }
 
                 selected.sort((a, b) => (a.estPower - b.estPower) || (a.count - b.count));
 
@@ -6835,15 +6836,8 @@
             bot.state.scoutStepCounter = (bot.state.scoutStepCounter || 0) + 1;
             const curIdx = Math.abs(Number(bot.state.scoutComboIdx || 0)) % total;
 
-            // Nhóm Chủ Lực (Core Hotzone): 2 tướng mạnh + 3 tướng + 4 tướng + 5 tướng yếu (45M - 125M LC, nơi có nhiều người chơi thật bị cướp nhất)
-            // Nhóm Phụ (Low Zone): 1 tướng (19M - 30M LC, quét lướt định kỳ)
-            const hotIndices = [];
-            const lowIndices = [];
-            for (let i = 0; i < total; i++) {
-                if (combos[i].count >= 2) hotIndices.push(i);
-                else lowIndices.push(i);
-            }
-            const mainPool = hotIndices.length > 0 ? hotIndices : combos.map((_, i) => i);
+            // Nhóm Chủ Lực: Toàn bộ 100% các mốc 2, 3, 4 tướng (40M - 120M LC - vùng đối thủ yếu và kẻ cướp dễ đánh nhất)
+            const mainPool = combos.map((_, i) => i);
 
             // 1. Cứ mỗi 3 nhịp: ưu tiên quay lại mốc (hoặc mốc sát cạnh ±1) đã từng giải cứu thành công!
             if (reason !== "lose" && bot.state.scoutStepCounter % 3 === 0) {
@@ -6866,13 +6860,7 @@
                 }
             }
 
-            // 2. Cứ mỗi 8 nhịp: ghé qua quét nhanh mốc 1 tướng (dành ~88% thời gian ở vùng nóng 2-3-4-5 tướng!)
-            if (lowIndices.length > 0 && bot.state.scoutStepCounter % 8 === 0) {
-                const lIdx = lowIndices[(bot.state.scoutStepCounter / 8 | 0) % lowIndices.length];
-                if (lIdx !== curIdx) return lIdx;
-            }
-
-            // 3. Quét nhảy xen kẽ (Interleaved Stride) giống bản 15:12 qua vùng nóng 2-3-4-5 tướng để phủ nhanh cả cụm 60M-125M LC!
+            // 2. Quét nhảy xen kẽ (Interleaved Stride) qua toàn bộ các mốc 2, 3, 4 tướng để phủ rộng phổ LC 40M-120M!
             const stride = Math.max(1, Math.floor(mainPool.length / 3));
             bot.state.hotPoolCursor = ((bot.state.hotPoolCursor !== undefined ? bot.state.hotPoolCursor : -stride) + stride) % mainPool.length;
             if (bot.state.scoutStepCounter % mainPool.length === 0) {
@@ -6931,6 +6919,7 @@
                     bot.state.isScoutLowPowerActive = true;
                     bot.state.currentScoutHeroCount = combo.count;
                     bot.state.currentScoutComboKey = combo.key;
+                    bot.state.scoutComboIdx = idx;
                     bot.state.currentScoutComboIdx = idx + 1;
                     bot.state.totalScoutCombos = combos.length;
                     bot.state.lastScoutArraySetTime = Date.now();
@@ -9069,9 +9058,9 @@
                         return false;
                     }
 
-                    // Nếu chưa rõ LC kẻ cướp nhưng chủ nhà có LC quá cao (> 125% LC mình) -> Kẻ cướp có thể rất mạnh -> Bỏ qua
-                    if (robberPower === 0 && victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 1.25) {
-                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC rất lớn (${bot.formatNumber(victimPower)} > 125% LC mình) -> Kẻ cướp có thể mạnh hơn LC của mình (${bot.formatNumber(myFullPower)}), bỏ qua để an toàn!`);
+                    // Nếu chưa rõ LC kẻ cướp nhưng chủ nhà có LC quá cao (> 95% LC mình) -> Kẻ cướp chắc chắn mạnh hơn chủ nhà và có thể mạnh hơn mình -> Bỏ qua để an toàn
+                    if (robberPower === 0 && victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 0.95) {
+                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC lớn (${bot.formatNumber(victimPower)} > 95% LC mình) -> Kẻ cướp có thể mạnh hơn LC của mình (${bot.formatNumber(myFullPower)}), bỏ qua để an toàn!`);
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
                         bot.state.skipRescueReason[targetRid] = "victim_too_strong";
                         return false;
@@ -9244,6 +9233,10 @@
                         delete bot.state.rescueAttempts[targetRid];
 
                         bot.log(`💎 [Farm KNB] 🎉 GIẢI CỨU THÀNH CÔNG [${victimName}] (Đánh đuổi [${robberName}])! +50 KNB (Tổng: ${bot.state.rescuedKnbTotal.toLocaleString()} KNB • ${bot.state.rescuedCount} lượt)!`);
+                        if (bot.state.currentScoutComboKey) {
+                            if (!bot.state.scoutComboWins) bot.state.scoutComboWins = {};
+                            bot.state.scoutComboWins[bot.state.currentScoutComboKey] = (bot.state.scoutComboWins[bot.state.currentScoutComboKey] || 0) + 1;
+                        }
                         // Hoàn toàn chạy ngầm: không gọi bot.showToast để loại bỏ triệt để toast phiền toái trên màn hình
                         if (typeof bot.updateStats === "function") bot.updateStats();
                         didSomething = true;
@@ -9415,6 +9408,9 @@
                                         const rs = it._role_show;
                                         const rRid = Number(rs._rid || rs.rid || rs._role_id || 0);
                                         const rName = rs._name || rs.name || `ID ${rRid}`;
+                                        const rPow = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : 0;
+                                        const myFullPow = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats.fullPower) || Number(bot.stats.power) || 260000000);
+                                        if (rPow > 0 && myFullPow > 0 && rPow > myFullPow * 0.95) return; // Bỏ qua top cao thủ BXH có LC khủng
                                         addTarget(rRid, rName, "Tuần Tra BXH");
                                     });
                                 }
