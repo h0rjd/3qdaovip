@@ -1069,8 +1069,8 @@
                         }
                     }
                 }
-                // 3. Tuyệt đối KHÔNG tự động đóng BattleResultView nếu người chơi đang thao tác thủ công (không bật auto chạy ngầm)
-                if (!bot.isAutoStageOn() && !bot.state.isAutoTowerActive) {
+                // 3. Tự động dọn dẹp BattleResultView nếu đang bật skip_battle hoặc đang chạy auto
+                if (!bot.isAutoStageOn() && !bot.state.isAutoTowerActive && !(bot.settings && bot.settings.skip_battle)) {
                     return;
                 }
                 if (typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
@@ -1263,7 +1263,7 @@
 
                 const warId = (fd && fd.battleData && fd.battleData._id) || (self.battleData && self.battleData._id);
                 window.__LAST_OTHER_WAR_TIME__ = Date.now();
-                bot.state.lastBattleEndTime = Date.now() + 2500;
+                bot.state.lastBattleEndTime = Date.now() + 300;
                 bot.log(`⚔️ [Skip-Battle] Bỏ qua trận đấu (Type: ${aType || "unknown"}, WarID: ${warId || "unknown"})`);
 
                 let dispatched = false;
@@ -2431,70 +2431,13 @@
                             window.__LAST_WAR_CLOSE_TIME__ = now;
                         }
 
-                        // 1. Giãn cách gói tin WarStartCs (10401) của Ải Cốt Truyện (Type = 1) để chống Error 66
-                        // QUAN TRỌNG: KHÔNG ĐƯỢC BỎ gói tin (game sẽ đợi phản hồi mãi -> kẹt ải). Chỉ HOÃN gửi
-                        // tới khi đủ giãn cách; nếu có nhiều gói chờ thì chỉ giữ gói mới nhất.
-                        // Với Tháp (2), Tần Lĩnh (9), Arena (101): Không bao giờ chặn
+                        // Gói tin WarStartCs (10401): Cho phép gửi ngay lập tức 0ms, không bao giờ chặn hay hoãn 5s
                         if (t === 10401) {
                             const bType = (e && e._type) || 1;
-                            if (bType === 1) {
-                                const mm = window.ModelManager || (gm && gm.ModelManager);
-                                const bm = mm && mm.BattleModel;
-                                const hasHangupBattle = !!(bm && typeof bm.getHangupBattleInfo === "function" && bm.getHangupBattleInfo());
-                                const tm = (window.LoginUtil && window.LoginUtil.TransitionModel) || (gm && gm.LoginUtil && gm.LoginUtil.TransitionModel) || (mm && mm.TransitionModel);
-                                const isTransitionDone = !(tm && typeof tm.isComplete === "function") || !!tm.isComplete();
-                                const vm = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
-                                const isLoadingOpen = !!(vm && typeof vm.isOpenView === "function" && vm.isOpenView("LoadingView"));
-                                const isLoginPreload = !window.__ENTER_GAME__ || !bot.state.hasLoggedInOnce || !hasHangupBattle || !isTransitionDone || isLoadingOpen;
-
-                                // GIAI ĐOẠN ĐĂNG NHẬP / TẢI GAME (80-90% Transition Loading):
-                                // BẮT BUỘC cho phép gói 10401 (Copy _type: 1) đi qua ngay lập tức để Server gửi dữ liệu trận treo ban đầu,
-                                // kích hoạt BattleModel.preloadMainCopyRes() và Dispatcher.dispatchEvent("TransitionDegree_Update", { batteLevelRes: 1 })
-                                // đưa thanh tiến trình từ 80-90% lên 100% hoàn tất vào game!
-                                if (isLoginPreload) {
-                                    lastProtoTimes[`10401_${bType}`] = now;
-                                    lastProtoTimes[10401] = now;
-                                    return origSendMsg.apply(this, arguments);
-                                }
-
-                                // SAU KHI ĐÃ VÀO GAME HOÀN TẤT:
-                                // Nếu người chơi TẮT tính năng Vượt Ải trong bot, chặn gửi lặp gói đánh ải để không xung đột với Farm KNB
-                                if (!bot.isAutoStageOn()) {
-                                    if (window.__QA_PENDING_MAIN_START__) {
-                                        clearTimeout(window.__QA_PENDING_MAIN_START__);
-                                        window.__QA_PENDING_MAIN_START__ = null;
-                                    }
-                                    return;
-                                }
-                                const lastWarTime = lastProtoTimes[`10401_${bType}`] || 0;
-                                const lastClose = window.__LAST_WAR_CLOSE_TIME__ || 0;
-                                const lastOther = window.__LAST_OTHER_WAR_TIME__ || 0;
-                                const lastFail = window.__LAST_WAR_FAIL_COOLDOWN__ || 0;
-                                const busyUntil = (bot.state.battleInProgress || bot.state.rescueFightActive) ? (now + 2600) : 0;
-                                const readyAt = Math.max(lastWarTime + 2200, lastClose + 350, lastOther + 2600, lastFail, busyUntil);
-                                if (window.__QA_PENDING_MAIN_START__) {
-                                    clearTimeout(window.__QA_PENDING_MAIN_START__);
-                                    window.__QA_PENDING_MAIN_START__ = null;
-                                }
-                                if (now < readyAt) {
-                                    const self = this, args = arguments;
-                                    window.__QA_PENDING_MAIN_START__ = setTimeout(function () {
-                                        window.__QA_PENDING_MAIN_START__ = null;
-                                        if (!bot.isAutoStageOn()) return;
-                                        try { self.sendMessage.apply(self, args); } catch (eSend) { }
-                                    }, readyAt - now);
-                                    return;
-                                }
-                                lastProtoTimes[`10401_${bType}`] = now;
-                                lastProtoTimes[10401] = now;
-                            } else {
-                                if (window.__QA_PENDING_MAIN_START__) {
-                                    clearTimeout(window.__QA_PENDING_MAIN_START__);
-                                    window.__QA_PENDING_MAIN_START__ = null;
-                                }
+                            lastProtoTimes[`10401_${bType}`] = now;
+                            lastProtoTimes[10401] = now;
+                            if (bType !== 1) {
                                 window.__LAST_OTHER_WAR_TIME__ = now;
-                                lastProtoTimes[`10401_${bType}`] = now;
-                                lastProtoTimes[10401] = now;
                             }
                         }
 
@@ -3006,7 +2949,7 @@
                                     if (battleData._type != null) {
                                         if (battleData._type !== 1 && battleData._type !== 106 && battleData._type !== 105) {
                                             window.__LAST_OTHER_WAR_TIME__ = Date.now();
-                                            bot.state.lastBattleEndTime = Date.now() + 2500;
+                                            bot.state.lastBattleEndTime = Date.now() + 300;
                                         }
                                         if (!bot.state.lastBattleByType) bot.state.lastBattleByType = {};
                                         const bEntry = {
@@ -4760,7 +4703,7 @@
                                     bot.log(`⚠️ [Anti-Spam] Ước Nguyện báo lỗi [${code}: ${content || 'Thao tác quá nhanh'}] -> Tạm hoãn 60s.`);
                                 } else if (proto === 10401 || code === 66) {
                                     const now = Date.now();
-                                    const cool = now + 5000;
+                                    const cool = now + 600;
                                     bot.state.lastBattleEndTime = cool;
                                     bot.state.lastWarError66Time = now;
                                     window.__LAST_WAR_FAIL_COOLDOWN__ = cool;
@@ -4774,10 +4717,6 @@
                                             }
                                         }
                                     } catch (eFm) { }
-                                    if (bot.isAutoStageOn() && (!bot.state.last10401WarnTime || (now - bot.state.last10401WarnTime > 5000))) {
-                                        bot.state.last10401WarnTime = now;
-                                        bot.log(`⚠️ [Anti-Spam] Vượt Ải báo [${code}: ${content || 'Thao tác quá nhanh'}] -> Tự động giãn cách an toàn 5.0s.`);
-                                    }
                                     return;
                                 } else if (proto === 10413) {
                                     bot.state.lastBattleEndTime = Date.now() + 3500;
@@ -4850,25 +4789,15 @@
                         };
                     }
 
-                    // 2. Hook moveNext: Bắt thất bại trận ải, kích hoạt Defeat Guard và khóa màn hình an toàn
+                    // 2. Hook moveNext: Ghi nhận kết quả trận đấu cho Defeat Guard
                     const origMoveNext = bmv.prototype.moveNext;
                     if (origMoveNext && !bmv.prototype.__QA_MOVENEXT_HOOKED__) {
                         bmv.prototype.__QA_MOVENEXT_HOOKED__ = true;
                         bmv.prototype.moveNext = function () {
                             window.__BMV_INSTANCE__ = this;
-                            if (!bot.isAutoStageOn()) {
-                                this.isEnterGame = false;
-                                if (this.copyAnimState && typeof this.copyAnimState.onLockState === "function") {
-                                    this.copyAnimState.onLockState();
-                                }
-                                return;
-                            }
                             try {
                                 if (this.playData && this.playData._winner !== 1) {
                                     bot.handleStageDefeat();
-                                    if (this.copyAnimState && this.copyAnimState.onLockState) {
-                                        this.copyAnimState.onLockState();
-                                    }
                                 } else if (this.playData && this.playData._winner === 1) {
                                     bot.state.stageFailCount = 0;
                                     bot.state.stage10401ErrCount = 0;
@@ -4878,7 +4807,7 @@
                         };
                     }
 
-                    // 3. Hook initBattleData, enterBattle & pullBatteData: Khóa an toàn ải chính tuyến khi TẮT Vượt Ải
+                    // 3. Hook initBattleData, enterBattle & pullBatteData: Luôn cho phép người chơi vào trận 0ms tức thì
                     const origInitBattleData = bmv.prototype.initBattleData;
                     if (origInitBattleData && !bmv.prototype.__QA_INITBATTLE_HOOKED__) {
                         bmv.prototype.__QA_INITBATTLE_HOOKED__ = true;
@@ -4893,16 +4822,6 @@
                         bmv.prototype.__QA_ENTERBATTLE_HOOKED__ = true;
                         bmv.prototype.enterBattle = function () {
                             window.__BMV_INSTANCE__ = this;
-                            if (!bot.isAutoStageOn()) {
-                                this.isEnterGame = false;
-                                if (this.copyAnimState) {
-                                    this.copyAnimState.lockState = 6;
-                                    this.copyAnimState.stateUpdate = null;
-                                }
-                                const bfmInst = (gm && gm.BattleFastManager) || window.BattleFastManager;
-                                if (bfmInst) bfmInst.batteStatus = 6;
-                                return;
-                            }
                             return origEnterBattle.apply(this, arguments);
                         };
                     }
@@ -4912,16 +4831,6 @@
                         bmv.prototype.__QA_PULLBATTLE_HOOKED__ = true;
                         bmv.prototype.pullBatteData = function () {
                             window.__BMV_INSTANCE__ = this;
-                            const mm = window.ModelManager || (gm && gm.ModelManager);
-                            const hasHangup = !!(mm && mm.BattleModel && typeof mm.BattleModel.getHangupBattleInfo === "function" && mm.BattleModel.getHangupBattleInfo());
-                            if (!bot.isAutoStageOn() && window.__ENTER_GAME__ && hasHangup) {
-                                this.isEnterGame = false;
-                                if (this.copyAnimState) {
-                                    this.copyAnimState.lockState = 6;
-                                    this.copyAnimState.stateUpdate = null;
-                                }
-                                return;
-                            }
                             return origPullBattleData.apply(this, arguments);
                         };
                     }
@@ -4941,13 +4850,6 @@
                         cas.prototype.__QA_ENTERSTATE_HOOKED__ = true;
                         cas.prototype.onEnterState = function () {
                             window.__CAS_INSTANCE__ = this;
-                            if (!bot.isAutoStageOn()) {
-                                if (this.bindViewClass) this.bindViewClass.isEnterGame = false;
-                                if (this.lockState !== 6 && typeof this.onLockState === "function") {
-                                    return this.onLockState();
-                                }
-                                return;
-                            }
                             return origOnEnterState.apply(this, arguments);
                         };
                     }
@@ -4990,29 +4892,26 @@
                                 clearTimeout(this.__enterBattleTimer);
                                 this.__enterBattleTimer = null;
                             }
-                            // CHẶN TUYỆT ĐỐI NẾU KHÔNG BẬT AUTO ĐI ẢI
+                            // CHỈ TỰ ĐỘNG KHIÊU CHIẾN KHI BẬT AUTO ĐI ẢI
                             if (!bot.isAutoStageOn()) return;
 
                             const maxRetries = 10;
                             if ((bot.state.stageFailCount || 0) < maxRetries) {
                                 const self = this;
-                                // Giãn cách an toàn: sau khi thua 4.2s, bình thường 3.2s để Server đóng phiên trận cũ & tránh Error 66
-                                const delay = (bot.state.stageFailCount || 0) > 0 ? 4200 : 3200;
+                                const delay = (bot.state.stageFailCount || 0) > 0 ? 1500 : 500;
                                 let waits = 0;
                                 const tryEnter = function () {
                                     self.__enterBattleTimer = null;
-                                    // KIỂM TRA LẠI: NẾU TRONG LÚC CHỜ MÀ AUTO ĐI ẢI BỊ TẮT THÌ HỦY NGAY
                                     if (!bot.isAutoStageOn()) return;
                                     try {
                                         const now = Date.now();
-                                        // Đang trong giãn cách (trận khác vừa kết thúc) -> HẸN LẠI thay vì bỏ cuộc (tránh kẹt khóa ải vĩnh viễn)
-                                        if (bot.state.lastBattleEndTime && now < bot.state.lastBattleEndTime && waits < 20) {
+                                        if (bot.state.lastBattleEndTime && now < bot.state.lastBattleEndTime && waits < 10) {
                                             waits++;
-                                            self.__enterBattleTimer = setTimeout(tryEnter, Math.min(5000, bot.state.lastBattleEndTime - now + 300));
+                                            self.__enterBattleTimer = setTimeout(tryEnter, Math.max(100, bot.state.lastBattleEndTime - now + 50));
                                             return;
                                         }
                                         const bfmNow = (gm && gm.BattleFastManager) || window.BattleFastManager;
-                                        if (bfmNow && bfmNow.batteStatus !== 6) return; // Đã thoát trạng thái khóa
+                                        if (bfmNow && bfmNow.batteStatus !== 6) return;
                                         if ((bot.state.stageFailCount || 0) < maxRetries && self.bindViewClass && typeof self.bindViewClass.btn_enterBattle === "function") {
                                             const attempt = (bot.state.stageFailCount || 0) + 1;
                                             bot.log(`⚔️ Vượt Ải: Tự động vào trận khiêu chiến (Lần ${attempt}/${maxRetries})...`);
@@ -5025,15 +4924,11 @@
                         };
                     }
 
-                    // Giữ nguyên logic gốc của game cho onRequestWait (đóng trận cũ + kéo trận mới khi chờ quá lâu).
-                    // Đóng băng khi TẮT Vượt Ải hoặc khi Defeat Guard đã kích hoạt (thua >= 10 lần).
+                    // Giữ nguyên logic gốc của game cho onRequestWait (đóng trận cũ + kéo trận mới khi chờ quá lâu)
                     const origOnRequestWait = cas.prototype.onRequestWait;
                     if (origOnRequestWait && !cas.prototype.__QA_REQWAIT_HOOKED__) {
                         cas.prototype.__QA_REQWAIT_HOOKED__ = true;
                         cas.prototype.onRequestWait = function () {
-                            if (!bot.isAutoStageOn()) {
-                                return this.onLockState();
-                            }
                             origOnRequestWait.apply(this, arguments);
                             const nativeUpdate = this.stateUpdate;
                             const e = this;
@@ -5139,43 +5034,14 @@
                     }
                 }
 
-                // D. MainUIModel.prototype.islockBatteLevel - Kiểm soát Vượt Ải chính xác tuyệt đối theo nút bấm người dùng
+                // D. MainUIModel.prototype.islockBatteLevel: Không can thiệp, giữ nguyên logic gốc của game để người chơi bấm Khiêu Chiến luôn phản hồi ngay 0ms
                 const mum = (gm && gm.MainUIModel) || (window.ModelManager && window.ModelManager.MainUIModel);
                 const mumProto = mum && (mum.prototype || Object.getPrototypeOf(mum));
                 if (mumProto && !mumProto.__QA_LOCK_HOOKED__) {
                     mumProto.__QA_LOCK_HOOKED__ = true;
-                    mumProto.islockBatteLevel = function (e) {
-                        const autoStageOn = bot.isAutoStageOn();
-                        if (!autoStageOn) {
-                            // KHI TẮT VƯỢT ẢI TRONG BOT:
-                            // Khóa tuyệt đối mọi đợt (Đợt 1..5 và Boss), không cho Cocos tự động đánh hay đẩy ải ngầm
-                            return true;
-                        }
-                        // KHI BẬT VƯỢT ẢI TRONG BOT:
-                        // Defeat Guard: Nếu đã thua liên tục >= 10 lần thì khóa lại tạm nghỉ để tránh spam lỗi 66
-                        if ((bot.state.stageFailCount || 0) >= 10) {
-                            return true;
-                        }
-                        // Đang bật Vượt Ải và chưa chạm mốc Defeat Guard -> Cho phép vào trận tự động
-                        return false;
-                    };
                 }
 
-                // Đảm bảo nếu đang TẮT Vượt Ải thì khóa an toàn BattleMainCopyView sau khi đã vào game
-                if (!bot.isAutoStageOn() && window.__ENTER_GAME__) {
-                    try {
-                        const vmNow = bot.getViewManager();
-                        const mainUINow = vmNow && typeof vmNow.getView === "function" && (vmNow.getView("MainUI_2025View") || vmNow.getView("MainUIView"));
-                        const bViewNow = window.__BMV_INSTANCE__ || (mainUINow && mainUINow.ctlView && (mainUINow.ctlView["BattleMainCopyView"] || (mainUINow.loadBatteViewName && mainUINow.ctlView[mainUINow.loadBatteViewName])));
-                        if (bViewNow && bViewNow.copyAnimState) {
-                            bViewNow.isEnterGame = false;
-                            bViewNow.copyAnimState.lockState = 6;
-                            bViewNow.copyAnimState.stateUpdate = null;
-                            const bfmNow = (gm && gm.BattleFastManager) || window.BattleFastManager;
-                            if (bfmNow) bfmNow.batteStatus = 6;
-                        }
-                    } catch (eLockNow) { }
-                }
+                // Không can thiệp ép trạng thái lockState = 6 để tránh làm đơ nút bấm của người chơi
 
                 // E. HeroDataItem - Mod Full Skin (Client-side Visual & Bag/Preview)
                 let hdiMod = null;
