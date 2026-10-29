@@ -726,6 +726,19 @@
             return Number((bot.stats && bot.stats.power) || 267000000);
         },
 
+                interruptibleRescueSleep: async function (ms) {
+            return new Promise(resolve => {
+                let timer = null;
+                const cleanup = () => {
+                    if (timer) clearTimeout(timer);
+                    bot.state.rescueWaitResolver = null;
+                    resolve();
+                };
+                bot.state.rescueWaitResolver = cleanup;
+                timer = setTimeout(cleanup, ms);
+            });
+        },
+
         extractHomesteadSosRid: function (mItem) {
             if (!mItem) return 0;
             try {
@@ -8858,7 +8871,7 @@
                 }
             };
 
-            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 250) => {
+            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 500) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
                 const prevFirstRid = (hl.otherHostList && hl.otherHostList[0]) ? getHouseRid(hl.otherHostList[0]) : 0;
@@ -9334,10 +9347,13 @@
                     bot.hookBattleController();
                 }
 
-                const hostList = await waitRefreshHostList(true, 180);
+                const hostList = await waitRefreshHostList(true, 500);
                 if (Array.isArray(hostList) && hostList.length > 0) {
-                    // 1. Lọc các nhà hợp lệ (không phải của mình, không trong cooldown bỏ qua)
-                    const candidateHouses = [];
+                    // 1. Phân loại chuẩn xác theo cờ _de_res trong giao thức HostHostListSc:
+                    // _de_res === 1: Nhà ĐANG BỐC LỬA (có kẻ địch chiếm đóng thật sự - showFireEffect)
+                    // _de_res === 2: Nhà bị chiếm đóng / kiệt quệ
+                    // _de_res === 0: Nhà 100% YÊN BÌNH, KHÔNG CÓ CƯỚP (robRid = 0, robSec = 0)
+                    const burningHouses = [];
                     for (let hIdx = 0; hIdx < hostList.length; hIdx++) {
                         const house = hostList[hIdx];
                         if (!house) continue;
@@ -9347,38 +9363,38 @@
 
                         const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                         if (Date.now() < skipUntil) continue;
-                        candidateHouses.push(house);
-                    }
 
-                    // 2. Sắp xếp ưu tiên: Nhà bốc lửa (_de_res = 1) và nhà bị chiếm (_de_res = 2) lên đầu
-                    candidateHouses.sort((a, b) => {
-                        const da = Number(a._de_res !== undefined ? a._de_res : 0);
-                        const db = Number(b._de_res !== undefined ? b._de_res : 0);
-                        return db - da;
-                    });
-
-                    // 3. PIPELINING SONG SONG: Gửi trước HostViewCs cho toàn bộ các nhà hợp lệ trong danh sách
-                    candidateHouses.forEach(h => {
-                        const r = getHouseRid(h);
-                        if (r) requestViewHome(r);
-                    });
-
-                    // Đệm nhẹ 80ms để server nạp các gói HostViewSc vào bộ nhớ đệm __HOST_VIEW_DATA_MAP__
-                    if (candidateHouses.length > 0) {
-                        await bot.sleep(80);
-                    }
-
-                    // 4. Lần lượt kiểm tra chi tiết và giải cứu ngay khi phát hiện cướp
-                    for (let hIdx = 0; hIdx < candidateHouses.length; hIdx++) {
-                        const house = candidateHouses[hIdx];
-                        const targetRid = getHouseRid(house);
                         const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
-                        const houseName = getHouseName(house, targetRid);
-
-                        const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : (deRes === 2 ? "Hàng Xóm Bị Chiếm Đóng" : "Quét Hàng Xóm");
-                        const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
-                        if (handled) return didSomething;
+                        // CHỈ THẨM ĐỊNH NHÀ BỐC LỬA / BỊ CHIẾM (_de_res === 1 || 2)
+                        // BỎ QUA 0ms TUYỆT ĐỐI NHÀ YÊN BÌNH (_de_res === 0) ĐỂ KHÔNG SPAM PACKET VÀ KHÔNG BỊ TRỄ
+                        if (deRes === 1 || deRes === 2) {
+                            burningHouses.push(house);
+                        }
                     }
+
+                    // 2. Nếu phát hiện có nhà bốc lửa: Giải cứu ngay lập tức!
+                    if (burningHouses.length > 0) {
+                        burningHouses.sort((a, b) => Number(b._de_res || 0) - Number(a._de_res || 0));
+
+                        for (let hIdx = 0; hIdx < burningHouses.length; hIdx++) {
+                            const house = burningHouses[hIdx];
+                            const targetRid = getHouseRid(house);
+                            const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
+                            const houseName = getHouseName(house, targetRid);
+
+                            const sourceTag = (deRes === 1) ? "Hàng Xóm Bốc Lửa" : "Hàng Xóm Bị Chiếm Đóng";
+                            const handled = await inspectAndRescueTarget(targetRid, houseName, sourceTag);
+                            if (handled) return didSomething;
+                        }
+                    } else {
+                        // 3. Nếu toàn bộ 10 nhà đều yên bình (_de_res === 0):
+                        // Nghỉ một nhịp nhẹ 800ms - 1200ms (chuẩn tốc độ người chơi thật làm mới danh sách)
+                        // Giúp server ghép cặp cụm người chơi mới và giải phóng hoàn toàn socket.
+                        // ĐẶC BIỆT: Tự động ngắt quãng trong 0ms nếu có tín hiệu Cầu Cứu từ Chat Realtime!
+                        await bot.interruptibleRescueSleep(1000);
+                    }
+                } else {
+                    await bot.interruptibleRescueSleep(1000);
                 }
 
                 if (bot.canDo("rescue_scan_status_log", 60)) {
