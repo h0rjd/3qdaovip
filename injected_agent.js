@@ -8871,7 +8871,7 @@
                 }
             };
 
-            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 500) => {
+            const waitRefreshHostList = async (isRefresh = true, maxWaitMs = 1200) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
                 const prevFirstRid = (hl.otherHostList && hl.otherHostList[0]) ? getHouseRid(hl.otherHostList[0]) : 0;
@@ -8879,19 +8879,23 @@
                 requestRefreshHostList(isRefresh);
                 const start = Date.now();
                 while (Date.now() - start < maxWaitMs) {
-                    await bot.sleep(15);
+                    await bot.sleep(25);
                     if ((window.__LAST_HOST_LIST_SC_TIME__ || 0) >= reqTime && hl.otherHostList && hl.otherHostList.length > 0) {
                         return hl.otherHostList;
                     }
                     if (hl.otherHostList && hl.otherHostList.length > 0) {
                         const curFirstRid = getHouseRid(hl.otherHostList[0]);
-                        if (!isRefresh || curFirstRid !== prevFirstRid) {
+                        if (isRefresh && curFirstRid !== prevFirstRid) {
                             return hl.otherHostList;
                         }
                     }
                 }
-                return hl.otherHostList;
+                if ((window.__LAST_HOST_LIST_SC_TIME__ || 0) >= reqTime && hl.otherHostList && hl.otherHostList.length > 0) {
+                    return hl.otherHostList;
+                }
+                return null;
             };
+
 
             const requestViewHome = (rid) => {
                 const targetId = Number(rid);
@@ -8906,7 +8910,26 @@
                 }
             };
 
-            const waitViewHomeData = async (rid, maxWaitMs = 650) => {
+            if (!window.__UNIQUE_SCANNED_HOUSES__) window.__UNIQUE_SCANNED_HOUSES__ = new Map();
+            const recordUniqueScan = (rid) => {
+                const numRid = Number(rid);
+                if (!numRid || numRid <= 0 || numRid === myRid) return false;
+                const now = Date.now();
+                if (window.__UNIQUE_SCANNED_HOUSES__.size > 2000) {
+                    for (let [k, ts] of window.__UNIQUE_SCANNED_HOUSES__.entries()) {
+                        if (now - ts > 300000) window.__UNIQUE_SCANNED_HOUSES__.delete(k);
+                    }
+                }
+                const lastTs = window.__UNIQUE_SCANNED_HOUSES__.get(numRid) || 0;
+                if (now - lastTs > 60000) {
+                    window.__UNIQUE_SCANNED_HOUSES__.set(numRid, now);
+                    bot.state.totalRescueScanned++;
+                    return true;
+                }
+                return false;
+            };
+
+            const waitViewHomeData = async (rid, maxWaitMs = 1200) => {
                 if (bot.isBattling() || (Date.now() - (window.__LAST_OTHER_WAR_TIME__ || 0) < 1500)) return null;
                 if (nw && (nw.isReconnecting || nw._needFullRelogin || (typeof nw.isClose === "function" && nw.isClose()))) return null;
 
@@ -8935,7 +8958,7 @@
                     if (oh && getHouseRid(oh) === Number(rid)) {
                         return oh;
                     }
-                    await bot.sleep(15);
+                    await bot.sleep(25);
                 }
                 const finalOh = (window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[rid])
                     ? window.__HOST_VIEW_DATA_MAP__[rid].data
@@ -9280,51 +9303,128 @@
                 } catch (eChatScan) { }
 
                 // ==========================================
-                // KÊNH 2: TUẦN TRA THÀNH VIÊN BANG HỘI (Guild Patrol)
+                // KÊNH 2: TUẦN TRA KHO MỤC TIÊU TÍCH CỰC (Active Targets Pool: Bang Hội + BXH + Bạn Bè + Nhật Ký)
                 // ==========================================
                 try {
-                    const gmModel = mm.GuildModel;
-                    if (gmModel) {
-                        const mList = (gmModel.guildInfo && Array.isArray(gmModel.guildInfo._member_list))
-                            ? gmModel.guildInfo._member_list
-                            : null;
+                    // Định kỳ yêu cầu cập nhật BXH (Lực Chiến 1001, Tháp 3001) và Nhật Ký Cướp (mỗi 5 phút)
+                    const rnm = mm.RankNewModel;
+                    if (rnm && typeof rnm.reqRank === "function" && bot.canDo("rescue_req_rankings_pool", 300)) {
+                        bot.markDone("rescue_req_rankings_pool");
+                        rnm.reqRank(1001);
+                        setTimeout(() => { try { rnm.reqRank(3001); } catch (e) { } }, 1000);
+                    }
+                    if (hl && typeof hl.reqLootLog === "function" && bot.canDo("rescue_req_loot_log_pool", 300)) {
+                        bot.markDone("rescue_req_loot_log_pool");
+                        hl.reqLootLog();
+                    }
 
-                        if (!mList || mList.length === 0) {
-                            if (bot.canDo("req_guild_info_patrol", 20)) {
-                                bot.markDone("req_guild_info_patrol");
-                                if (typeof gmModel.requestGuildInfo === "function") {
-                                    const gId = (gmModel.guildInfo && gmModel.guildInfo._id) || (mm.PlayerModel && mm.PlayerModel.getGuildId ? mm.PlayerModel.getGuildId() : 0);
-                                    gmModel.requestGuildInfo(gId || 0);
-                                } else if (gm.GuildInfoCs && gm.RPCReq) {
-                                    gm.RPCReq.send(gm.GuildInfoCs.protocol, { _id: 0 });
-                                }
+                    // Hàm gom tất cả mục tiêu tiềm năng nhất máy chủ vào hàng đợi tuần tra
+                    const updateActivePatrolPool = () => {
+                        if (!bot.state.activePatrolPool) bot.state.activePatrolPool = [];
+                        if (!bot.state.activePatrolMap) bot.state.activePatrolMap = {};
+
+                        const addTarget = (rid, name, source) => {
+                            const targetId = Number(rid);
+                            if (!targetId || targetId <= 0 || targetId === myRid) return;
+                            if (!bot.state.activePatrolMap[targetId]) {
+                                bot.state.activePatrolMap[targetId] = true;
+                                bot.state.activePatrolPool.push({ rid: targetId, name: name || `ID ${targetId}`, source: source });
                             }
-                        } else {
-                            if (bot.state.guildPatrolIdx === undefined) bot.state.guildPatrolIdx = 0;
-                            const totalMembers = mList.length;
-                            for (let pStep = 0; pStep < 2; pStep++) {
-                                const mItem = mList[bot.state.guildPatrolIdx % totalMembers];
-                                bot.state.guildPatrolIdx++;
-                                if (!mItem) continue;
-                                const mShows = mItem._shows || mItem._role_show;
+                        };
+
+                        // 1. Anh em Bang Hội (Guild Roster - 100% người chơi cùng phe)
+                        const gmModel = mm.GuildModel;
+                        if (gmModel && gmModel.guildInfo && Array.isArray(gmModel.guildInfo._member_list)) {
+                            gmModel.guildInfo._member_list.forEach(m => {
+                                if (!m) return;
+                                const mShows = m._shows || m._role_show;
                                 const mRid = mShows ? Number(mShows.getRoleId ? mShows.getRoleId() : (mShows._rid || mShows.rid || 0)) : 0;
                                 const mName = mShows ? ((mShows.getName ? mShows.getName() : (mShows._name || mShows.name)) || `ID ${mRid}`) : `ID ${mRid}`;
+                                addTarget(mRid, mName, "Tuần Tra Bang");
+                            });
+                        }
 
-                                if (mRid > 0 && mRid !== myRid) {
-                                    const skipUntil = bot.state.skipRescueHouseUntil[mRid] || 0;
-                                    if (Date.now() >= skipUntil) {
-                                        const handled = await inspectAndRescueTarget(mRid, mName, "Tuần Tra Bang Hội");
-                                        if (handled) return didSomething;
-                                        break; // Chỉ kiểm tra 1 thành viên mỗi chu kỳ để giữ tốc độ cao
-                                    }
+                        // 2. Bạn Bè (Friend List)
+                        const fm = mm.FriendModel;
+                        if (fm && typeof fm.getRelationTabRoleList === "function") {
+                            try {
+                                const fList = fm.getRelationTabRoleList(0, 5);
+                                if (Array.isArray(fList)) {
+                                    fList.forEach(f => {
+                                        const r = f && f.roleInfo;
+                                        if (!r) return;
+                                        const fRid = Number(r.getRoleId ? r.getRoleId() : (r._rid || r.rid || 0));
+                                        const fName = (r.getName ? r.getName() : (r._name || r.name)) || `ID ${fRid}`;
+                                        addTarget(fRid, fName, "Tuần Tra Bạn Bè");
+                                    });
                                 }
+                            } catch (eF) { }
+                        }
+
+                        // 3. Top Bảng Xếp Hạng Server (Rankings: Lực Chiến 1001, Tháp 3001, v.v.)
+                        if (rnm && rnm.rankInfo) {
+                            const rankKeys = [1001, 3001, 5001, 5002, 5003, 5004, 5005];
+                            rankKeys.forEach(rType => {
+                                const info = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || rnm.rankInfo[rType];
+                                if (info && Array.isArray(info._ranks)) {
+                                    info._ranks.forEach(it => {
+                                        if (!it || !it._role_show) return;
+                                        const rs = it._role_show;
+                                        const rRid = Number(rs._rid || rs.rid || rs._role_id || 0);
+                                        const rName = rs._name || rs.name || `ID ${rRid}`;
+                                        addTarget(rRid, rName, "Tuần Tra BXH");
+                                    });
+                                }
+                            });
+                        }
+
+                        // 4. Kẻ Cướp từ Nhật Ký Gia Viên (HostRobLogCs)
+                        if (hl && Array.isArray(hl._rob_logs)) {
+                            hl._rob_logs.forEach(log => {
+                                if (!log || !log._role_show) return;
+                                const rs = log._role_show;
+                                const rRid = Number(rs._rid || rs.rid || (rs.getRoleId ? rs.getRoleId() : 0));
+                                const rName = (rs.getName ? rs.getName() : (rs._name || rs.name)) || `ID ${rRid}`;
+                                addTarget(rRid, rName, "Tuần Tra Nhật Ký");
+                            });
+                        }
+                    };
+
+                    updateActivePatrolPool();
+
+                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0) {
+                        if (bot.state.activePatrolIdx === undefined) bot.state.activePatrolIdx = 0;
+                        const poolLen = bot.state.activePatrolPool.length;
+                        for (let pStep = 0; pStep < 2; pStep++) {
+                            const target = bot.state.activePatrolPool[bot.state.activePatrolIdx % poolLen];
+                            bot.state.activePatrolIdx++;
+                            if (!target || !target.rid || target.rid === myRid) continue;
+
+                            const skipUntil = bot.state.skipRescueHouseUntil[target.rid] || 0;
+                            if (Date.now() >= skipUntil) {
+                                recordUniqueScan(target.rid);
+                                const handled = await inspectAndRescueTarget(target.rid, target.name, target.source || "Tuần Tra Tích Cực");
+                                if (handled) return didSomething;
+                                break;
+                            }
+                        }
+                    } else {
+                        // Nạp lại dữ liệu Bang nếu chưa có
+                        const gmModel = mm.GuildModel;
+                        if (gmModel && (!gmModel.guildInfo || !gmModel.guildInfo._member_list) && bot.canDo("req_guild_info_patrol", 20)) {
+                            bot.markDone("req_guild_info_patrol");
+                            if (typeof gmModel.requestGuildInfo === "function") {
+                                const gId = (gmModel.guildInfo && gmModel.guildInfo._id) || (mm.PlayerModel && mm.PlayerModel.getGuildId ? mm.PlayerModel.getGuildId() : 0);
+                                gmModel.requestGuildInfo(gId || 0);
+                            } else if (gm.GuildInfoCs && gm.RPCReq) {
+                                gm.RPCReq.send(gm.GuildInfoCs.protocol, { _id: 0 });
                             }
                         }
                     }
-                } catch (eGuildPatrol) { }
+                } catch (eActivePatrol) { }
 
                 // ==========================================
-                // KÊNH 3: LỌC SIÊU TỐC HÀNG XÓM BỐC LỬA (_de_res === 1)
+                // KÊNH 3: LỌC SIÊU TỐC HÀNG XÓM BỐC LỬA (_de_res === 1 || 2)
                 // Bỏ qua 0ms mọi nhà _de_res === 0 (nhà yên bình, không có cướp)
                 // ==========================================
                 // Cơ chế Hạ Lực Chiến Dò Nhà (Facebook Trick):
@@ -9347,7 +9447,7 @@
                     bot.hookBattleController();
                 }
 
-                const hostList = await waitRefreshHostList(true, 500);
+                const hostList = await waitRefreshHostList(true, 1200);
                 if (Array.isArray(hostList) && hostList.length > 0) {
                     // 1. Phân loại chuẩn xác theo cờ _de_res trong giao thức HostHostListSc:
                     // _de_res === 1: Nhà ĐANG BỐC LỬA (có kẻ địch chiếm đóng thật sự - showFireEffect)
@@ -9357,9 +9457,10 @@
                     for (let hIdx = 0; hIdx < hostList.length; hIdx++) {
                         const house = hostList[hIdx];
                         if (!house) continue;
-                        bot.state.totalRescueScanned++;
                         const targetRid = getHouseRid(house);
                         if (!targetRid || targetRid === myRid) continue;
+
+                        recordUniqueScan(targetRid);
 
                         const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                         if (Date.now() < skipUntil) continue;
