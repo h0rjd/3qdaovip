@@ -8969,10 +8969,27 @@
                 return null;
             };
 
-            // Hàm kiểm tra chi tiết & đánh giải cứu 1 mục tiêu
-            const inspectAndRescueTarget = async (targetRid, fallbackName, sourceLabel) => {
-                if (!targetRid || Number(targetRid) <= 0 || Number(targetRid) === myRid) return false;
-                const otherHome = await waitViewHomeData(targetRid, 650);
+            // Hàm kiểm tra chi tiết & đánh giải cứu 1 mục tiêu (hỗ trợ cả giải cứu hàng xóm & tự vệ nhà mình)
+            const inspectAndRescueTarget = async (targetRid, fallbackName, sourceLabel, isSelfDefense = false) => {
+                if (!targetRid || Number(targetRid) <= 0 || (!isSelfDefense && Number(targetRid) === myRid)) return false;
+
+                let otherHome = null;
+                if (isSelfDefense) {
+                    const myLog = hl.newEstLog;
+                    if (myLog && myLog._role_show) {
+                        const sInfo = myLog._role_show;
+                        const sRid = Number(sInfo.getRoleId ? sInfo.getRoleId() : (sInfo._rid || sInfo.rid || 0));
+                        const sName = (sInfo.getName ? sInfo.getName() : sInfo._name) || "Kẻ xâm nhập";
+                        otherHome = {
+                            _role_show: (mm.PlayerModel ? mm.PlayerModel.getRoleInfo() : { _rid: myRid }),
+                            _rob_rid: sRid,
+                            _rob_sec: myLog._rob_sec || 0,
+                            _rob_name: sName
+                        };
+                    }
+                } else {
+                    otherHome = await waitViewHomeData(targetRid, 1200);
+                }
                 if (!otherHome) return false;
 
                 const viewedRid = getHouseRid(otherHome) || Number(targetRid);
@@ -8981,7 +8998,7 @@
                     : Math.floor(Date.now() / 1000);
                 const robRid = Number(otherHome._rob_rid || 0);
                 const robSec = Number(otherHome._rob_sec || 0);
-                const victimName = getHouseName(otherHome, targetRid) || fallbackName || `ID ${targetRid}`;
+                const victimName = isSelfDefense ? "Gia Viên Của Tôi" : (getHouseName(otherHome, targetRid) || fallbackName || `ID ${targetRid}`);
                 const robberName = otherHome._rob_name || (robRid > 0 ? `Kẻ địch (ID: ${robRid})` : "Kẻ chiếm đóng");
 
                 if (robRid > 0 && robSec > 0 && curServerTime - robSec >= 21600) {
@@ -9012,16 +9029,7 @@
                     const victimPower = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(otherHome._role_show) : 0;
                     const myFullPower = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats.fullPower) || Number(bot.stats.power) || 260000000);
 
-                    // 1. Kiểm tra Lực Chiến của chủ nhà (Victim):
-                    // Nếu chủ nhà có LC lớn hơn 95% LC của mình, kẻ chiếm đóng họ chắc chắn rất mạnh -> Bỏ qua
-                    if (victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 0.95) {
-                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC lớn (${bot.formatNumber(victimPower)}) -> Kẻ cướp chắc chắn mạnh hơn LC của mình (${bot.formatNumber(myFullPower)}), bỏ qua để an toàn!`);
-                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
-                        bot.state.skipRescueReason[targetRid] = "victim_too_strong";
-                        return false;
-                    }
-
-                    // 2. Kiểm tra Lực Chiến của Kẻ Chiếm Đóng (Robber) qua QueryCs (11801) & HeroRivalCs (10334):
+                    // 1. Kiểm tra Lực Chiến của Kẻ Chiếm Đóng (Robber) qua QueryCs (11801) & HeroRivalCs (10334):
                     let robberPower = 0;
                     const cachedRobber = window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid];
                     if (cachedRobber && Date.now() - cachedRobber.time < 600000) {
@@ -9041,7 +9049,7 @@
                                 rpc.send(rivalProto, { _rid: robRid, _type: 106, _id: 2 });
                             }
                             const rWaitStart = Date.now();
-                            while (Date.now() - rWaitStart < 250) {
+                            while (Date.now() - rWaitStart < 300) {
                                 if (window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid]) {
                                     robberPower = window.__ROBBER_POWER_CACHE__[robRid].power;
                                     break;
@@ -9051,12 +9059,20 @@
                         } catch (eRival) { }
                     }
 
-                    // 3. Nếu xác định được LC kẻ cướp và LC kẻ cướp lớn hơn LC của mình -> BỎ QUA NGAY
+                    // 2. So sánh LC để đảm bảo tỷ lệ thắng 100%:
                     if (robberPower > 0 && myFullPower > 0 && robberPower > myFullPower) {
                         bot.log(`🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [${robberName}] có LC ${bot.formatNumber(robberPower)} > LC của mình (${bot.formatNumber(myFullPower)}) -> Bỏ qua để giữ tỷ lệ thắng 100%!`);
                         bot.state.failedRescueRids[robRid] = Date.now();
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
                         bot.state.skipRescueReason[targetRid] = "robber_too_strong";
+                        return false;
+                    }
+
+                    // Nếu chưa rõ LC kẻ cướp nhưng chủ nhà có LC quá cao (> 125% LC mình) -> Kẻ cướp có thể rất mạnh -> Bỏ qua
+                    if (robberPower === 0 && victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 1.25) {
+                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC rất lớn (${bot.formatNumber(victimPower)} > 125% LC mình) -> Kẻ cướp có thể mạnh hơn LC của mình (${bot.formatNumber(myFullPower)}), bỏ qua để an toàn!`);
+                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
+                        bot.state.skipRescueReason[targetRid] = "victim_too_strong";
                         return false;
                     }
 
@@ -9249,6 +9265,25 @@
 
             try {
                 // ==========================================
+                // KÊNH 0: TỰ VỆ GIA VIÊN CỦA BẢN THÂN (Nếu bị cướp chiếm đóng -> Đánh đuổi ngay)
+                // ==========================================
+                try {
+                    const myLog = hl.newEstLog;
+                    if (myLog && myLog._type === 1 && Array.isArray(myLog._rewards) && myLog._rewards.length > 0) {
+                        const robTime = Number(myLog._rob_sec || 0);
+                        if (robTime > 0 && (sTime - robTime < lootShowTime)) {
+                            const myRobberRid = myLog._role_show && Number(myLog._role_show.getRoleId ? myLog._role_show.getRoleId() : (myLog._role_show._rid || myLog._role_show.rid || 0));
+                            const myRobberName = (myLog._role_show && (myLog._role_show.getName ? myLog._role_show.getName() : (myLog._role_show._name || myLog._role_show.name))) || "Kẻ xâm nhập";
+                            if (myRobberRid > 0 && myRobberRid !== myRid && Date.now() >= (bot.state.skipRescueHouseUntil[myRid] || 0)) {
+                                bot.log(`🛡️ [Farm KNB • Tự Vệ] Gia viên của bạn đang bị [${myRobberName}] (ID: ${myRobberRid}) chiếm đóng! Đang khởi nghĩa đánh đuổi...`);
+                                const handledSelf = await inspectAndRescueTarget(myRid, "Gia Viên Của Tôi", "Tự Vệ Gia Viên", true);
+                                if (handledSelf) return didSomething;
+                            }
+                        }
+                    }
+                } catch (eSelf) { }
+
+                // ==========================================
                 // KÊNH 1: XỬ LÝ HÀNG ĐỢI CẦU CỨU TỪ CHAT (Ưu tiên số 1)
                 // ==========================================
                 if (bot.state.priorityRescueQueue.length > 0) {
@@ -9306,12 +9341,19 @@
                 // KÊNH 2: TUẦN TRA KHO MỤC TIÊU TÍCH CỰC (Active Targets Pool: Bang Hội + BXH + Bạn Bè + Nhật Ký)
                 // ==========================================
                 try {
-                    // Định kỳ yêu cầu cập nhật BXH (Lực Chiến 1001, Tháp 3001) và Nhật Ký Cướp (mỗi 5 phút)
+                    // Định kỳ yêu cầu cập nhật BXH (Lực Chiến 1001, Vượt Ải 2001, Tháp 3001...), Bạn Bè và Nhật Ký Cướp (mỗi 5 phút)
                     const rnm = mm.RankNewModel;
                     if (rnm && typeof rnm.reqRank === "function" && bot.canDo("rescue_req_rankings_pool", 300)) {
                         bot.markDone("rescue_req_rankings_pool");
-                        rnm.reqRank(1001);
-                        setTimeout(() => { try { rnm.reqRank(3001); } catch (e) { } }, 1000);
+                        const ranksToReq = [1001, 2001, 3001, 4001, 5001, 5002, 5003];
+                        ranksToReq.forEach((rId, idx) => {
+                            setTimeout(() => { try { rnm.reqRank(rId); } catch (e) { } }, idx * 600);
+                        });
+                    }
+                    const fmFriend = mm.FriendModel;
+                    if (fmFriend && typeof fmFriend.requestRelationTab === "function" && bot.canDo("rescue_req_friend_tab", 300)) {
+                        bot.markDone("rescue_req_friend_tab");
+                        fmFriend.requestRelationTab(0, 0);
                     }
                     if (hl && typeof hl.reqLootLog === "function" && bot.canDo("rescue_req_loot_log_pool", 300)) {
                         bot.markDone("rescue_req_loot_log_pool");
@@ -9395,7 +9437,8 @@
                     if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0) {
                         if (bot.state.activePatrolIdx === undefined) bot.state.activePatrolIdx = 0;
                         const poolLen = bot.state.activePatrolPool.length;
-                        for (let pStep = 0; pStep < 2; pStep++) {
+                        let inspectedInPool = 0;
+                        for (let pStep = 0; pStep < Math.min(poolLen, 20) && inspectedInPool < 2; pStep++) {
                             const target = bot.state.activePatrolPool[bot.state.activePatrolIdx % poolLen];
                             bot.state.activePatrolIdx++;
                             if (!target || !target.rid || target.rid === myRid) continue;
@@ -9403,9 +9446,9 @@
                             const skipUntil = bot.state.skipRescueHouseUntil[target.rid] || 0;
                             if (Date.now() >= skipUntil) {
                                 recordUniqueScan(target.rid);
+                                inspectedInPool++;
                                 const handled = await inspectAndRescueTarget(target.rid, target.name, target.source || "Tuần Tra Tích Cực");
                                 if (handled) return didSomething;
-                                break;
                             }
                         }
                     } else {
