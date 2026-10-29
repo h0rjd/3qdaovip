@@ -1041,10 +1041,6 @@
                 if (typeof vm.isOpenView === "function" && (vm.isOpenView("BattledataView") || vm.isOpenView("PanelBattleData"))) {
                     return;
                 }
-                // 2. Tuyệt đối KHÔNG tự động đóng BattleResultView nếu người chơi đang mở giao diện Tháp (ClimbtowerView)
-                if (typeof vm.isOpenView === "function" && vm.isOpenView("ClimbtowerView")) {
-                    return;
-                }
                 if (typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
                     const brv = typeof vm.getView === "function" ? vm.getView("BattleResultView") : null;
                     if (brv) {
@@ -1064,7 +1060,7 @@
                         }
                     }
                 }
-                // 3. Tự động dọn dẹp BattleResultView nếu đang bật skip_battle hoặc đang chạy auto
+                // 2. Tự động dọn dẹp BattleResultView nếu đang bật skip_battle hoặc đang chạy auto
                 if (!bot.isAutoStageOn() && !bot.state.isAutoTowerActive && !(bot.settings && bot.settings.skip_battle)) {
                     return;
                 }
@@ -1075,8 +1071,6 @@
                         // Chỉ giữ lại DefJz (9 - Tần Lĩnh) để người chơi tự chọn buff/lõi
                         const isDefJz = (Number(bType) === 9);
                         if (isDefJz) return;
-                        // Nếu là trận Tháp (2 hoặc 12..16) và người chơi đang trên màn hình Tháp -> Giữ nguyên để xem data
-                        if ((bType === 2 || (bType >= 12 && bType <= 16)) && vm.isOpenView("ClimbtowerView")) return;
 
                         if (brv._curPageClass && typeof brv._curPageClass.okClick === "function") {
                             brv._curPageClass.okClick();
@@ -3242,7 +3236,7 @@
                     }
                 } catch (e) { }
 
-                // Hook 2.66: ClimbtowerView - Chống kẹt trạng thái "Đang chiến đấu" (com_is_battle) và khôi phục nút Khiêu chiến
+                // Hook 2.66: ClimbtowerView - Triệt tiêu độ trễ, chống kẹt "Đang chiến đấu" và tăng tốc leo Tháp tức thì
                 try {
                     let ctvMod = null;
                     if (typeof window.__require === "function") {
@@ -3251,39 +3245,77 @@
                     const ClimbtowerViewClass = (ctvMod && (ctvMod.ClimbtowerView || ctvMod.default || ctvMod)) || (gm && gm.ClimbtowerView) || window.ClimbtowerView;
                     if (ClimbtowerViewClass && ClimbtowerViewClass.prototype && !ClimbtowerViewClass.prototype.__QA_CLEAN_HOOKED__) {
                         ClimbtowerViewClass.prototype.__QA_CLEAN_HOOKED__ = true;
+
                         const origCheckInBattle = ClimbtowerViewClass.prototype.checkIsInbattle;
                         ClimbtowerViewClass.prototype.checkIsInbattle = function () {
                             try {
-                                const fm = window.FightManager || (gm && gm.FightManager);
                                 const vm = window.ViewManager || (gm && gm.ViewManager);
-                                if (fm && typeof fm.haveFight === "function" && fm.haveFight(2)) {
-                                    const isBattleOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleBeginView");
-                                    if (!isBattleOpen && typeof fm.removeFight === "function") {
-                                        fm.removeFight(2);
+                                const isBattleOpen = vm && typeof vm.isOpenView === "function" && (vm.isOpenView("BattleBeginView") || vm.isOpenView("BatteJingzhouView"));
+                                if (!isBattleOpen) {
+                                    const fm = window.FightManager || (gm && gm.FightManager);
+                                    if (fm) {
+                                        if (typeof fm.removeFight === "function" && fm.haveFight && fm.haveFight(2)) {
+                                            fm.removeFight(2);
+                                        }
+                                        if (fm.fightList && fm.fightList[2]) delete fm.fightList[2];
                                     }
+                                    if (this._isBattleTip) this._isBattleTip.setVisible(false);
+                                    if (this.btn_fight) {
+                                        this.btn_fight.setVisible(true);
+                                        this.btn_fight.setTouchable(true);
+                                    }
+                                    return false;
                                 }
                             } catch (err) { }
                             if (origCheckInBattle) return origCheckInBattle.apply(this, arguments);
+                            return false;
                         };
 
                         const origFight = ClimbtowerViewClass.prototype.fight;
                         ClimbtowerViewClass.prototype.fight = function () {
                             try {
-                                const fm = window.FightManager || (gm && gm.FightManager);
                                 const vm = window.ViewManager || (gm && gm.ViewManager);
-                                if (fm && typeof fm.haveFight === "function" && fm.haveFight(2)) {
-                                    const isBattleOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleBeginView");
-                                    if (!isBattleOpen && typeof fm.removeFight === "function") {
+                                const fm = window.FightManager || (gm && gm.FightManager);
+                                const isBattleOpen = vm && typeof vm.isOpenView === "function" && (vm.isOpenView("BattleBeginView") || vm.isOpenView("BatteJingzhouView"));
+                                if (!isBattleOpen && fm) {
+                                    if (typeof fm.removeFight === "function" && fm.haveFight && fm.haveFight(2)) {
                                         fm.removeFight(2);
                                     }
+                                    if (fm.fightList && fm.fightList[2]) delete fm.fightList[2];
+                                }
+                                if (this._isBattleTip) this._isBattleTip.setVisible(false);
+                                if (this.btn_fight) {
+                                    this.btn_fight.setVisible(true);
+                                    this.btn_fight.setTouchable(true);
                                 }
                             } catch (err) { }
                             const now = Date.now();
-                            if (now - (this.__lastFightClickTime || 0) < 600) {
+                            if (now - (this.__lastFightClickTime || 0) < 100) {
                                 return;
                             }
                             this.__lastFightClickTime = now;
                             if (origFight) return origFight.apply(this, arguments);
+                        };
+
+                        const origShowView = ClimbtowerViewClass.prototype.showView;
+                        ClimbtowerViewClass.prototype.showView = function () {
+                            if (origShowView) origShowView.apply(this, arguments);
+                            try {
+                                const fm = window.FightManager || (gm && gm.FightManager);
+                                const vm = window.ViewManager || (gm && gm.ViewManager);
+                                const isBattleOpen = vm && typeof vm.isOpenView === "function" && (vm.isOpenView("BattleBeginView") || vm.isOpenView("BatteJingzhouView"));
+                                if (!isBattleOpen && fm) {
+                                    if (typeof fm.removeFight === "function" && fm.haveFight && fm.haveFight(2)) {
+                                        fm.removeFight(2);
+                                    }
+                                    if (fm.fightList && fm.fightList[2]) delete fm.fightList[2];
+                                }
+                                if (this._isBattleTip) this._isBattleTip.setVisible(false);
+                                if (this.btn_fight) {
+                                    this.btn_fight.setVisible(true);
+                                    this.btn_fight.setTouchable(true);
+                                }
+                            } catch (e) { }
                         };
                     }
                 } catch (e) { }
@@ -4007,6 +4039,13 @@
                                 }
                                 this.battleData = null;
                                 if (this._args) {
+                                    const aType = this._args.arrayType || (this._args.battleData && this._args.battleData._type);
+                                    if (aType === 2 || (aType >= 12 && aType <= 16)) {
+                                        const mmTower = window.ModelManager || (gm && gm.ModelManager);
+                                        if (mmTower && mmTower.RewardModel && typeof mmTower.RewardModel.setBackCall === "function") {
+                                            try { mmTower.RewardModel.setBackCall(this._args); } catch (eBack) { }
+                                        }
+                                    }
                                     this._args.battleData = null;
                                     this._args.battleFunc = null;
                                     this._args = null;
@@ -4017,6 +4056,21 @@
                                 }
                                 if (mm && mm.TaskModel && typeof mm.TaskModel.showNextPopup === "function") {
                                     mm.TaskModel.showNextPopup();
+                                }
+                                // Tự động làm mới UI Tháp Thông Thiên ngay khi đóng kết quả trận đấu
+                                const curVm = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
+                                if (curVm && typeof curVm.isOpenView === "function" && curVm.isOpenView("ClimbtowerView")) {
+                                    const ctv = typeof curVm.getView === "function" ? curVm.getView("ClimbtowerView") : null;
+                                    if (ctv) {
+                                        if (ctv._isBattleTip) ctv._isBattleTip.setVisible(false);
+                                        if (ctv.btn_fight) {
+                                            ctv.btn_fight.setVisible(true);
+                                            ctv.btn_fight.setTouchable(true);
+                                        }
+                                        if (typeof ctv.refreshUI === "function") {
+                                            try { ctv.refreshUI(); } catch (eRef) { }
+                                        }
+                                    }
                                 }
                             } catch (eExit) {
                                 console.warn("[BattleResultView _exit Guard]", eExit);
@@ -4064,7 +4118,7 @@
                                     this.view.__QA_CLICK_DISMISS__ = true;
                                     this.view.addClickListener(() => {
                                         bot.state.viewingBattleData = false;
-                                        if (this._curPageClass && typeof this._curPageClass.okClick === "function") {
+                                        if (this._curPageClass && typeof self._curPageClass.okClick === "function") {
                                             this._curPageClass.okClick();
                                         } else {
                                             this.closeView();
@@ -4090,36 +4144,21 @@
                                         if (bot.isViewVisible(self)) {
                                             if (self._curPageClass && typeof self._curPageClass.okClick === "function") {
                                                 self._curPageClass.okClick();
-                                            } else if (typeof self.closeView === "function") {
-                                                self.closeView();
+                                            } else {
+                                                const mmTower = window.ModelManager || (gm && gm.ModelManager);
+                                                const args = (self._curPageClass && self._curPageClass._args) || self._args;
+                                                if (args && (args.arrayType === 2 || (args.arrayType >= 12 && args.arrayType <= 16) || (args.battleData && args.battleData._type === 2))) {
+                                                    if (mmTower && mmTower.RewardModel && typeof mmTower.RewardModel.setBackCall === "function") {
+                                                        try { mmTower.RewardModel.setBackCall(args); } catch (eCall) { }
+                                                    }
+                                                }
+                                                if (typeof self.closeView === "function") {
+                                                    self.closeView();
+                                                }
                                             }
                                         }
                                     } catch (e) { }
                                 }, 300);
-                            }
-                            const vm = bot.getViewManager();
-                            const isTowerUIOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("ClimbtowerView");
-
-                            // Chỉ tự động đóng trễ nếu ĐANG CHẠY AUTO THÁP NGẦM và NGƯỜI CHƠI KHÔNG MỞ GIAO DIỆN THÁP và KHÔNG xem dữ liệu
-                            if (!isDefJz && !isTowerUIOpen && bot.state.towerInProgress && bot.state.isAutoTowerActive) {
-                                const self = this;
-                                setTimeout(() => {
-                                    try {
-                                        if (bot.state.viewingBattleData) return;
-                                        const curVm = bot.getViewManager();
-                                        if (curVm && typeof curVm.isOpenView === "function" && (curVm.isOpenView("BattledataView") || curVm.isOpenView("PanelBattleData") || curVm.isOpenView("ClimbtowerView"))) {
-                                            return;
-                                        }
-                                        if (bot.isViewVisible(self)) {
-                                            bot.log("⚔️ Tự động đóng bảng kết quả trận đấu (BattleResultView)");
-                                            if (self._curPageClass && typeof self._curPageClass.okClick === "function") {
-                                                self._curPageClass.okClick();
-                                            } else if (typeof self.closeView === "function") {
-                                                self.closeView();
-                                            }
-                                        }
-                                    } catch (e) { }
-                                }, 3000);
                             }
                         };
                     }
@@ -4288,7 +4327,7 @@
                         }
                     } catch (e) { }
 
-                    // Hook BattleTowerEx (Thắng Tháp Thông Thiên): Gán trực tiếp callback an toàn cho nút btn_ok ("Xác nhận")
+                    // Hook BattleTowerEx (Thắng Tháp Thông Thiên): Gán trực tiếp callback an toàn cho nút btn_ok ("Xác nhận") và định nghĩa okClick()
                     let bteMod = null;
                     if (typeof window.__require === "function") {
                         try { bteMod = window.__require("BattleTowerEx"); } catch (e) { }
@@ -4309,9 +4348,40 @@
                                 });
                             }
                         };
+                        BattleTowerExClass.prototype.okClick = function () {
+                            bot.state.viewingBattleData = false;
+                            try {
+                                const mm = window.ModelManager || (gm && gm.ModelManager);
+                                if (mm && mm.RewardModel && typeof mm.RewardModel.setBackCall === "function") {
+                                    mm.RewardModel.setBackCall(this._args);
+                                }
+                            } catch (e) { }
+                            try {
+                                const curVm = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
+                                if (curVm && typeof curVm.isOpenView === "function" && curVm.isOpenView("ClimbtowerView")) {
+                                    const ctv = typeof curVm.getView === "function" ? curVm.getView("ClimbtowerView") : null;
+                                    if (ctv) {
+                                        if (ctv._isBattleTip) ctv._isBattleTip.setVisible(false);
+                                        if (ctv.btn_fight) {
+                                            ctv.btn_fight.setVisible(true);
+                                            ctv.btn_fight.setTouchable(true);
+                                        }
+                                        if (typeof ctv.refreshUI === "function") ctv.refreshUI();
+                                    }
+                                }
+                            } catch (e) { }
+                            try {
+                                const vm = bot.getViewManager();
+                                if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
+                                    vm.close("BattleResultView");
+                                } else if (this._parentTarget && typeof this._parentTarget.closeView === "function") {
+                                    this._parentTarget.closeView();
+                                }
+                            } catch (e) { }
+                        };
                     }
 
-                    // Hook BattleTowerFail & BattleFail (Thua Tháp): Gán callback an toàn cho nút btn_ok ("Xác nhận")
+                    // Hook BattleTowerFail & BattleFail (Thua Tháp): Gán callback an toàn cho nút btn_ok ("Xác nhận") và định nghĩa okClick()
                     let btfMod = null;
                     if (typeof window.__require === "function") {
                         try { btfMod = window.__require("BattleTowerFail"); } catch (e) { }
@@ -4331,6 +4401,37 @@
                                     }
                                 });
                             }
+                        };
+                        BattleTowerFailClass.prototype.okClick = function () {
+                            bot.state.viewingBattleData = false;
+                            try {
+                                const mm = window.ModelManager || (gm && gm.ModelManager);
+                                if (mm && mm.RewardModel && typeof mm.RewardModel.setBackCall === "function") {
+                                    mm.RewardModel.setBackCall(this._args);
+                                }
+                            } catch (e) { }
+                            try {
+                                const curVm = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
+                                if (curVm && typeof curVm.isOpenView === "function" && curVm.isOpenView("ClimbtowerView")) {
+                                    const ctv = typeof curVm.getView === "function" ? curVm.getView("ClimbtowerView") : null;
+                                    if (ctv) {
+                                        if (ctv._isBattleTip) ctv._isBattleTip.setVisible(false);
+                                        if (ctv.btn_fight) {
+                                            ctv.btn_fight.setVisible(true);
+                                            ctv.btn_fight.setTouchable(true);
+                                        }
+                                        if (typeof ctv.refreshUI === "function") ctv.refreshUI();
+                                    }
+                                }
+                            } catch (e) { }
+                            try {
+                                const vm = bot.getViewManager();
+                                if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
+                                    vm.close("BattleResultView");
+                                } else if (this._parentTarget && typeof this._parentTarget.closeView === "function") {
+                                    this._parentTarget.closeView();
+                                }
+                            } catch (e) { }
                         };
                     }
 
@@ -4354,6 +4455,23 @@
                                 });
                             }
                         };
+                        BattleFailClass.prototype.okClick = function () {
+                            bot.state.viewingBattleData = false;
+                            try {
+                                const mm = window.ModelManager || (gm && gm.ModelManager);
+                                if (mm && mm.RewardModel && typeof mm.RewardModel.setBackCall === "function") {
+                                    mm.RewardModel.setBackCall(this._args);
+                                }
+                            } catch (e) { }
+                            try {
+                                const vm = bot.getViewManager();
+                                if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
+                                    vm.close("BattleResultView");
+                                } else if (this._parentTarget && typeof this._parentTarget.closeView === "function") {
+                                    this._parentTarget.closeView();
+                                }
+                            } catch (e) { }
+                        };
                     }
 
                     // Hook ClimbtowerView: Tự động làm mới UI tháp và nút khiêu chiến khi trận chiến kết thúc
@@ -4368,8 +4486,18 @@
                         ClimbtowerViewClass.prototype.close_battle_result = function () {
                             if (origCloseBattle) origCloseBattle.apply(this, arguments);
                             try {
+                                const fm = window.FightManager || (gm && gm.FightManager);
+                                if (fm) {
+                                    if (typeof fm.removeFight === "function" && fm.haveFight && fm.haveFight(2)) {
+                                        fm.removeFight(2);
+                                    }
+                                    if (fm.fightList && fm.fightList[2]) delete fm.fightList[2];
+                                }
                                 if (this._isBattleTip) this._isBattleTip.setVisible(false);
-                                if (this.btn_fight) this.btn_fight.setVisible(true);
+                                if (this.btn_fight) {
+                                    this.btn_fight.setVisible(true);
+                                    this.btn_fight.setTouchable(true);
+                                }
                                 if (typeof this.refreshUI === "function") {
                                     this.refreshUI();
                                 }
@@ -7792,7 +7920,7 @@
                 }
             }
 
-            if (!bot.canDo("auto_tower_cycle", 8)) return false;
+            if (!bot.canDo("auto_tower_cycle", 0.3)) return false;
             bot.markDone("auto_tower_cycle");
 
             try {
@@ -7803,10 +7931,9 @@
                 bot.state.lastTowerActionTime = nowTs;
 
                 const curFloor = tm.getCurFloor ? tm.getCurFloor(1) : (bot.stats.towerFloor || 1);
-                if (!vm || !vm.isOpenView("ClimbtowerView")) bot.closeBattleViews();
+                bot.closeBattleViews();
 
-
-                bot.log(`🏰 Leo Tháp: Còn ${towerPower} lượt -> Đang khiêu chiến Tháp Thông Thiên tầng [${curFloor}] (Chạy ngầm)...`);
+                bot.log(`🏰 Leo Tháp: Còn ${towerPower} lượt -> Đang khiêu chiến Tháp Thông Thiên tầng [${curFloor}]...`);
 
                 const tc = (G_Mapping && G_Mapping.TowerConfiger) || window.TowerConfiger;
                 const fm = (G_Mapping && G_Mapping.FubenManager) || window.FubenManager;
@@ -7816,19 +7943,19 @@
                 } else {
                     const battlePayload = { _type: 2, _id: curFloor, _cli: 1, _ext: [] };
                     G_Mapping.RPCReq.send(G_Mapping.WarStartCs.protocol, battlePayload);
-                    await bot.sleep(400);
+                    await bot.sleep(50);
                     G_Mapping.RPCReq.send(G_Mapping.WarJumpCs.protocol, battlePayload);
                 }
-                if (!vm || !vm.isOpenView("ClimbtowerView")) bot.closeBattleViews();
+                bot.closeBattleViews();
 
-                await bot.sleep(1500);
-                if (!vm || !vm.isOpenView("ClimbtowerView")) bot.closeBattleViews();
+                await bot.sleep(200);
+                bot.closeBattleViews();
                 let newFloor = tm.getCurFloor ? tm.getCurFloor(1) : bot.stats.towerFloor;
                 for (let w = 0; w < 6 && !(newFloor > curFloor); w++) {
-                    await bot.sleep(500);
+                    await bot.sleep(100);
                     newFloor = tm.getCurFloor ? tm.getCurFloor(1) : bot.stats.towerFloor;
                 }
-                if (!vm || !vm.isOpenView("ClimbtowerView")) bot.closeBattleViews();
+                bot.closeBattleViews();
                 bot.updateStats();
 
                 if (newFloor > curFloor) {
