@@ -114,14 +114,9 @@
     // Tuyệt đối KHÔNG gộp Bí Cảnh Tần Lĩnh (9), Ải Chính Tuyến (1), Leo Hạng Liên Server / Lôi Đài (105), và các loại Boss (4, 6, 10, v.v.) vào đây!
     function canNativeSkipBattle(gameplayType) {
         const t = Number(gameplayType);
-        return (
-            t === 2 ||                           // Tower (Leo tháp)
-            (t >= 12 && t <= 16) ||              // YsTower 1..5 (Tháp nguyên tố / trận doanh)
-            t === 3 ||                           // DailyDungeon (Phụ bản hằng ngày)
-            t === 101 ||                         // Arena (Đấu trường)
-            t === 106 ||                         // Revolt (Giải cứu gia viên)
-            t === 105                            // CityFight (Đánh cướp gia viên)
-        );
+        // Bỏ qua trận tức thì 0s cho tất cả các chế độ (Ải 1, Tháp 2, Phụ bản 3, Boss 4/6/10, Đấu trường 101, Gia viên 105/106, Tháp nguyên tố 12..16)
+        // CHỈ NGOẠI TRỪ: Bí Cảnh Tần Lĩnh (9) để người chơi tự chọn buff/lõi giữa các tầng
+        return t !== 9;
     }
 
     window.__AUTO_STAGE_ENABLED__ = false;
@@ -1077,9 +1072,9 @@
                     const brv = typeof vm.getView === "function" ? vm.getView("BattleResultView") : null;
                     if (brv) {
                         const bType = (brv.battleData && brv.battleData._type) || (brv._args && brv._args.battleData && brv._args.battleData._type) || (brv._args && brv._args.arrayType) || 0;
-                        // Không đóng các trận cần xem kết quả hoặc không skip native: Boss (4, 6, 10), Tần Lĩnh (9), Tháp (2, 12..16 khi người chơi mở giao diện)
-                        const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104 || !canNativeSkipBattle(bType);
-                        if (isBossOrDefJz) return;
+                        // Chỉ giữ lại DefJz (9 - Tần Lĩnh) để người chơi tự chọn buff/lõi
+                        const isDefJz = (Number(bType) === 9);
+                        if (isDefJz) return;
                         // Nếu là trận Tháp (2 hoặc 12..16) và người chơi đang trên màn hình Tháp -> Giữ nguyên để xem data
                         if ((bType === 2 || (bType >= 12 && bType <= 16)) && vm.isOpenView("ClimbtowerView")) return;
 
@@ -1194,8 +1189,10 @@
         doBattleSkip: function (battleSecnesView) {
             const self = battleSecnesView || window.__CURRENT_BATTLE_SCENES_VIEW__;
             if (!self || !self.view) return false;
-            if (self.__is_skipping__) return false;
+            const nowTs = Date.now();
+            if (self.__is_skipping__ && nowTs - (self.__skip_time__ || 0) < 250) return false;
             self.__is_skipping__ = true;
+            self.__skip_time__ = nowTs;
             try {
                 const aType = (self._args && self._args.arrayType) || 0;
                 const gm = window.G_Mapping;
@@ -1261,20 +1258,28 @@
                     }
                 }
 
-                const warId = (fd && fd.battleData && fd.battleData._id) || (self.battleData && self.battleData._id);
+                const warId = (fd && fd.battleData && fd.battleData._id) || (self.battleData && self.battleData._id) || window.__LAST_WAR_ID__;
                 window.__LAST_OTHER_WAR_TIME__ = Date.now();
                 bot.state.lastBattleEndTime = Date.now() + 300;
-                bot.log(`⚔️ [Skip-Battle] Bỏ qua trận đấu (Type: ${aType || "unknown"}, WarID: ${warId || "unknown"})`);
+                bot.log(`⚔️ [Skip-Battle] Bỏ qua trận đấu tức thì (Type: ${aType || "unknown"}, WarID: ${warId || "unknown"})`);
 
-                let dispatched = false;
-                // 1. Dispatch event battle_Next trực tiếp vào FightManager / BattleController
-                if (disp && evType && evType.battle_Next && fd) {
-                    disp.dispatchEvent(evType.battle_Next, fd);
-                    dispatched = true;
-                }
-                // 2. Kích hoạt nút Bỏ Qua trên UI nếu chưa dispatch
-                if (!dispatched && self.quickEnd && typeof self.quickEnd.callClickListener === "function") {
+                // 1. Kích hoạt nút native quickEnd trên UI (chắc chắn chạy)
+                if (self.quickEnd && typeof self.quickEnd.callClickListener === "function") {
                     try { self.quickEnd.callClickListener(); } catch (eClk) { }
+                }
+                // 2. Dispatch event battle_Next trực tiếp vào FightManager / BattleController
+                if (disp && evType && evType.battle_Next && fd) {
+                    try { disp.dispatchEvent(evType.battle_Next, fd); } catch (eBn) { }
+                }
+                // 3. Gửi lệnh WarJumpCs thẳng lên socket server
+                if (warId && gm && gm.RPCReq && gm.WarJumpCs) {
+                    try {
+                        gm.RPCReq.send(gm.WarJumpCs.protocol, { _type: aType || 1, _id: warId, _cli: 1, _ext: [] });
+                    } catch (eJump) { }
+                }
+                // 4. Nếu có hàm trực tiếp btn_quickEnd
+                if (typeof self.btn_quickEnd === "function") {
+                    try { self.btn_quickEnd(); } catch (eBqe) { }
                 }
                 return true;
             } catch (eSkip) {
@@ -2912,16 +2917,11 @@
                 // Tháp Thông Thiên (2), Tháp Trận Doanh (12..16), Phụ bản ngày (3), Đấu trường (101)
                 // Tuyệt đối KHÔNG gộp Bí Cảnh Tần Lĩnh (9), Ải Chính Tuyến (1), Leo Hạng Liên Server / Lôi Đài (105), và các loại Boss (4, 6, 10, v.v.) vào đây!
                 function canNativeSkipBattle(gameplayType) {
-                    const t = Number(gameplayType);
-                    return (
-                        t === 2 ||                           // Tower (Leo tháp)
-                        (t >= 12 && t <= 16) ||              // YsTower 1..5 (Tháp nguyên tố / trận doanh)
-                        t === 3 ||                           // DailyDungeon (Phụ bản hằng ngày)
-                        t === 101 ||                         // Arena (Đấu trường)
-                        t === 106 ||                         // Revolt (Giải cứu gia viên)
-                        t === 105                            // CityFight (Đánh cướp gia viên)
-                    );
-                }
+        const t = Number(gameplayType);
+        // Bỏ qua trận tức thì 0s cho tất cả các chế độ (Ải 1, Tháp 2, Phụ bản 3, Boss 4/6/10, Đấu trường 101, Gia viên 105/106, Tháp nguyên tố 12..16)
+        // CHỈ NGOẠI TRỪ: Bí Cảnh Tần Lĩnh (9) để người chơi tự chọn buff/lõi giữa các tầng
+        return t !== 9;
+    }
 
                 // Hook 2: BattleController & FightManager - Quản lý cờ skipBattle, triệt tiêu toast "Hãy chờ tổng kết trận này"
                 bot.hookBattleController = function () {
@@ -3950,10 +3950,8 @@
                     if (bcInst && bcInst.BattleConfigs) {
                         for (const k in bcInst.BattleConfigs) {
                             if (bcInst.BattleConfigs[k]) {
-                                if (canNativeSkipBattle(k) && bot.settings.skip_battle) {
+                                if (bot.settings && bot.settings.skip_battle && Number(k) !== 9) {
                                     bcInst.BattleConfigs[k].skipBattle = true;
-                                } else {
-                                    bcInst.BattleConfigs[k].skipBattle = false;
                                 }
                             }
                         }
@@ -4075,13 +4073,12 @@
                                 }
                             } catch (e) { }
 
-                            // Chỉ giữ lại DefJz (9 - cần chọn buff) và Boss thế giới (4, 6, 10, 103, 104)
-                            // Toàn bộ các chế độ còn lại (Ải 1, Tháp 2, Phụ bản 3, Đấu trường 101, Gia viên 105/106, Tháp nguyên tố 12..16)
-                            // đều tự động đóng ngay sau 0.3s (300ms) chuẩn chỉ!
-                            const isBossOrDefJz = bType === 9 || bType === 4 || bType === 6 || bType === 10 || bType === 103 || bType === 104;
+                            // Tự động đóng bảng kết quả ngay sau 0.3s (300ms) cho mọi loại trận (Ải 1, Tháp 2, Phụ bản 3, Boss 4/6/10, Đấu trường 101, Gia viên 105/106, v.v.)
+                            // Chỉ giữ lại DefJz (9 - Tần Lĩnh) để người chơi tự chọn buff/lõi giữa các tầng
+                            const isDefJz = (Number(bType) === 9);
 
                             // Tự động đóng bảng kết quả ngay sau 0.3s (300ms) nếu bật skip_battle
-                            if (bot.settings && bot.settings.skip_battle && !isBossOrDefJz) {
+                            if (bot.settings && bot.settings.skip_battle && !isDefJz) {
                                 const self = this;
                                 setTimeout(() => {
                                     try {
@@ -4104,7 +4101,7 @@
                             const isTowerUIOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("ClimbtowerView");
 
                             // Chỉ tự động đóng trễ nếu ĐANG CHẠY AUTO THÁP NGẦM và NGƯỜI CHƠI KHÔNG MỞ GIAO DIỆN THÁP và KHÔNG xem dữ liệu
-                            if (!isBossOrDefJz && !isTowerUIOpen && bot.state.towerInProgress && bot.state.isAutoTowerActive) {
+                            if (!isDefJz && !isTowerUIOpen && bot.state.towerInProgress && bot.state.isAutoTowerActive) {
                                 const self = this;
                                 setTimeout(() => {
                                     try {
@@ -4763,15 +4760,16 @@
                         configurable: true
                     });
 
-                    // 1. Hook setGameMap & resetAndLoadBattelObj: Rút ngắn thời gian chuyển cảnh mượt mà (chỉ khi BẬT Vượt Ải)
+                    // 1. Hook setGameMap & resetAndLoadBattelObj: Rút ngắn thời gian chuyển cảnh siêu tốc (0.15s)
+                    const isFastStage = () => (bot.settings && bot.settings.skip_battle) || bot.isAutoStageOn();
                     const origSetGameMap = bmv.prototype.setGameMap;
                     if (origSetGameMap && !bmv.prototype.__QA_SETMAP_HOOKED__) {
                         bmv.prototype.__QA_SETMAP_HOOKED__ = true;
                         bmv.prototype.setGameMap = function () {
                             origSetGameMap.apply(this, arguments);
-                            if (bot.isAutoStageOn()) {
-                                this.moveTime = 0.45;
-                                this.chapterCrossTime = 0.45;
+                            if (isFastStage()) {
+                                this.moveTime = 0.15;
+                                this.chapterCrossTime = 0.15;
                             }
                         };
                     }
@@ -4780,15 +4778,14 @@
                     if (origResetAndLoad && !bmv.prototype.__QA_RESETLOAD_HOOKED__) {
                         bmv.prototype.__QA_RESETLOAD_HOOKED__ = true;
                         bmv.prototype.resetAndLoadBattelObj = function (e, t) {
-                            if (bot.isAutoStageOn()) {
-                                if (t > 0.45) t = 0.45;
-                                this.moveTime = 0.45;
-                                this.chapterCrossTime = 0.45;
+                            if (isFastStage()) {
+                                if (t > 0.15) t = 0.15;
+                                this.moveTime = 0.15;
+                                this.chapterCrossTime = 0.15;
                             }
                             return origResetAndLoad.call(this, e, t);
                         };
                     }
-
                     // 2. Hook moveNext: Ghi nhận kết quả trận đấu cho Defeat Guard
                     const origMoveNext = bmv.prototype.moveNext;
                     if (origMoveNext && !bmv.prototype.__QA_MOVENEXT_HOOKED__) {
@@ -4858,10 +4855,10 @@
                     if (origPushMove && !cas.prototype.__QA_PUSHMOVE_HOOKED__) {
                         cas.prototype.__QA_PUSHMOVE_HOOKED__ = true;
                         cas.prototype.pushMoveWithBg = function (cb) {
-                            if (bot.isAutoStageOn()) {
+                            if ((bot.settings && bot.settings.skip_battle) || bot.isAutoStageOn()) {
                                 if (this.bindViewClass) {
-                                    this.bindViewClass.moveTime = 0.45;
-                                    this.bindViewClass.chapterCrossTime = 0.45;
+                                    this.bindViewClass.moveTime = 0.15;
+                                    this.chapterCrossTime = 0.15;
                                 }
                             }
                             return origPushMove.call(this, cb);
@@ -4872,10 +4869,10 @@
                     if (origUnlockMove && !cas.prototype.__QA_UNLOCKMOVE_HOOKED__) {
                         cas.prototype.__QA_UNLOCKMOVE_HOOKED__ = true;
                         cas.prototype.unLockMoveWithBg = function (cb) {
-                            if (bot.isAutoStageOn()) {
+                            if ((bot.settings && bot.settings.skip_battle) || bot.isAutoStageOn()) {
                                 if (this.bindViewClass) {
-                                    this.bindViewClass.moveTime = 0.45;
-                                    this.bindViewClass.chapterCrossTime = 0.45;
+                                    this.bindViewClass.moveTime = 0.15;
+                                    this.chapterCrossTime = 0.15;
                                 }
                             }
                             return origUnlockMove.call(this, cb);
@@ -4958,27 +4955,25 @@
                     if (origCasModuleOpen && !cas.prototype.__QA_CAS_MODOPEN__) {
                         cas.prototype.__QA_CAS_MODOPEN__ = true;
                         cas.prototype.module_open = function (e, t) {
-                            if (!bot.isAutoStageOn()) {
-                                return;
-                            }
                             return origCasModuleOpen.apply(this, arguments);
                         };
                     }
                 }
 
-                // C. BattleFastManager - Tăng tốc xử lý lượt và nền mượt mà 60fps (chỉ khi BẬT Vượt Ải)
+                // C. BattleFastManager - Tăng tốc xử lý lượt và nền mượt mà 60fps (khi bật skip_battle hoặc auto_stage)
                 const bfm = (gm && gm.BattleFastManager) || window.BattleFastManager;
                 if (bfm) {
-                    if (bot.isAutoStageOn()) {
-                        bfm.roundInerVal = 0.08;
+                    const isFastMode = () => (bot.settings && bot.settings.skip_battle) || bot.isAutoStageOn();
+                    if (isFastMode()) {
+                        bfm.roundInerVal = 0.01;
                     }
                     const origResetTick = bfm.resetRoundTick;
                     if (origResetTick && !bfm.__QA_TICK_HOOKED__) {
                         bfm.__QA_TICK_HOOKED__ = true;
                         bfm.resetRoundTick = function () {
                             if (origResetTick) origResetTick.apply(this, arguments);
-                            if (bot.isAutoStageOn()) {
-                                this.roundInerVal = 0.08;
+                            if (isFastMode()) {
+                                this.roundInerVal = 0.01;
                             }
                         };
                     }
@@ -4987,7 +4982,7 @@
                     if (origOffect && !bfm.__QA_OFFECT_HOOKED__) {
                         bfm.__QA_OFFECT_HOOKED__ = true;
                         bfm.offectInBaground = function (e, t, i, a) {
-                            if (bot.isAutoStageOn()) {
+                            if (isFastMode()) {
                                 var o = this;
                                 this.acttakStar = true;
                                 var n = this.getEffectRoundData(t);
@@ -5003,7 +4998,7 @@
                                     o.acttakStar = false;
                                     o.attackFinished = true;
                                     o.checkMoveNext();
-                                }, 0.08, 1);
+                                }, 0.01, 1);
                                 return;
                             }
                             return origOffect.apply(this, arguments);
@@ -5014,7 +5009,7 @@
                     if (origPlayAttack && !bfm.__QA_PLAYATTACK_HOOKED__) {
                         bfm.__QA_PLAYATTACK_HOOKED__ = true;
                         bfm.playAttack = function (e, t, i, a) {
-                            const shouldFast = bot.isAutoStageOn();
+                            const shouldFast = isFastMode();
                             if (shouldFast && (2 == e._type || 4 == e._type)) {
                                 var n = [];
                                 this.beAttackers = [];
