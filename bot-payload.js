@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         3Q Đào Đào Đào - AutoBot v3.9.32 (Farm KNB Homestead Rescue Edition)
+// @name         3Q Đào Đào Đào - AutoBot v3.9.35 (Farm KNB + 1-Click Clean Daily + Phone Conflict-Free)
 // @namespace    https://joyplay.vn/
-// @version      3.9.32
+// @version      3.9.35
 // @description  AutoBot v3.9.32: Tích hợp chế độ Farm KNB Giải Cứu Gia Viên (50 KNB/lượt không giới hạn), kiểm tra & trảm quân chiếm đóng.
 // @author       Antigravity
 // @match        *://3qdao.joyplay.vn/*
@@ -811,7 +811,8 @@
             if (bot.state.kickedByOtherDevice) return;
             bot.state.kickedByOtherDevice = true;
             window.__BOT_HARD_STOPPED__ = true;
-            bot.log("📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC khác (" + (reason || "Kick") + ")! Cắt mạng & dừng hoạt động ngay...");
+            window.__BOT_YIELDING__ = true;
+            bot.log("📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại (" + (reason || "Kick") + ")! Cắt toàn bộ mạng & đóng trình duyệt ngay...");
 
             // 1. Dừng mọi vòng lặp và scheduler
             try { bot.stopScheduleLoop(); } catch (e) { }
@@ -822,6 +823,10 @@
             if (window.__QA_PENDING_MAIN_START__) {
                 try { clearTimeout(window.__QA_PENDING_MAIN_START__); } catch (e) { }
                 window.__QA_PENDING_MAIN_START__ = null;
+            }
+            if (bot.state && bot.state._reconnectTimer) {
+                try { clearTimeout(bot.state._reconnectTimer); } catch (e) { }
+                bot.state._reconnectTimer = null;
             }
 
             // 2. Cắt đứt kết nối mạng ngay lập tức để giải phóng hoàn toàn socket máy chủ cho điện thoại
@@ -852,7 +857,7 @@
 
         scheduleSafeReconnect: function (nw, reason, delayMs) {
             try {
-                if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return false;
+                if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return false;
                 const gm = window.G_Mapping;
                 const net = nw || (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
                 if (!net || !bot.state.hasLoggedInOnce) return false;
@@ -871,7 +876,7 @@
                 const waitMs = Math.max(1200, Number(delayMs) || 1800);
                 setTimeout(() => {
                     bot.state._reconnectPending = false;
-                    if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return;
+                    if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
                     try {
                         const stillConnected = !!(net._wsClient && typeof net._wsClient.isConnected === "function" && net._wsClient.isConnected());
                         if (stillConnected) return;
@@ -2369,7 +2374,7 @@
                     let lastSendTime = 0;
                     const lastProtoTimes = window.__LAST_PROTO_TIMES__ = window.__LAST_PROTO_TIMES__ || {};
                     nwProto.sendMessage = function (t, e, o) {
-                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return;
+                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
                         window.__LAST_OUT_PROTO__ = t;
                         const now = Date.now();
 
@@ -2464,32 +2469,17 @@
                 if (nwProto && !nwProto.__QA_KICK_GUARD__) {
                     nwProto.__QA_KICK_GUARD__ = true;
 
-                    // 1. Hook onLoginKickSc: Khi máy chủ gửi mã kick (_res: 3 hoặc 0 do đăng nhập từ thiết bị khác)
+                    // 1. Hook onLoginKickSc: Khi máy chủ gửi mã kick (bất kể mã nào đều là do thiết bị khác đăng nhập)
                     const origKick = nwProto.onLoginKickSc;
                     nwProto.onLoginKickSc = function (event, data) {
                         const resCode = data && data._res != null ? data._res : 0;
                         bot.log(`🛡️ [Anti-Kick] Nhận thông điệp kick từ máy chủ: ${JSON.stringify(data || {})}`);
 
-                        // Nếu tài khoản bị đăng nhập từ thiết bị khác (Điện thoại / PC khác):
-                        // Server game gửi _res: 3 hoặc 0 khi có thiết bị khác đăng nhập
-                        const isPhoneLogin = (resCode === 3 || resCode === 0);
-                        if (isPhoneLogin) {
-                            this.kickData = data;
-                            bot.triggerEmergencyYield("Mã kick " + resCode);
-                            return;
-                        }
-
-                        if (!bot.state.hasLoggedInOnce) {
-                            if (origKick) return origKick.apply(this, arguments);
-                            return;
-                        }
+                        // Server gửi kick khi có thiết bị khác (Điện thoại) đăng nhập
+                        // Lập tức kích hoạt Nhường Máy, cắt toàn bộ kết nối và dừng hẳn, tuyệt đối không tự reconnect đè phiên
                         this.kickData = data;
-                        this._needFullRelogin = true;
-                        this._isCanReconnect = true;
-                        this.isManualClose = false;
-                        this.isEnterGame = false;
-                        this.isReconnecting = false;
-                        bot.scheduleSafeReconnect(this, "kick_" + resCode, 2200);
+                        bot.triggerEmergencyYield("Mã kick máy chủ (onLoginKickSc: " + resCode + ")");
+                        return;
                     };
 
                     // 1b. Hook onLoginTimeSc: Bảo đảm khi _needFullRelogin bật thì gửi LoginLoginCs (10101) trực tiếp không bị kẹt ở _waitingList
@@ -2596,12 +2586,15 @@
                     const origShowErrorTips = nwProto.showErrorTips;
                     nwProto.showErrorTips = function (tip) {
                         const tipStr = String(tip || "");
-                        const isKickTip = tipStr.includes("vui lòng đăng nhập lại") || 
-                                          tipStr.includes("thiết bị khác") || 
-                                          tipStr.includes("trùng lặp") || 
-                                          tipStr.includes("phiên khác");
+                        const tipLower = tipStr.toLowerCase();
+                        const isKickTip = tipLower.includes("vui lòng đăng nhập lại") || 
+                                          tipLower.includes("thiết bị khác") || 
+                                          tipLower.includes("trùng lặp") || 
+                                          tipLower.includes("phiên khác") ||
+                                          tipLower.includes("tài khoản của bạn") ||
+                                          tipLower.includes("kick");
                         if (isKickTip) {
-                            bot.triggerEmergencyYield("Thông báo lỗi: " + tipStr);
+                            bot.triggerEmergencyYield("showErrorTips: " + tipStr);
                             return;
                         }
 
@@ -2609,6 +2602,7 @@
                             if (origShowErrorTips) return origShowErrorTips.apply(this, arguments);
                             return;
                         }
+                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
                         bot.log(`🛡️ [Anti-Kick] Đã chặn hộp thoại thông báo mạng: "${tipStr}" -> Tự động kết nối lại ngầm!`);
                         this._isCanReconnect = true;
                         this.isManualClose = false;
@@ -2651,9 +2645,21 @@
                             if (!bot.state.hasLoggedInOnce) {
                                 return origLoginTips ? origLoginTips.apply(this, arguments) : null;
                             }
+                            const tipStr = String(tip || "");
+                            const tipLower = tipStr.toLowerCase();
+                            const isKickTip = tipLower.includes("vui lòng đăng nhập lại") || 
+                                              tipLower.includes("thiết bị") || 
+                                              tipLower.includes("trùng lặp") || 
+                                              tipLower.includes("phiên") || 
+                                              tipLower.includes("kick");
+                            if (isKickTip) {
+                                bot.triggerEmergencyYield("LoginController tip: " + tipStr);
+                                return;
+                            }
+                            if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
                             bot.log(`🛡️ [Anti-Kick] Đã triệt tiêu popup ngắt kết nối từ LoginController (${tip || "no_tip"})!`);
                             const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
-                            if (nw) {
+                            if (nw && !bot.state.kickedByOtherDevice && !window.__BOT_HARD_STOPPED__) {
                                 if (this.clickData || (nw._reconnectFailStreak || 0) >= 2) nw._needFullRelogin = true;
                                 bot.scheduleSafeReconnect(nw, "login_show_tips", 2000);
                             }
@@ -2698,17 +2704,30 @@
                                 return origAlertShow ? origAlertShow.apply(this, arguments) : null;
                             }
                             const txt = String((opt && (opt.text || opt.content || opt.title)) || "").toLowerCase();
-                            const isKickOrNetAlert = (opt && opt.key === "relink1") ||
+                            const isKickTip = txt.includes("thiết bị khác") || 
+                                              txt.includes("đăng nhập từ nơi khác") || 
+                                              txt.includes("phiên khác") || 
+                                              txt.includes("trùng lặp") || 
+                                              txt.includes("vui lòng đăng nhập lại") || 
+                                              txt.includes("tài khoản của bạn đã") || 
+                                              txt.includes("kick");
+                            if (isKickTip) {
+                                bot.triggerEmergencyYield("AlertUtil kick popup: " + txt);
+                                return [null, ""];
+                            }
+                            if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return [null, ""];
+                            const isNetAlert = (opt && opt.key === "relink1") ||
                                 txt.includes("nội dung mới") ||
                                 txt.includes("khởi động lại") ||
                                 txt.includes("mất kết nối") ||
                                 txt.includes("kết nối lại") ||
-                                txt.includes("đăng nhập lại") ||
                                 txt.includes("bảo trì");
-                            if (isKickOrNetAlert) {
+                            if (isNetAlert) {
                                 bot.log("🛡️ [Anti-Kick] Đã chặn hộp thoại ngắt kết nối/khởi động lại từ AlertUtil.show!");
                                 const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
-                                if (nw) bot.scheduleSafeReconnect(nw, "alert_intercept", 2000);
+                                if (nw && !bot.state.kickedByOtherDevice && !window.__BOT_HARD_STOPPED__) {
+                                    bot.scheduleSafeReconnect(nw, "alert_intercept", 2000);
+                                }
                                 return [null, ""];
                             }
                             return origAlertShow ? origAlertShow.apply(this, arguments) : null;
@@ -10598,6 +10617,202 @@
         // ====================================================================
         // TÍNH NĂNG 12: TỰ ĐỘNG TOÀN DIỆN: QUÀ NGÀY, MỐC NĂNG ĐỘNG, SHOP, CÂY TIỀN, HÒM THƯ, BẠN BÈ & QUỸ
         // ====================================================================
+                // ====================================================================
+        // TÍNH NĂNG 1-BẤM: LÀM SẠCH 100 ĐIỂM NHIỆM VỤ NGÀY + TOÀN BỘ QUÀ HÀNG NGÀY
+        // ====================================================================
+        runOneClickAllDailyAndGifts: async function () {
+            bot.log("✨ [1-Bấm Làm Sạch] Đang tiến hành làm sạch 100 điểm Nhiệm Vụ Ngày & Nhận toàn bộ quà hàng ngày...");
+            const gm = window.G_Mapping || (typeof G_Mapping !== "undefined" ? G_Mapping : null);
+            const mm = window.ModelManager || (typeof bot.getModelManager === "function" ? bot.getModelManager() : null) || (gm && gm.ModelManager);
+            const rpc = (gm && gm.RPCReq) || window.RPCReq;
+            
+            const pm = (mm && mm.PlayerModel) || (gm && gm.PlayerModel);
+            const startGold = (pm && typeof pm.getGold === "function") ? pm.getGold() : 0;
+            const startKnb = (pm && typeof pm.getKnb === "function") ? pm.getKnb() : 0;
+
+            let claimedAny = false;
+
+            // 1. Bái tế toàn bộ 7 Bảng Xếp Hạng (BXH)
+            try {
+                if (typeof bot.runAutoRankSmart === "function") {
+                    await bot.runAutoRankSmart(true);
+                }
+            } catch (eRank) { }
+
+            // 2. Điểm danh và mỏ bang hội
+            try {
+                if (typeof bot.runAutoGuildMineSmart === "function") {
+                    await bot.runAutoGuildMineSmart();
+                }
+            } catch (eGuild) { }
+
+            // 3. Tặng & Nhận Tim Bạn Bè (RelationAutoPickSendCs - 14217)
+            try {
+                const relationProto = (gm && gm.RelationAutoPickSendCs && gm.RelationAutoPickSendCs.protocol) || 14217;
+                if (rpc && typeof rpc.send === "function") {
+                    rpc.send(relationProto, {});
+                }
+            } catch (eRel) { }
+
+            // 4. Mua Vàng Cây Tiền (Welfare Gold Buy / Điểm Kim KNB)
+            try {
+                const mtm = (mm && mm.MoneyTreeModel) || (gm && gm.MoneyTreeModel);
+                const gpc = (gm && gm.GoldPointConfiger) || window.GoldPointConfiger;
+                if (mtm && gpc && typeof gpc.getGoldPointCfgIds === "function" && typeof mtm.reqWelfareGoldBuy === "function") {
+                    const ids = gpc.getGoldPointCfgIds() || [];
+                    for (let id of ids) {
+                        try { mtm.reqWelfareGoldBuy(id); } catch (e) { }
+                    }
+                }
+            } catch (eGold) { }
+
+            // 5. Quay Thưởng Miễn Phí (Tàng Bảo Các, Danh Tướng,...)
+            try {
+                if (typeof bot.runAutoFreeLotterySmart === "function") {
+                    await bot.runAutoFreeLotterySmart(true);
+                }
+            } catch (eLot) { }
+
+            // 6. Đầu Hồ Ném Bình
+            try {
+                if (typeof bot.runAutoTouhuSmart === "function") {
+                    await bot.runAutoTouhuSmart(true);
+                }
+            } catch (eTouhu) { }
+
+            // 7. Phân rã Mảnh Tướng Thừa
+            try {
+                if (typeof bot.runAutoHeroFragmentDecompose === "function") {
+                    await bot.runAutoHeroFragmentDecompose();
+                }
+            } catch (eDec) { }
+
+            // 8. Chạy toàn diện Quà Ngày, Điểm Danh, Hòm Thư, Shop 0đ, Quỹ & Hoạt Động
+            try {
+                if (typeof bot.runAutoDailyRewardsSmart === "function") {
+                    await bot.runAutoDailyRewardsSmart(true);
+                }
+            } catch (eRwd) { }
+
+            // 9. LÀM SẠCH VÀ NHẬN 100 ĐIỂM NHIỆM VỤ NGÀY & RƯƠNG MỐC NĂNG ĐỘNG (TaskModel)
+            try {
+                const tm = mm && mm.TaskModel;
+                const eEnum = (gm && gm.e_EnumDataE) || (typeof window.__require === "function" && window.__require("e_EnumDataE")) || {};
+                const TaskDaily = eEnum.TaskDaily || 1;
+                const TaskDailyBox = eEnum.TaskDailyBox || 5;
+                const TaskWeekly = eEnum.TaskWeekly || 3;
+                const TaskWeeklyBox = eEnum.TaskWeeklyBox || 6;
+                const TaskAchieve = eEnum.TaskAchieve || 4;
+
+                if (tm && typeof tm.getTaskListByType === "function" && typeof tm.getTaskState === "function") {
+                    // 9a. Nhận tất cả nhiệm vụ ngày đã xong
+                    const dailyTasks = tm.getTaskListByType(TaskDaily) || [];
+                    const claimableDaily = [];
+                    for (let t of dailyTasks) {
+                        const tId = (typeof t === "object") ? (t.id || t._id) : t;
+                        if (tm.getTaskState(TaskDaily, tId) === 2) {
+                            claimableDaily.push(tId);
+                        }
+                    }
+                    if (claimableDaily.length > 0) {
+                        if (typeof tm.reqTaskComplete2 === "function") {
+                            tm.reqTaskComplete2(TaskDaily, claimableDaily);
+                        } else if (typeof tm.reqTaskComplete === "function") {
+                            for (let id of claimableDaily) {
+                                try { tm.reqTaskComplete(TaskDaily, id); } catch (e) { }
+                            }
+                        }
+                        claimedAny = true;
+                    }
+
+                    // Đợi server cập nhật điểm năng động
+                    await new Promise(r => setTimeout(r, 600));
+
+                    // 9b. Nhận 5 rương mốc năng động ngày (mốc 1->5 tương ứng 20, 40, 60, 80, 100 điểm)
+                    const tc = (gm && gm.TaskConfiger) || window.TaskConfiger;
+                    let boxCfgs = (tc && typeof tc.getTaskActiveCfgArray === "function") ? (tc.getTaskActiveCfgArray(1) || []) : [];
+                    if (!boxCfgs.length) {
+                        boxCfgs = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }];
+                    }
+                    for (let box of boxCfgs) {
+                        const bId = box.id || box._id;
+                        if (bId && (tm.getTaskState(TaskDailyBox, bId) === 2 || tm.getTaskState(TaskDailyBox, bId) === 1)) {
+                            if (typeof tm.reqTaskComplete === "function") {
+                                try {
+                                    tm.reqTaskComplete(TaskDailyBox, bId);
+                                    claimedAny = true;
+                                } catch (e) { }
+                            }
+                        }
+                    }
+
+                    // 9c. Nhận nhiệm vụ tuần & rương tuần nếu đủ mốc
+                    const weeklyTasks = tm.getTaskListByType(TaskWeekly) || [];
+                    const claimableWeekly = [];
+                    for (let w of weeklyTasks) {
+                        const wId = (typeof w === "object") ? (w.id || w._id) : w;
+                        if (tm.getTaskState(TaskWeekly, wId) === 2) {
+                            claimableWeekly.push(wId);
+                        }
+                    }
+                    if (claimableWeekly.length > 0) {
+                        if (typeof tm.reqTaskComplete2 === "function") {
+                            tm.reqTaskComplete2(TaskWeekly, claimableWeekly);
+                        } else if (typeof tm.reqTaskComplete === "function") {
+                            for (let id of claimableWeekly) {
+                                try { tm.reqTaskComplete(TaskWeekly, id); } catch (e) { }
+                            }
+                        }
+                    }
+                    let wBoxCfgs = (tc && typeof tc.getTaskActiveCfgArray === "function") ? (tc.getTaskActiveCfgArray(2) || []) : [];
+                    for (let wBox of wBoxCfgs) {
+                        const wbId = wBox.id || wBox._id;
+                        if (wbId && tm.getTaskState(TaskWeeklyBox, wbId) === 2) {
+                            if (typeof tm.reqTaskComplete === "function") {
+                                try { tm.reqTaskComplete(TaskWeeklyBox, wbId); } catch (e) { }
+                            }
+                        }
+                    }
+
+                    // 9d. Nhận thành tựu nếu có
+                    const achieveTasks = tm.getTaskListByType(TaskAchieve) || [];
+                    for (let a of achieveTasks) {
+                        const aId = (typeof a === "object") ? (a.id || a._id) : a;
+                        if (tm.getTaskState(TaskAchieve, aId) === 2) {
+                            if (typeof tm.reqTaskComplete === "function") {
+                                try { tm.reqTaskComplete(TaskAchieve, aId); } catch (e) { }
+                            }
+                        }
+                    }
+                }
+            } catch (eTask) {
+                console.error("[1-Click Daily Task Error]", eTask);
+            }
+
+            // Đợi 800ms để model cập nhật tài nguyên
+            await new Promise(r => setTimeout(r, 800));
+
+            const endGold = (pm && typeof pm.getGold === "function") ? pm.getGold() : startGold;
+            const endKnb = (pm && typeof pm.getKnb === "function") ? pm.getKnb() : startKnb;
+            const gDelta = endGold - startGold;
+            const kDelta = endKnb - startKnb;
+
+            const summaryMsg = `✨ [1-Bấm Làm Sạch] Hoàn thành 100 điểm Nhiệm Vụ Ngày + Nhận sạch Quà! (Vàng: ${gDelta >= 0 ? '+' : ''}${bot.formatNumber ? bot.formatNumber(gDelta) : gDelta}, KNB: ${kDelta >= 0 ? '+' : ''}${bot.formatNumber ? bot.formatNumber(kDelta) : kDelta})`;
+            bot.log(summaryMsg);
+            if (typeof bot.updateStats === "function") bot.updateStats();
+
+            return {
+                ok: true,
+                goldDelta: gDelta,
+                knbDelta: kDelta,
+                claimedAny: claimedAny
+            };
+        },
+
+        cleanAllDailyAndClaim100: async function () {
+            return await bot.runOneClickAllDailyAndGifts();
+        },
+
         runAutoDailyRewardsSmart: async function (force = false) {
             if (typeof G_Mapping === "undefined" || !G_Mapping.RPCReq) return false;
             if (bot.isBattling()) return false;
@@ -12136,6 +12351,7 @@
 
         checkAndDismissRestartAlert: function () {
             try {
+                if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
                 if (!bot.state.hasLoggedInOnce || !bot.isReady()) return;
                 const nw = (window.G_Mapping && window.G_Mapping.NetWork && window.G_Mapping.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
                 if (!nw) return;
@@ -12187,7 +12403,7 @@
 
         isDisconnected: function () {
             try {
-                if (bot.state.kickedByOtherDevice) return true;
+                if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return true;
                 const nw = (window.G_Mapping && window.G_Mapping.NetWork && window.G_Mapping.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
                 if (nw && typeof nw.isClose === "function") {
                     const closed = nw.isClose();
@@ -13174,6 +13390,31 @@
                 .log-info { color: #60A5FA; }
                 .log-warn { color: #FBBF24; }
 
+                /* 1-Click Clean Daily Button */
+                .btn-clean-daily {
+                    background: linear-gradient(135deg, #F59E0B, #D97706);
+                    color: #FFFFFF;
+                    font-weight: 800;
+                    font-size: 12px;
+                    padding: 9px 0;
+                    margin-bottom: 6px;
+                    border-radius: 8px;
+                    border: 1px solid #FCD34D;
+                    cursor: pointer;
+                    transition: all 0.15s;
+                    text-align: center;
+                    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+                }
+                .btn-clean-daily:active {
+                    transform: scale(0.97);
+                    opacity: 0.9;
+                }
+                .btn-clean-daily:disabled {
+                    background: #64748B;
+                    border-color: #475569;
+                    cursor: not-allowed;
+                }
+
                 /* Master Action */
                 .btn-master {
                     background: #10B981;
@@ -13213,7 +13454,7 @@
                         <div class="header-title-box">
                             <span style="font-size: 16px;">⚡</span>
                             <span class="header-title">3Q ĐÀO ĐÀO ĐÀO</span>
-                            <span class="header-badge">v3.9.20 PRO</span>
+                            <span class="header-badge">v3.9.35 PRO</span>
                         </div>
                         <button class="btn-icon" id="btn-close-hud" title="Thu nhỏ">✕</button>
                     </div>
@@ -13327,7 +13568,8 @@
                             <div class="log-line"><span class="log-time">[Init]</span> <span class="log-ok">Sẵn sàng vận hành.</span></div>
                         </div>
 
-                        <!-- Master Button -->
+                        <!-- Action Buttons -->
+                        <button class="btn-clean-daily" id="btn-clean-daily">✨ 1-BẤM LÀM SẠCH (100Đ NV + HẾT QUÀ)</button>
                         <button class="btn-master" id="btn-master-toggle">TẠM DỪNG TẤT CẢ AUTO</button>
                     </div>
                 </div>
@@ -13500,6 +13742,27 @@
                     bot.log(`[HUD] Đã đặt tốc độ game: ${spd}x`);
                 });
             });
+
+                        // 1-Click Clean Daily Button
+            const btnCleanDaily = shadow.getElementById('btn-clean-daily');
+            if (btnCleanDaily) {
+                btnCleanDaily.onclick = async () => {
+                    btnCleanDaily.disabled = true;
+                    btnCleanDaily.innerText = "⏳ ĐANG LÀM SẠCH NV & QUÀ...";
+                    try {
+                        if (typeof bot.runOneClickAllDailyAndGifts === "function") {
+                            await bot.runOneClickAllDailyAndGifts();
+                        }
+                    } catch (e) {
+                        console.error("[HUD Clean Daily Error]", e);
+                    } finally {
+                        setTimeout(() => {
+                            btnCleanDaily.disabled = false;
+                            btnCleanDaily.innerText = "✨ 1-BẤM LÀM SẠCH (100Đ NV + HẾT QUÀ)";
+                        }, 2500);
+                    }
+                };
+            }
 
             // Master Pause/Resume Button
             let isPausedAll = bot.state ? !bot.state.master : false;

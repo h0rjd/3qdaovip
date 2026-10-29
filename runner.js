@@ -998,6 +998,7 @@ async function launchAndEnterGame(sessionState) {
             m.includes('phiên khác');
         if (isKick) {
             sessionState.kickDetectedFromLog = true;
+            sessionState.isYielding = true;
             const br = sessionState.activeBrowser || sessionState.currentBrowser;
             if (br && !sessionState.closingBrowserForYield) {
                 sessionState.closingBrowserForYield = true;
@@ -1854,63 +1855,13 @@ async function run() {
             }
 
             // Kiểm tra Hot-Reload nếu sửa config.json mỗi 30 giây
-            if (cycle % 3 === 0) {
+            if (cycle % 3 === 0 && activePage && !activePage.isClosed()) {
                 await checkGitConfigHotReload(activePage, sessionState);
             }
 
-            if (!activePage || activePage.isClosed()) {
-                if (sessionState.stopRequested || sessionState.maintenanceDetected) {
-                    const actRes = await handleHardStopOrMaintenance();
-                    if (actRes === 'EXIT_WORKFLOW') break;
-                    continue;
-                }
-                writeLog("[Watchdog] Trang trình duyệt đã đóng, đang khởi tạo lại phiên...");
-                try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
-                activeBrowser = null;
-                activePage = null;
-                const reSession = await safeLaunchAndEnterGame(sessionState);
-                if (reSession && (reSession.browser || reSession.inGame)) {
-                    activeBrowser = reSession.browser;
-                    activePage = reSession.page;
-                    sessionState.activeBrowser = activeBrowser;
-                    sessionState.activePage = activePage;
-                } else {
-                    writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 10s trước khi thử lại...");
-                    await new Promise(r => setTimeout(r, 10000));
-                }
-                continue;
-            }
-
-            const mergedToggles = Object.assign({}, CONFIG.settings, CONFIG.toggles);
-            let status = null;
-            try {
-                status = await activePage.evaluate(async (t) => {
-                    if (window.AutoBot && typeof window.AutoBot.runSmartCycle === "function") {
-                        return await window.AutoBot.runSmartCycle(t);
-                    }
-                    return null;
-                }, mergedToggles);
-            } catch (evalErr) {
-                writeLog(`[Watchdog] ⚠️ Lỗi evaluate runSmartCycle: ${evalErr.message}`);
-            }
-
-            // Kiểm tra trạng thái dừng / bảo trì từ status
-            if (status && (status.isMaintenance || status.hardStopped)) {
-                sessionState.maintenanceDetected = !!status.isMaintenance;
-                sessionState.stopRequested = true;
-                sessionState.stopReason = status.maintenanceReason || (status.isMaintenance ? 'Máy chủ đang bảo trì' : 'Đã dừng AutoBot');
-                const actRes = await handleHardStopOrMaintenance();
-                if (actRes === 'EXIT_WORKFLOW') break;
-                continue;
-            }
-
-            // 1. KIỂM TRA NHƯỜNG MÁY NGAY LẬP TỨC (Khi Điện thoại đăng nhập hoặc nhận lệnh từ Telegram / GUI)
-            const isKickDetected = !!(
-                (status && status.kickedByOtherDevice) ||
-                sessionState.kickDetectedFromLog
-            );
-
-            if ((isKickDetected && CONFIG.settings.yield_on_kick) || sessionState.manualYieldRequested) {
+            // 1. KIỂM TRA NHƯỜNG MÁY TỪ TÍN HIỆU LOG HOẶC MANUAL YIELD TRƯỚC TIÊN
+            const hasKickSignal = !!(sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick);
+            if (hasKickSignal || sessionState.manualYieldRequested) {
                 const isManual = sessionState.manualYieldRequested;
                 sessionState.manualYieldRequested = false;
                 sessionState.kickDetectedFromLog = false;
@@ -1998,6 +1949,64 @@ async function run() {
                     await sendTelegramMessage(resumeHtml, fs.existsSync(resumeSnap) ? resumeSnap : null, sessionState);
                     sessionState.lastReportTime = Date.now();
                 }
+                continue;
+            }
+
+            // 2. NẾU TRANG ĐANG ĐÓNG (VÀ KHÔNG PHẢI ĐANG YIELD HOẶC DỪNG)
+            if (!activePage || activePage.isClosed()) {
+                if (sessionState.isYielding || sessionState.kickDetectedFromLog || sessionState.manualYieldRequested) {
+                    continue;
+                }
+                if (sessionState.stopRequested || sessionState.maintenanceDetected) {
+                    const actRes = await handleHardStopOrMaintenance();
+                    if (actRes === 'EXIT_WORKFLOW') break;
+                    continue;
+                }
+                writeLog("[Watchdog] Trang trình duyệt đã đóng, đang khởi tạo lại phiên...");
+                try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
+                activeBrowser = null;
+                activePage = null;
+                const reSession = await safeLaunchAndEnterGame(sessionState);
+                if (reSession && (reSession.browser || reSession.inGame)) {
+                    activeBrowser = reSession.browser;
+                    activePage = reSession.page;
+                    sessionState.activeBrowser = activeBrowser;
+                    sessionState.activePage = activePage;
+                } else {
+                    writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 10s trước khi thử lại...");
+                    await new Promise(r => setTimeout(r, 10000));
+                }
+                continue;
+            }
+
+            // 3. ĐÁNH GIÁ TRẠNG THÁI GAME QUA EVALUATE
+            const mergedToggles = Object.assign({}, CONFIG.settings, CONFIG.toggles);
+            let status = null;
+            try {
+                status = await activePage.evaluate(async (t) => {
+                    if (window.AutoBot && typeof window.AutoBot.runSmartCycle === "function") {
+                        return await window.AutoBot.runSmartCycle(t);
+                    }
+                    return null;
+                }, mergedToggles);
+            } catch (evalErr) {
+                writeLog(`[Watchdog] ⚠️ Lỗi evaluate runSmartCycle: ${evalErr.message}`);
+            }
+
+            // Kiểm tra trạng thái dừng / bảo trì từ status
+            if (status && (status.isMaintenance || status.hardStopped)) {
+                sessionState.maintenanceDetected = !!status.isMaintenance;
+                sessionState.stopRequested = true;
+                sessionState.stopReason = status.maintenanceReason || (status.isMaintenance ? 'Máy chủ đang bảo trì' : 'Đã dừng AutoBot');
+                const actRes = await handleHardStopOrMaintenance();
+                if (actRes === 'EXIT_WORKFLOW') break;
+                continue;
+            }
+
+            // Kiểm tra kick từ status
+            if (status && status.kickedByOtherDevice && CONFIG.settings.yield_on_kick) {
+                sessionState.kickDetectedFromLog = true;
+                sessionState.isYielding = true;
                 continue;
             }
 
