@@ -9059,8 +9059,9 @@
                         } catch (eRival) { }
                     }
 
-                    // 2. So sánh LC để đảm bảo tỷ lệ thắng 100%:
-                    if (robberPower > 0 && myFullPower > 0 && robberPower > myFullPower) {
+                    // 2. So sánh LC: Cho phép khiêu chiến tới 105% LC mình (thua 0 mất gì, thắng nhận ngay +50 KNB)
+                    const maxPowerThreshold = myFullPower > 0 ? (myFullPower * 1.05) : 310000000;
+                    if (robberPower > 0 && robberPower > maxPowerThreshold) {
                         bot.log(`🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [${robberName}] có LC ${bot.formatNumber(robberPower)} > LC của mình (${bot.formatNumber(myFullPower)}) -> Bỏ qua để giữ tỷ lệ thắng 100%!`);
                         bot.state.failedRescueRids[robRid] = Date.now();
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
@@ -9505,13 +9506,17 @@
 
                         recordUniqueScan(targetRid);
 
-                        const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
-                        if (Date.now() < skipUntil) continue;
-
                         const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
                         // CHỈ THẨM ĐỊNH NHÀ BỐC LỬA / BỊ CHIẾM (_de_res === 1 || 2)
                         // BỎ QUA 0ms TUYỆT ĐỐI NHÀ YÊN BÌNH (_de_res === 0) ĐỂ KHÔNG SPAM PACKET VÀ KHÔNG BỊ TRỄ
                         if (deRes === 1 || deRes === 2) {
+                            const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
+                            const reason = bot.state.skipRescueReason[targetRid] || "";
+                            // Nếu nhà đang bốc lửa: CHỈ bỏ qua nếu chính mình vừa giải cứu xong (rescued) hoặc kẻ cướp quá mạnh (robber_too_strong)
+                            // TUYỆT ĐỐI KHÔNG BỎ QUA nếu chỉ là cooldown kiểm tra định kỳ trước đó!
+                            if (Date.now() < skipUntil && (reason === "rescued" || reason === "robber_too_strong" || reason.startsWith("server_reject"))) {
+                                continue;
+                            }
                             burningHouses.push(house);
                         }
                     }
@@ -9535,10 +9540,10 @@
                         // Nghỉ một nhịp nhẹ 800ms - 1200ms (chuẩn tốc độ người chơi thật làm mới danh sách)
                         // Giúp server ghép cặp cụm người chơi mới và giải phóng hoàn toàn socket.
                         // ĐẶC BIỆT: Tự động ngắt quãng trong 0ms nếu có tín hiệu Cầu Cứu từ Chat Realtime!
-                        await bot.interruptibleRescueSleep(1000);
+                        await bot.interruptibleRescueSleep(350);
                     }
                 } else {
-                    await bot.interruptibleRescueSleep(1000);
+                    await bot.interruptibleRescueSleep(350);
                 }
 
                 if (bot.canDo("rescue_scan_status_log", 60)) {
