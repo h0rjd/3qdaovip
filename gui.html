@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3Q Đào Đào Đào — AutoBot GUI v3.9.32 (24/7 Farm KNB & Telegram)</title>
+    <style>
+        :root {
+            --bg-dark: #070b14;
+            --bg-panel: rgba(17, 24, 39, 0.88);
+            --bg-card: rgba(30, 41, 59, 0.72);
+            --bg-card-hover: rgba(51, 65, 85, 0.85);
+            --border: rgba(148, 163, 184, 0.16);
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-purple: #8b5cf6;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background: radial-gradient(circle at top right, #1e1b4b 0%, #090d16 45%, #050811 100%);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 16px 20px;
+            overflow-x: hidden;
+        }
+
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 14px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 14px 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo {
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.35);
+        }
+
+        .brand-title h1 {
+            font-size: 18px;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .badge-ver {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            font-weight: 700;
+        }
+
+        .brand-sub {
+            font-size: 12.5px;
+            color: var(--text-sub);
+            margin-top: 2px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 700;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+
+        .status-pill.yielding {
+            background: rgba(245, 158, 11, 0.18);
+            color: #fbbf24;
+            border-color: rgba(245, 158, 11, 0.45);
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 10px currentColor;
+            animation: blink 1.6s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+
+        .top-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-main);
+            padding: 9px 14px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.18s ease;
+        }
+
+        .btn:hover {
+            background: var(--bg-card-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            border-color: rgba(96, 165, 250, 0.4);
+        }
+
+        .btn-amber {
+            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+            border-color: rgba(251, 191, 36, 0.4);
+        }
+
+        .btn-green {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            border-color: rgba(52, 211, 153, 0.4);
+        }
+
+        .btn-gold-action {
+            background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+            border-color: rgba(253, 224, 71, 0.6);
+            color: #fff;
+            font-weight: 800;
+            box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
+        }
+
+        .btn-gold-action:hover {
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .oneclick-banner {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 15px;
+            margin-bottom: 14px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(234, 88, 12, 0.16));
+            border: 1px solid rgba(251, 191, 36, 0.55);
+        }
+
+        .oneclick-banner-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .oneclick-banner-title {
+            font-size: 13.5px;
+            font-weight: 800;
+            color: #fde68a;
+        }
+
+        .oneclick-banner-sub {
+            font-size: 11.5px;
+            color: #cbd5e1;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 1300px) {
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .stat-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 12px 15px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .stat-label {
+            font-size: 11.5px;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 18px;
+            font-weight: 800;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .stat-sub {
+            font-size: 12px;
+            color: #34d399;
+            margin-top: 3px;
+            font-weight: 600;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 350px 1fr 410px;
+            gap: 16px;
+            align-items: start;
+        }
+
+        @media (max-width: 1280px) {
+            .main-grid {
+                grid-template-columns: 340px 1fr;
+            }
+            .col-right {
+                grid-column: 1 / -1;
+            }
+        }
+
+        @media (max-width: 860px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-title {
+            font-size: 14.5px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Screen Preview */
+        .screen-wrap {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 450 / 850;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            cursor: crosshair;
+        }
+
+        .screen-wrap img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .screen-overlay-hint {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.72);
+            color: #cbd5e1;
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        .speed-bar {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .speed-btn {
+            flex: 1;
+            padding: 8px 0;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-sub);
+            font-weight: 700;
+            font-size: 12.5px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .speed-btn.active {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: #fff;
+            border-color: #60a5fa;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Toggles Grid */
+        .group-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #93c5fd;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 12px 0 8px;
+        }
+
+        .group-label:first-of-type {
+            margin-top: 0;
+        }
+
+        .toggles-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 9px;
+        }
+
+        @media (max-width: 600px) {
+            .toggles-grid { grid-template-columns: 1fr; }
+        }
+
+        .toggle-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 13px;
+            border-radius: 11px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.16s ease;
+        }
+
+        .toggle-card:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .toggle-card.active {
+            background: rgba(16, 185, 129, 0.14);
+            border-color: rgba(16, 185, 129, 0.45);
+        }
+
+        .toggle-card.highlight-knb.active {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(16, 185, 129, 0.18));
+            border-color: rgba(251, 191, 36, 0.6);
+        }
+
+        .toggle-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .toggle-sub {
+            font-size: 11px;
+            color: var(--text-sub);
+            margin-top: 2px;
+        }
+
+        .switch {
+            width: 40px;
+            height: 22px;
+            border-radius: 999px;
+            background: rgba(100, 116, 139, 0.45);
+            position: relative;
+            flex-shrink: 0;
+            transition: background 0.2s ease;
+        }
+
+        .switch::after {
+            content: "";
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            transition: transform 0.2s ease;
+        }
+
+        .toggle-card.active .switch {
+            background: #10b981;
+        }
+
+        .toggle-card.active .switch::after {
+            transform: translateX(18px);
+        }
+
+        /* Config Form & Logs */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .form-field.full {
+            grid-column: 1 / -1;
+        }
+
+        .form-field label {
+            font-size: 11.5px;
+            color: var(--text-sub);
+            font-weight: 600;
+        }
+
+        .form-field input, .form-field select {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 8px 11px;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .form-field input:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .log-box {
+            background: #05080f;
+            border: 1px solid var(--border);
+            border-radius: 11px;
+            height: 360px;
+            overflow-y: auto;
+            padding: 10px 12px;
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .log-item {
+            margin-bottom: 4px;
+            word-break: break-word;
+            color: #cbd5e1;
+        }
+
+        .log-item.ok { color: #34d399; }
+        .log-item.warn { color: #fbbf24; }
+        .log-item.err { color: #f87171; }
+        .log-item.tele { color: #60a5fa; }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(16, 185, 129, 0.95);
+            color: #fff;
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.45);
+            transform: translateY(80px);
+            opacity: 0;
+            transition: all 0.25s ease;
+            z-index: 9999;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <div class="brand">
+            <div class="brand-logo">⚔️</div>
+            <div class="brand-title">
+                <h1>
+                    3Q Đào Đào Đào — AutoBot GUI
+                    <span class="badge-ver">v3.9.34 • Anti-Lag Stop & Bypass</span>
+                </h1>
+                <div class="brand-sub">Treo 24/7 • Tự ngắt 100% Login khi Dừng/Bảo trì • Mở khóa sớm tính năng Client • Đồng bộ Telegram</div>
+            </div>
+        </div>
+
+        <div id="status-badge" class="status-pill">
+            <span class="status-dot"></span>
+            <span id="status-text">ĐANG KHỞI ĐỘNG...</span>
+        </div>
+
+        <div class="top-actions">
+            <button id="btn-oneclick-top" class="btn btn-gold-action" onclick="triggerOneClickDaily()">⚡ Dọn NV Ngày + Mua Vàng KNB + Nhận Full Quà</button>
+            <button id="btn-yield" class="btn btn-amber" onclick="triggerYieldToggle()">⏸️ Nghỉ 15p Nhường Máy</button>
+            <button id="btn-stop-bot" class="btn" style="background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.55); color: #fca5a5; font-weight: 700;" onclick="triggerStopBot()">🛑 Dừng Hẳn Bot (Ngắt Login)</button>
+            <button class="btn btn-primary" onclick="sendTelegramReportNow()">📸 Báo Cáo Telegram Ngay</button>
+            <button id="btn-browser-mode" class="btn" onclick="toggleShowBrowser()">🖥️ Cửa Sổ Game: Đang Hiện</button>
+            <button class="btn" onclick="restartBrowserSession()">🔄 Tải Lại Game</button>
+        </div>
+    </div>
+
+    <!-- 6 LIVE STAT CARDS -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">👤 Nhân Vật & Máy Chủ</div>
+            <div class="stat-value" id="st-role">Đang tải...</div>
+            <div class="stat-sub" id="st-server">Tam Quốc S6</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">⚔️ Lực Chiến</div>
+            <div class="stat-value" id="st-power">0</div>
+            <div class="stat-sub" id="st-level">Cấp: --</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">💎 KNB Hiện Có</div>
+            <div class="stat-value" id="st-jade">0</div>
+            <div class="stat-sub" id="st-jade-diff">+0 KNB phiên này</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">🏡 Giải Cứu Gia Viên (50 KNB)</div>
+            <div class="stat-value" id="st-rescue">0 lượt (+0 KNB)</div>
+            <div class="stat-sub" id="st-homes">Đã tuần tra: 0 nhà</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">🗺️ Tiến Độ Ải & Tháp</div>
+            <div class="stat-value" id="st-stage">Ải -- | Tháp --</div>
+            <div class="stat-sub" id="st-gold">Vàng: 0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">⏱️ Thời Gian Treo & Nhường Máy</div>
+            <div class="stat-value" id="st-uptime">0 phút</div>
+            <div class="stat-sub" id="st-yield-info">Nhường ĐT 15p: BẬT</div>
+        </div>
+    </div>
+
+    <div class="main-grid">
+        <!-- CỘT 1: MÀN HÌNH GAME TRỰC TIẾP -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">📱 Màn Hình Game Trực Tiếp</div>
+                <span style="font-size: 11.5px; color: var(--text-sub);" id="snap-time">Live</span>
+            </div>
+            <div class="screen-wrap" id="screen-wrap" onclick="handleCanvasClick(event)">
+                <img id="live-screen" src="/api/screenshot?t=0" alt="Game Screen" onerror="this.style.opacity=0.2" onload="this.style.opacity=1">
+                <div class="screen-overlay-hint">👆 Click vào ảnh để chạm trực tiếp vào Game</div>
+            </div>
+            <div class="speed-bar">
+                <button class="speed-btn" data-spd="1" onclick="setSpeed(1)">⚡ x1</button>
+                <button class="speed-btn active" data-spd="2" onclick="setSpeed(2)">⚡ x2</button>
+                <button class="speed-btn" data-spd="3" onclick="setSpeed(3)">⚡ x3</button>
+                <button class="speed-btn" data-spd="5" onclick="setSpeed(5)">⚡ x5</button>
+            </div>
+        </div>
+
+        <!-- CỘT 2: CÔNG TẮC TÍNH NĂNG TRỰC TIẾP -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">🎛️ Bảng Điều Khiển Tính Năng Thời Gian Thực (Bấm Là Đổi Ngay)</div>
+                <span style="font-size: 12px; color: #34d399; font-weight: 600;">Tự động lưu config.json</span>
+            </div>
+
+            <!-- 1-CLICK ALL-IN-ONE DAILY ACTION BANNER -->
+            <div class="oneclick-banner">
+                <div class="oneclick-banner-info">
+                    <div class="oneclick-banner-title">⚡ 1-Click: Làm Hết NV Ngày + Mua Hết Lượt Vàng KNB + Nhận Sạch Ưu Đãi & Gói Quà</div>
+                    <div class="oneclick-banner-sub">Trợ lý nhanh, Điểm Kim Free+KNB, Phó bản ngày, 5 Rương Sôi Nổi, Thẻ Tháng, Quỹ, Shop 0Đ, Chiến Lệnh, Thư...</div>
+                </div>
+                <button id="btn-oneclick-main" class="btn btn-gold-action" onclick="triggerOneClickDaily()">🚀 Thực Hiện Ngay</button>
+            </div>
+
+            <div class="group-label">🔥 Cày KNB & Vượt Ải Chủ Lực</div>
+            <div class="toggles-grid" id="group-core"></div>
+
+            <div class="group-label">🏯 Gia Viên, Bí Cảnh, Bang Hội & Đào Bảo</div>
+            <div class="toggles-grid" id="group-guild"></div>
+
+            <div class="group-label">🎯 Sự Kiện, Đấu Trường, Phúc Lợi & Ngoại Trang</div>
+            <div class="toggles-grid" id="group-events"></div>
+        </div>
+
+        <!-- CỘT 3: CẤU HÌNH NHƯỜNG MÁY & NHẬT KÝ -->
+        <div class="panel col-right">
+            <div class="panel-header">
+                <div class="panel-title">⚙️ Cài Đặt Nhường Máy & Telegram</div>
+                <button class="btn btn-green" style="padding: 6px 12px; font-size: 12px;" onclick="saveSettingsForm()">💾 Lưu Cài Đặt</button>
+            </div>
+
+            <div class="form-grid">
+                <div class="form-field">
+                    <label>Tài khoản JoyPlay</label>
+                    <input type="text" id="cfg-email" placeholder="Email đăng nhập">
+                </div>
+                <div class="form-field">
+                    <label>Máy chủ mục tiêu</label>
+                    <input type="text" id="cfg-server" placeholder="Tam Quốc S6">
+                </div>
+                <div class="form-field">
+                    <label>Nghỉ nhường ĐT (phút)</label>
+                    <input type="number" id="cfg-yield-min" min="1" max="180" value="15">
+                </div>
+                <div class="form-field">
+                    <label>Báo cáo Tele (phút/lần)</label>
+                    <input type="number" id="cfg-tele-min" min="1" max="240" value="30">
+                </div>
+            </div>
+
+            <div class="panel-header" style="margin-top: 8px;">
+                <div class="panel-title">📜 Nhật Ký Hoạt Động Thời Gian Thực</div>
+                <span style="font-size: 11.5px; color: var(--text-sub);" id="log-count">0 dòng</span>
+            </div>
+            <div class="log-box" id="log-box"></div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast">✅ Đã cập nhật!</div>
+
+    <script>
+        const CORE_ITEMS = [
+            { key: 'auto_rescue_knb', name: '💎 Farm 50 KNB Gia Viên', sub: 'Giải cứu nhận 50 KNB/lượt không giới hạn', highlight: true },
+            { key: 'auto_stage', name: '⚔️ Tự Động Vượt Ải Chính', sub: 'Đánh ải chính tuyến liên tục' },
+            { key: 'auto_longmach', name: '🎲 Tự Động Long Mạch', sub: 'Đoạt bảo / Xúc xắc Long Quốc' },
+            { key: 'auto_tower', name: '🏰 Leo Tháp Thông Thiên', sub: 'Vượt tháp chính & tháp nguyên tố' }
+        ];
+
+        const GUILD_ITEMS = [
+            { key: 'auto_host', name: '🏡 Quản Lý Gia Viên', sub: 'Thu hoạch, phái thợ, cướp & đánh đuổi' },
+            { key: 'auto_defjz', name: '🛡️ Bí Cảnh Tần Lĩnh', sub: 'Tự động vào trận & chọn kỹ năng' },
+            { key: 'auto_guild_mine', name: '🌾 Mỏ Bang (2 Đội)', sub: 'Tự động chiếm & thu hoạch mỏ bang' },
+            { key: 'auto_treasure', name: '⛏️ Tự Động Đào Kho Báu', sub: 'Đào xẻng & lọc trang bị lực chiến cao' },
+            { key: 'auto_dispatch', name: '🗺️ Tự Động Phái Tướng', sub: 'Nhận thưởng & phái tướng nhiệm vụ' },
+            { key: 'auto_yyzq_core', name: '🔮 Cấm Địa / Đạo Mộ', sub: 'Tự động càn quét & nhận rương AFK' }
+        ];
+
+        const EVENT_ITEMS = [
+            { key: 'auto_daily_rewards', name: '🎁 Quà Ngày, Ưu Đãi & Gói Quà', sub: 'Full NV ngày, Rương sôi nổi, Thẻ tháng, Shop 0Đ', highlight: true },
+            { key: 'auto_buy_gold', name: '💰 Tự Mua Hết Lượt Vàng (KNB)', sub: 'Mua full Điểm Kim bằng KNB & càn quét Phó Bản', highlight: true },
+            { key: 'auto_arena', name: '🏆 Tự Động Đấu Trường', sub: 'Đánh đối thủ lực chiến thấp hơn' },
+            { key: 'auto_rank', name: '👑 Bái Kiến 7 BXH', sub: 'Bái kiến nhận KNB & thưởng 7 bảng' },
+            { key: 'auto_skvs', name: '🐯 Long Hổ Tranh Đấu', sub: 'Báo danh, cược & nhận lì xì SKVS' },
+            { key: 'auto_touhu', name: '🎯 Tự Động Thần Xạ', sub: 'Aimbot ném tên bách phát bách trúng' },
+            { key: 'auto_feidao', name: '🗡️ Tự Động Phi Kiếm', sub: 'Phi dao sự kiện tự động' },
+            { key: 'auto_hongbao', name: '🧧 Tự Động Giật Lì Xì', sub: 'Canh & mở phong bao lì xì' },
+            { key: 'auto_free_lottery', name: '🎰 Quay Tướng Miễn Phí', sub: 'Tự quay lượt chiêu mộ miễn phí' },
+            { key: 'auto_split_purple_shard', name: '🧩 Tách Mảnh Tím/Cam', sub: 'Tự động phân giải mảnh tướng dư' },
+            { key: 'mod_skin', name: '✨ Mở Khóa Skin & Khung', sub: 'Kích hoạt bộ ngoại trang & danh hiệu' },
+            { key: 'skip_ads', name: '🚫 Bỏ Qua Quảng Cáo 0s', sub: 'Nhận thưởng quảng cáo tức thì' },
+            { key: 'skip_battle', name: '⏩ Bỏ Qua Hoạt Cảnh Trận', sub: 'Skip trận đấu 0s các chế độ hỗ trợ' }
+        ];
+
+        let currentState = null;
+        let formInitialized = false;
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        function renderToggleGroup(containerId, items, toggles, settings) {
+            const el = document.getElementById(containerId);
+            el.innerHTML = items.map(item => {
+                const val = (toggles && toggles[item.key] !== undefined)
+                    ? !!toggles[item.key]
+                    : !!(settings && settings[item.key]);
+                return `
+                    <div class="toggle-card ${val ? 'active' : ''} ${item.highlight ? 'highlight-knb' : ''}" onclick="toggleFeature('${item.key}')">
+                        <div>
+                            <div class="toggle-name">${item.name}</div>
+                            <div class="toggle-sub">${item.sub}</div>
+                        </div>
+                        <div class="switch"></div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function toggleFeature(key) {
+            try {
+                const res = await fetch('/api/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key })
+                }).then(r => r.json());
+                if (res.ok) {
+                    showToast(`${res.value ? '🟢 Đã BẬT' : '⚪ Đã TẮT'}: ${key}`);
+                    await fetchStatus();
+                }
+            } catch (e) {}
+        }
+
+        async function triggerOneClickDaily() {
+            const bTop = document.getElementById('btn-oneclick-top');
+            const bMain = document.getElementById('btn-oneclick-main');
+            if (bTop) bTop.disabled = true;
+            if (bMain) {
+                bMain.disabled = true;
+                bMain.textContent = '⏳ Đang chạy...';
+            }
+            showToast('⚡ Đang làm hết NV Ngày + Mua hết Vàng KNB + Nhận sạch Ưu Đãi & Quà...');
+            try {
+                const res = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'one_click_daily' })
+                }).then(r => r.json());
+                if (res && res.ok) {
+                    showToast(res.message || '✅ Đã hoàn tất 100% NV Ngày + Mua Vàng KNB + Nhận Quà!');
+                } else {
+                    showToast('⚠️ ' + ((res && res.error) || 'Chưa kết nối phiên game'));
+                }
+                await fetchStatus();
+                setTimeout(refreshScreenshot, 600);
+            } catch (e) {
+                showToast('❌ Lỗi kết nối tới máy chủ GUI!');
+            } finally {
+                if (bTop) bTop.disabled = false;
+                if (bMain) {
+                    bMain.disabled = false;
+                    bMain.textContent = '🚀 Thực Hiện Ngay';
+                }
+            }
+        }
+
+        async function setSpeed(spd) {
+            try {
+                await fetch('/api/speed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ speed: spd })
+                });
+                showToast(`⚡ Đã đặt tốc độ game: x${spd}`);
+                await fetchStatus();
+            } catch (e) {}
+        }
+
+        async function triggerYieldToggle() {
+            const action = (currentState && (currentState.isYielding || currentState.isStopped)) ? 'resume' : 'pause';
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            showToast(action === 'pause' ? '⏸️ Đã tạm dừng nhường máy!' : '▶️ Đang đăng nhập lại ngay!');
+            await fetchStatus();
+        }
+
+        async function triggerStopBot() {
+            const isStopped = !!(currentState && currentState.isStopped);
+            const action = isStopped ? 'resume' : 'stop_bot';
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            showToast(isStopped ? '▶️ Đang khởi động và đăng nhập lại!' : '🛑 Đã DỪNG HẲN BOT & ngắt toàn bộ Login/Reconnect!');
+            await fetchStatus();
+        }
+
+        async function sendTelegramReportNow() {
+            showToast('📡 Đang chụp ảnh & gửi báo cáo về Telegram...');
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'report_telegram' })
+            });
+            showToast('✅ Đã gửi báo cáo về Telegram!');
+        }
+
+        async function toggleShowBrowser() {
+            showToast('🖥️ Đang chuyển chế độ hiển thị cửa sổ Game...');
+            const res = await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'toggle_browser' })
+            }).then(r => r.json());
+            showToast(res.show_browser ? '🖥️ Đã mở cửa sổ trình duyệt Game!' : '👻 Đã chuyển sang chạy ngầm (Headless)!');
+            await fetchStatus();
+        }
+
+        async function restartBrowserSession() {
+            showToast('🔄 Đang khởi động lại phiên trình duyệt Game...');
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'restart' })
+            });
+        }
+
+        async function saveSettingsForm() {
+            const email = document.getElementById('cfg-email').value.trim();
+            const server = document.getElementById('cfg-server').value.trim();
+            const yieldMin = Number(document.getElementById('cfg-yield-min').value) || 15;
+            const teleMin = Number(document.getElementById('cfg-tele-min').value) || 30;
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, server, yield_wait_minutes: yieldMin, report_interval_min: teleMin })
+            });
+            showToast('💾 Đã lưu cài đặt vào config.json!');
+            await fetchStatus();
+        }
+
+        async function handleCanvasClick(ev) {
+            const wrap = document.getElementById('screen-wrap');
+            const rect = wrap.getBoundingClientRect();
+            const x = Math.round(((ev.clientX - rect.left) / rect.width) * 450);
+            const y = Math.round(((ev.clientY - rect.top) / rect.height) * 850);
+            await fetch('/api/click', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x, y })
+            });
+            showToast(`👆 Đã chạm tọa độ (${x}, ${y})`);
+            setTimeout(refreshScreenshot, 600);
+        }
+
+        function refreshScreenshot() {
+            const img = document.getElementById('live-screen');
+            img.src = '/api/screenshot?t=' + Date.now();
+            document.getElementById('snap-time').textContent = new Date().toLocaleTimeString('vi-VN');
+        }
+
+        function fmt(n) {
+            const num = Number(n || 0);
+            return isNaN(num) ? String(n || 0) : num.toLocaleString('en-US');
+        }
+
+        async function fetchStatus() {
+            try {
+                const data = await fetch('/api/status').then(r => r.json());
+                currentState = data;
+
+                const badge = document.getElementById('status-badge');
+                const statusText = document.getElementById('status-text');
+                const btnYield = document.getElementById('btn-yield');
+                const btnStop = document.getElementById('btn-stop-bot');
+
+                if (data.isStopped) {
+                    badge.className = 'status-pill yielding';
+                    statusText.textContent = `🛑 ĐÃ DỪNG HẲN (NGẮT 100% LOGIN)`;
+                    btnYield.textContent = '▶️ Chạy Lại Ngay';
+                    btnYield.className = 'btn btn-green';
+                    if (btnStop) {
+                        btnStop.textContent = '▶️ Mở Lại Bot';
+                        btnStop.className = 'btn btn-green';
+                        btnStop.style = '';
+                    }
+                } else if (data.isYielding) {
+                    badge.className = 'status-pill yielding';
+                    const remSec = Math.max(0, Math.round((data.yieldEndTime - Date.now()) / 1000));
+                    const m = Math.floor(remSec / 60);
+                    const s = remSec % 60;
+                    statusText.textContent = `⏸️ ĐANG NHƯỜNG MÁY ĐT (${m}p ${s}s)`;
+                    btnYield.textContent = '▶️ Chạy Lại Ngay (Bỏ Chờ)';
+                    btnYield.className = 'btn btn-green';
+                    if (btnStop) {
+                        btnStop.textContent = '🛑 Dừng Hẳn Bot (Ngắt Login)';
+                        btnStop.className = 'btn';
+                        btnStop.style = 'background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.55); color: #fca5a5; font-weight: 700;';
+                    }
+                } else {
+                    badge.className = 'status-pill';
+                    statusText.textContent = data.inGame ? '🟢 ĐANG TREO AUTO 24/7' : '🔄 ĐANG KẾT NỐI VÀO GAME...';
+                    btnYield.textContent = `⏸️ Nghỉ ${data.config.settings.yield_wait_minutes || 15}p Nhường Máy`;
+                    btnYield.className = 'btn btn-amber';
+                    if (btnStop) {
+                        btnStop.textContent = '🛑 Dừng Hẳn Bot (Ngắt Login)';
+                        btnStop.className = 'btn';
+                        btnStop.style = 'background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.55); color: #fca5a5; font-weight: 700;';
+                    }
+                }
+
+                const btnBrowser = document.getElementById('btn-browser-mode');
+                btnBrowser.textContent = data.config.settings.show_browser
+                    ? '🖥️ Cửa Sổ Game: ĐANG HIỆN'
+                    : '👻 Cửa Sổ Game: CHẠY NGẦM';
+
+                const st = data.stats || {};
+                document.getElementById('st-role').textContent = st.roleName || 's6.TàoPhi';
+                document.getElementById('st-server').textContent = `Máy chủ: ${data.config.server}`;
+                document.getElementById('st-power').textContent = fmt(st.basePower || st.power || 0);
+                document.getElementById('st-level').textContent = `Cấp độ: ${st.level || '--'} ${st.usingLowPowerPreset ? '• ⚠️ Đội 2 tướng dò nhà' : '• ✅ Đội hình chính'}`;
+                document.getElementById('st-jade').textContent = fmt(st.jade || 0);
+                const diff = data.jadeDiff || 0;
+                document.getElementById('st-jade-diff').textContent = `${diff >= 0 ? '+' : ''}${fmt(diff)} KNB trong phiên`;
+                document.getElementById('st-rescue').textContent = `${fmt(data.totalRescued)} lượt (+${fmt(data.totalKnb)} KNB)`;
+                document.getElementById('st-homes').textContent = `Đã tuần tra: ${fmt(data.totalHomes)} Gia Viên`;
+                document.getElementById('st-stage').textContent = `Ải ${st.stage || '--'} | Tháp ${st.towerFloor || '--'}`;
+                document.getElementById('st-gold').textContent = `Vàng: ${fmt(st.gold || 0)}`;
+                document.getElementById('st-uptime').textContent = `${data.uptimeMinutes || 0} phút (24/7)`;
+                document.getElementById('st-yield-info').textContent = `Nhường ĐT: ${data.config.settings.yield_on_kick ? 'BẬT (' + (data.config.settings.yield_wait_minutes || 15) + 'p)' : 'TẮT'}`;
+
+                renderToggleGroup('group-core', CORE_ITEMS, data.config.toggles, data.config.settings);
+                renderToggleGroup('group-guild', GUILD_ITEMS, data.config.toggles, data.config.settings);
+                renderToggleGroup('group-events', EVENT_ITEMS, data.config.toggles, data.config.settings);
+
+                document.querySelectorAll('.speed-btn').forEach(b => {
+                    const s = Number(b.getAttribute('data-spd'));
+                    b.classList.toggle('active', s === Number(data.config.settings.speed_hack || 2));
+                });
+
+                if (!formInitialized) {
+                    formInitialized = true;
+                    document.getElementById('cfg-email').value = data.config.email || '';
+                    document.getElementById('cfg-server').value = data.config.server || 'Tam Quốc S6';
+                    document.getElementById('cfg-yield-min').value = data.config.settings.yield_wait_minutes || 15;
+                    document.getElementById('cfg-tele-min').value = data.config.telegram.report_interval_min || 30;
+                }
+
+                const logBox = document.getElementById('log-box');
+                const logs = data.logs || [];
+                document.getElementById('log-count').textContent = `${logs.length} dòng gần nhất`;
+                const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 60;
+                logBox.innerHTML = logs.map(line => {
+                    let cls = '';
+                    if (line.includes('✅') || line.includes('thành công') || line.includes('Giải cứu')) cls = 'ok';
+                    else if (line.includes('⚠️') || line.includes('Nhường Máy')) cls = 'warn';
+                    else if (line.includes('❌') || line.includes('Error')) cls = 'err';
+                    else if (line.includes('[Telegram]')) cls = 'tele';
+                    return `<div class="log-item ${cls}">${line.replace(/</g, '&lt;')}</div>`;
+                }).join('');
+                if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+            } catch (e) {}
+        }
+
+        fetchStatus();
+        setInterval(fetchStatus, 2000);
+        setInterval(refreshScreenshot, 3500);
+    </script>
+</body>
+</html>

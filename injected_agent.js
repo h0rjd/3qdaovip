@@ -179,12 +179,24 @@
             rescuedKnbTotal: 0,
             inspectedHomesCount: 0,
             totalRescueScanned: 0,
-            basePower: 0
+            basePower: 0,
+            sessionStartTime: Date.now(),
+            sessionKnbFarmed: 0,
+            sessionStagesCleared: 0,
+            sessionTowerFloors: 0,
+            sessionWins: 0,
+            sessionLosses: 0,
+            initialStage: null,
+            initialTower: null,
+            initialJade: null
         },
 
         // Bộ nhớ trạng thái & Cooldown
         state: {
             master: true,
+            isSleepMode: false,
+            autoSleepIdle: true,
+            lastUserInteractionTime: Date.now(),
             stageFailCount: 0,
             lastStageFailTime: 0,
             lastStageFailPower: 0,
@@ -1463,8 +1475,9 @@
             return true;
         },
 
-        sleep: function (ms) {
-            return new Promise(function (resolve) { setTimeout(resolve, ms); });
+        sleep: function (ms, useJitter = false) {
+            const jitter = useJitter ? Math.floor(Math.random() * 25) : 0;
+            return new Promise(function (resolve) { setTimeout(resolve, ms + jitter); });
         },
 
         log: function (msg, data) {
@@ -5290,6 +5303,14 @@
                                 const winner = Number(warData && (warData._winner != null ? warData._winner : warData.winner));
 
                                 if (bType) {
+                                    if (winner === 1) {
+                                        bot.stats.sessionWins = (bot.stats.sessionWins || 0) + 1;
+                                    } else if (winner === 2) {
+                                        bot.stats.sessionLosses = (bot.stats.sessionLosses || 0) + 1;
+                                    }
+                                    if (typeof window !== "undefined" && window.__UPDATE_HUD_STATS__) {
+                                        try { window.__UPDATE_HUD_STATS__(bot.stats); } catch (e) { }
+                                    }
                                     if (warId) window.__LAST_WAR_ID__ = warId;
                                     if (!bot.state.lastBattleByType) bot.state.lastBattleByType = {};
                                     const bEntry = {
@@ -6482,6 +6503,120 @@
             bot.settings.skip_battle = !!val;
         },
 
+        enterSleepMode: function () {
+            bot.state.isSleepMode = true;
+            try {
+                if (window.cc && window.cc.game && typeof window.cc.game.setFrameRate === "function") {
+                    window.cc.game.setFrameRate(20);
+                }
+            } catch (e) { }
+            try {
+                if (typeof window.__SHOW_SLEEP_OVERLAY__ === "function") {
+                    window.__SHOW_SLEEP_OVERLAY__(true);
+                }
+            } catch (e) { }
+            bot.log("🌙 [Treo Máy] Đã kích hoạt Chế Độ Tiết Kiệm Pin (20 FPS & Khóa Màn Hình OLED)!");
+        },
+
+        exitSleepMode: function () {
+            bot.state.isSleepMode = false;
+            try {
+                if (window.cc && window.cc.game && typeof window.cc.game.setFrameRate === "function") {
+                    window.cc.game.setFrameRate(60);
+                }
+            } catch (e) { }
+            try {
+                if (typeof window.__SHOW_SLEEP_OVERLAY__ === "function") {
+                    window.__SHOW_SLEEP_OVERLAY__(false);
+                }
+            } catch (e) { }
+            bot.log("☀️ [Treo Máy] Đã mở khóa màn hình & khôi phục tốc độ 60 FPS!");
+        },
+
+        dumpCharacterSummary: function () {
+            try {
+                bot.updateStats();
+                const mm = window.ModelManager || bot.getModelManager() || (window.G_Mapping && window.G_Mapping.ModelManager);
+                const pm = mm && mm.PlayerModel;
+                const ri = pm && typeof pm.getRoleInfo === "function" ? pm.getRoleInfo() : null;
+                const gm = mm && mm.GuildModel;
+
+                const roleName = bot.stats.roleName || (ri && (ri._name || ri.name)) || "Hiệp Khách";
+                const roleId = (ri && (ri._id || ri.id || ri._rid)) || (pm && pm._roleId) || "--";
+                const level = bot.stats.level || (ri && (ri._level || ri.level)) || 1;
+                const power = bot.stats.power ? Number(bot.stats.power).toLocaleString() : "0";
+                const gold = bot.stats.gold ? Number(bot.stats.gold).toLocaleString() : "0";
+                const jade = bot.stats.jade ? Number(bot.stats.jade).toLocaleString() : "0";
+                const stage = bot.stats.stage || 1;
+                const tower = bot.stats.towerFloor || 1;
+                const shovels = `${bot.stats.shovels || 0} thường / ${bot.stats.shovelsAdv || 0} vàng / ${bot.stats.shovelsMyth || 0} thần`;
+                
+                let guildName = "Chưa gia nhập";
+                if (gm && gm.guildInfo && gm.guildInfo.name) {
+                    guildName = gm.guildInfo.name;
+                }
+
+                const uptimeSec = Math.floor((Date.now() - (bot.stats.sessionStartTime || Date.now())) / 1000);
+                const h = String(Math.floor(uptimeSec / 3600)).padStart(2, '0');
+                const m = String(Math.floor((uptimeSec % 3600) / 60)).padStart(2, '0');
+                const s = String(uptimeSec % 60).padStart(2, '0');
+                const uptimeStr = `${h}:${m}:${s}`;
+
+                const report = [
+                    `🎮 [3Q ĐÀO ĐÀO ĐÀO - BÁO CÁO NHÂN VẬT & TÀI KHOẢN]`,
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+                    `👤 Tên Nhân Vật  : ${roleName} (ID: ${roleId})`,
+                    `🎖️ Cấp Độ        : Lv.${level}`,
+                    `💪 Lực Chiến      : ${power}`,
+                    `⚔️ Ải Hiện Tại    : Ải ${stage} (+${bot.stats.sessionStagesCleared || 0} trong phiên)`,
+                    `🏰 Tháp Hiện Tại  : Tầng ${tower} (+${bot.stats.sessionTowerFloors || 0} trong phiên)`,
+                    `💰 Kim Nguyên Bảo : ${jade} KNB (+${bot.stats.sessionKnbFarmed || 0} đã farm)`,
+                    `🪙 Vàng Dự Trữ   : ${gold} Vàng`,
+                    `⛏️ Xẻng Đào Bảo   : ${shovels}`,
+                    `🌾 Bang Hội       : ${guildName}`,
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+                    `📊 THỐNG KÊ PHIÊN (SESSION TELEMETRY):`,
+                    `⏱️ Thời Gian Chạy : ${uptimeStr}`,
+                    `🏆 Tỉ Lệ Thắng    : ${bot.stats.sessionWins || 0} Thắng / ${bot.stats.sessionLosses || 0} Thua`,
+                    `🏡 Gia Viên Quét  : ${bot.stats.inspectedHomesCount || 0} nhà | Cứu: ${bot.stats.rescuedCount || 0} lần`,
+                    `⏰ Xuất Báo Cáo    : ${new Date().toLocaleString('vi-VN')}`
+                ].join('\n');
+
+                return report;
+            } catch (e) {
+                return `[Báo Cáo] Lỗi thu thập: ${e.message}`;
+            }
+        },
+
+        copyCharacterSummary: async function () {
+            const summary = bot.dumpCharacterSummary();
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(summary);
+                    bot.showToast("✅ Đã sao chép báo cáo tài khoản vào bộ nhớ tạm!");
+                    return true;
+                }
+            } catch (eClip) { }
+            try {
+                const ta = document.createElement("textarea");
+                ta.value = summary;
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                ta.style.top = "-9999px";
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                const ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                if (ok) {
+                    bot.showToast("✅ Đã sao chép báo cáo tài khoản vào bộ nhớ tạm!");
+                    return true;
+                }
+            } catch (eDom) { }
+            bot.log("[Clipboard] " + summary);
+            return false;
+        },
+
         // Giữ nguyên tỷ lệ chuẩn của Cocos2d-js để giao diện Full màn hình sắc nét tự nhiên
         enhanceCanvasResolution: function () {
         },
@@ -6622,6 +6757,20 @@
                 bot.stats.inspectedHomesCount = Number(bot.state.totalRescueScanned || 0);
                 bot.stats.totalRescueScanned = Number(bot.state.totalRescueScanned || 0);
                 bot.stats.basePower = Number((bot.state.savedFullMainArray && bot.state.savedFullMainArray.rolePower) || bot.stats.power || 0);
+
+                // Cập nhật session tracking thời gian thực (GhostSoul Telemetry)
+                if (bot.stats.initialStage === null && bot.stats.stage > 0) bot.stats.initialStage = bot.stats.stage;
+                if (bot.stats.initialTower === null && bot.stats.towerFloor > 0) bot.stats.initialTower = bot.stats.towerFloor;
+                if (bot.stats.initialJade === null && bot.stats.jade > 0) bot.stats.initialJade = bot.stats.jade;
+
+                if (bot.stats.initialStage && bot.stats.stage >= bot.stats.initialStage) {
+                    bot.stats.sessionStagesCleared = bot.stats.stage - bot.stats.initialStage;
+                }
+                if (bot.stats.initialTower && bot.stats.towerFloor >= bot.stats.initialTower) {
+                    bot.stats.sessionTowerFloors = bot.stats.towerFloor - bot.stats.initialTower;
+                }
+                const farmDelta = (bot.stats.initialJade && bot.stats.jade >= bot.stats.initialJade) ? (bot.stats.jade - bot.stats.initialJade) : 0;
+                bot.stats.sessionKnbFarmed = Math.max(Number(bot.stats.rescuedKnbTotal || 0), farmDelta);
             } catch (e) { }
             return bot.stats;
         },
@@ -13041,7 +13190,8 @@
         FEAT_AUTO_GUILD_MINE: !isNativeApp,
         FEAT_AUTO_RECYCLE_FRAGMENTS: true,
         FEAT_AUTO_DEFJZ: false,
-        FEAT_AUTO_DAILY_REWARDS: true
+        FEAT_AUTO_DAILY_REWARDS: true,
+        FEAT_SLEEP_MODE: false
     };
 
     window.__dauto_toggle = function (key, val) {
@@ -13049,7 +13199,13 @@
         if (window.__DAUTO_CONFIG) window.__DAUTO_CONFIG[key] = val;
         if (!window.AutoBot) return;
         const b = window.AutoBot;
-        if (key === "master") {
+        if (key === "FEAT_SLEEP_MODE") {
+            if (val) {
+                b.enterSleepMode();
+            } else {
+                b.exitSleepMode();
+            }
+        } else if (key === "master") {
             b.state.master = val;
             b.settings.skip_ads = val;
             b.settings.skip_battle = val;
@@ -13338,14 +13494,14 @@
         bot.enforceMineTeam2Unlock();
         bot.hookGameEngine();
         bot.startScheduleLoop();
-        if (!window.__HIDE_IN_GAME_HUD__ && typeof jsb === "undefined" && typeof window !== "undefined" && window.__INIT_3Q_HUD__) {
+        if (!window.__HIDE_IN_GAME_HUD__ && typeof document !== "undefined" && typeof document.createElement === "function" && window.__INIT_3Q_HUD__) {
             try { window.__INIT_3Q_HUD__(bot); } catch (e) { }
         }
     }, 1500));
 
 /**
  * In-Game Floating HUD Overlay for 3Q Đào Đào Đào (Tampermonkey & Web Injected Agent)
- * Designed with UI/UX Pro Max Glassmorphism & Dark Mode OLED Architecture
+ * Designed with UI/UX Pro Max Glassmorphism & GhostSoul Multi-Tab OLED Architecture
  */
 
 (function () {
@@ -13375,7 +13531,7 @@
                     box-sizing: border-box;
                     margin: 0;
                     padding: 0;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                     user-select: none;
                     -webkit-user-select: none;
                 }
@@ -13383,27 +13539,28 @@
                 /* Floating Pill (Collapsed) */
                 #hud-pill {
                     position: fixed;
-                    top: 18px;
-                    right: 18px;
-                    background: rgba(15, 23, 42, 0.90);
-                    backdrop-filter: blur(12px);
-                    -webkit-backdrop-filter: blur(12px);
-                    border: 1px solid rgba(56, 189, 248, 0.4);
-                    border-radius: 24px;
-                    padding: 6px 14px 6px 10px;
+                    top: 20px;
+                    right: 20px;
+                    background: rgba(11, 15, 25, 0.92);
+                    backdrop-filter: blur(14px);
+                    -webkit-backdrop-filter: blur(14px);
+                    border: 1px solid rgba(56, 189, 248, 0.45);
+                    border-radius: 28px;
+                    padding: 7px 14px 7px 10px;
                     display: flex;
                     align-items: center;
                     gap: 8px;
                     cursor: grab;
                     pointer-events: auto;
-                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+                    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.6), 0 0 12px rgba(2, 132, 199, 0.2);
                     transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.2s ease;
                     z-index: 1000;
+                    touch-action: none;
                 }
                 #hud-pill:hover {
                     transform: translateY(-2px);
                     border-color: #38BDF8;
-                    box-shadow: 0 12px 28px rgba(2, 132, 199, 0.35);
+                    box-shadow: 0 12px 30px rgba(2, 132, 199, 0.4);
                 }
                 #hud-pill:active {
                     cursor: grabbing;
@@ -13423,16 +13580,17 @@
                 .pill-text {
                     color: #F8FAFC;
                     font-size: 12px;
-                    font-weight: 700;
-                    letter-spacing: 0.3px;
+                    font-weight: 800;
+                    letter-spacing: 0.4px;
                 }
                 .pill-badge {
                     background: #0284C7;
                     color: #E0F2FE;
                     font-size: 9px;
                     font-weight: 800;
-                    padding: 2px 6px;
+                    padding: 2px 7px;
                     border-radius: 10px;
+                    letter-spacing: 0.2px;
                 }
 
                 /* Expanded Panel */
@@ -13440,14 +13598,14 @@
                     position: fixed;
                     top: 60px;
                     right: 20px;
-                    width: 360px;
-                    max-height: 580px;
-                    background: rgba(11, 15, 25, 0.95);
+                    width: 364px;
+                    max-height: 590px;
+                    background: rgba(11, 15, 25, 0.96);
                     backdrop-filter: blur(20px);
                     -webkit-backdrop-filter: blur(20px);
-                    border: 1px solid rgba(56, 189, 248, 0.3);
-                    border-radius: 16px;
-                    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), 0 0 20px rgba(2, 132, 199, 0.15);
+                    border: 1px solid rgba(56, 189, 248, 0.35);
+                    border-radius: 18px;
+                    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 25px rgba(2, 132, 199, 0.2);
                     display: none;
                     flex-direction: column;
                     pointer-events: auto;
@@ -13463,7 +13621,7 @@
                 /* Header */
                 .panel-header {
                     padding: 12px 16px;
-                    background: rgba(18, 26, 42, 0.8);
+                    background: rgba(18, 26, 42, 0.85);
                     border-bottom: 1px solid rgba(38, 53, 77, 0.7);
                     display: flex;
                     align-items: center;
@@ -13492,13 +13650,18 @@
                     padding: 2px 7px;
                     border-radius: 4px;
                 }
+                .header-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
                 .btn-icon {
                     background: transparent;
                     border: none;
                     color: #94A3B8;
-                    font-size: 16px;
-                    width: 26px;
-                    height: 26px;
+                    font-size: 15px;
+                    width: 28px;
+                    height: 28px;
                     border-radius: 6px;
                     display: flex;
                     align-items: center;
@@ -13511,6 +13674,37 @@
                     color: #F8FAFC;
                 }
 
+                /* Tab Navigation Bar */
+                .hud-tabs {
+                    display: flex;
+                    background: rgba(15, 23, 42, 0.9);
+                    border-bottom: 1px solid rgba(38, 53, 77, 0.7);
+                    padding: 4px 8px;
+                    gap: 4px;
+                }
+                .hud-tab-btn {
+                    flex: 1;
+                    background: transparent;
+                    border: none;
+                    color: #94A3B8;
+                    font-size: 11px;
+                    font-weight: 700;
+                    padding: 8px 4px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: all 0.18s ease;
+                    text-align: center;
+                }
+                .hud-tab-btn:hover {
+                    color: #F8FAFC;
+                    background: rgba(255, 255, 255, 0.05);
+                }
+                .hud-tab-btn.active {
+                    color: #FFFFFF;
+                    background: linear-gradient(135deg, #0284C7, #0369A1);
+                    box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+                }
+
                 /* Content Body */
                 .panel-body {
                     padding: 12px 14px;
@@ -13518,7 +13712,7 @@
                     flex-direction: column;
                     gap: 10px;
                     overflow-y: auto;
-                    max-height: 500px;
+                    max-height: 480px;
                 }
                 .panel-body::-webkit-scrollbar {
                     width: 5px;
@@ -13528,7 +13722,16 @@
                     border-radius: 4px;
                 }
 
-                /* Stat Cards */
+                .tab-pane {
+                    display: none;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                .tab-pane.active {
+                    display: flex;
+                }
+
+                /* Stat Mini Strip */
                 .stat-grid {
                     display: grid;
                     grid-template-columns: 1fr 1fr;
@@ -13548,23 +13751,29 @@
                     margin-bottom: 2px;
                 }
                 .stat-value {
-                    font-size: 13px;
+                    color: #F1F5F9;
+                    font-size: 12px;
                     font-weight: 800;
-                    color: #F8FAFC;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
-                .stat-power { color: #34D399; }
-                .stat-stage { color: #FBBF24; }
-                .stat-tower { color: #38BDF8; }
-                .stat-gold { color: #F472B6; }
+                .stat-value.cyan { color: #38BDF8; }
+                .stat-value.gold { color: #FBBF24; }
+                .stat-value.green { color: #34D399; }
 
-                /* Section Titles */
+                /* Section Title */
                 .section-title {
-                    color: #38BDF8;
+                    color: #94A3B8;
                     font-size: 11px;
                     font-weight: 800;
-                    letter-spacing: 0.5px;
                     text-transform: uppercase;
-                    margin-top: 4px;
+                    letter-spacing: 0.5px;
+                    margin-top: 2px;
+                    margin-bottom: 2px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
                 }
 
                 /* Toggles Grid */
@@ -13574,27 +13783,25 @@
                     gap: 6px;
                 }
                 .toggle-item {
-                    background: rgba(19, 28, 45, 0.6);
-                    border: 1px solid rgba(30, 41, 59, 0.7);
-                    border-radius: 8px;
-                    padding: 6px 10px;
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
+                    background: rgba(19, 28, 45, 0.5);
+                    border: 1px solid rgba(30, 41, 59, 0.7);
+                    border-radius: 8px;
+                    padding: 7px 10px;
                     cursor: pointer;
                     transition: background 0.15s, border-color 0.15s;
                 }
                 .toggle-item:hover {
-                    background: rgba(24, 35, 56, 0.85);
-                    border-color: rgba(56, 189, 248, 0.4);
+                    background: rgba(30, 41, 59, 0.7);
+                    border-color: rgba(56, 189, 248, 0.3);
                 }
                 .toggle-name {
-                    color: #CBD5E1;
                     font-size: 11px;
                     font-weight: 600;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
+                    color: #CBD5E1;
+                    pointer-events: none;
                 }
                 .switch-dot {
                     width: 14px;
@@ -13636,7 +13843,7 @@
                     color: #CBD5E1;
                     font-size: 11px;
                     font-weight: 700;
-                    padding: 4px 0;
+                    padding: 5px 0;
                     border-radius: 6px;
                     cursor: pointer;
                     transition: all 0.15s;
@@ -13659,7 +13866,7 @@
                     padding: 8px;
                     font-family: Consolas, Monaco, "Courier New", monospace;
                     font-size: 10px;
-                    max-height: 100px;
+                    max-height: 120px;
                     overflow-y: auto;
                     display: flex;
                     flex-direction: column;
@@ -13673,7 +13880,7 @@
                     border-radius: 3px;
                 }
                 .log-line {
-                    line-height: 1.3;
+                    line-height: 1.35;
                     word-break: break-all;
                 }
                 .log-time { color: #64748B; }
@@ -13689,7 +13896,7 @@
                     font-weight: 800;
                     font-size: 12px;
                     padding: 9px 0;
-                    margin-bottom: 6px;
+                    margin-bottom: 4px;
                     border-radius: 8px;
                     border: 1px solid #FCD34D;
                     cursor: pointer;
@@ -13713,7 +13920,7 @@
                     color: #022C22;
                     font-weight: 800;
                     font-size: 12px;
-                    padding: 8px 0;
+                    padding: 9px 0;
                     border-radius: 8px;
                     border: none;
                     cursor: pointer;
@@ -13726,6 +13933,261 @@
                 .btn-master.stopped {
                     background: #EF4444;
                     color: #FFFFFF;
+                }
+
+                /* Primary Glow Buttons */
+                .btn-primary-action {
+                    background: linear-gradient(135deg, #0284C7, #0369A1);
+                    color: #FFFFFF;
+                    font-weight: 800;
+                    font-size: 12px;
+                    padding: 10px 0;
+                    border-radius: 8px;
+                    border: 1px solid #38BDF8;
+                    cursor: pointer;
+                    transition: all 0.15s;
+                    text-align: center;
+                    box-shadow: 0 3px 10px rgba(2, 132, 199, 0.35);
+                }
+                .btn-primary-action:hover {
+                    background: linear-gradient(135deg, #0369A1, #075985);
+                }
+                .btn-primary-action:active {
+                    transform: scale(0.98);
+                }
+
+                .btn-secondary-action {
+                    background: #1E293B;
+                    border: 1px solid #334155;
+                    color: #CBD5E1;
+                    font-weight: 700;
+                    font-size: 11px;
+                    padding: 8px 0;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: all 0.15s;
+                    text-align: center;
+                }
+                .btn-secondary-action:hover {
+                    background: #334155;
+                    color: #F8FAFC;
+                }
+
+                /* Account Card */
+                .account-card {
+                    background: rgba(19, 28, 45, 0.65);
+                    border: 1px solid rgba(32, 45, 66, 0.85);
+                    border-radius: 10px;
+                    padding: 10px 12px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                }
+                .acc-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    font-size: 11px;
+                }
+                .acc-lbl { color: #94A3B8; font-weight: 600; }
+                .acc-val { color: #F8FAFC; font-weight: 700; }
+
+                /* Explanation Card (GhostSoul Style) */
+                .info-card {
+                    background: rgba(15, 23, 42, 0.65);
+                    border: 1px solid rgba(30, 41, 59, 0.7);
+                    border-radius: 10px;
+                    padding: 10px 12px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                }
+                .info-item {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 8px;
+                    font-size: 11px;
+                    color: #CBD5E1;
+                    line-height: 1.4;
+                }
+                .info-icon { font-size: 14px; flex-shrink: 0; }
+
+                /* Fullscreen OLED Sleep Overlay */
+                #hud-sleep-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100vw;
+                    height: 100vh;
+                    z-index: 2147483647;
+                    background: rgba(0, 0, 0, 0.96);
+                    backdrop-filter: blur(14px);
+                    -webkit-backdrop-filter: blur(14px);
+                    display: none;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 50px 24px 40px;
+                    pointer-events: auto;
+                    user-select: none;
+                    -webkit-user-select: none;
+                    touch-action: none;
+                }
+                .sleep-header-box {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    text-align: center;
+                    gap: 6px;
+                }
+                .sleep-moon-icon {
+                    font-size: 38px;
+                    margin-bottom: 2px;
+                    filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.5));
+                }
+                .sleep-title {
+                    color: #F8FAFC;
+                    font-size: 17px;
+                    font-weight: 800;
+                    letter-spacing: 0.5px;
+                }
+                .sleep-sub {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    color: #34D399;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+                .sleep-pulse-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    background: #10B981;
+                    box-shadow: 0 0 10px #10B981;
+                    animation: pulseDot 1.5s infinite ease-in-out;
+                }
+
+                .sleep-stats-container {
+                    width: 100%;
+                    max-width: 380px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                .sleep-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 8px;
+                }
+                .sleep-stat-card {
+                    background: rgba(15, 23, 42, 0.85);
+                    border: 1px solid rgba(56, 189, 248, 0.25);
+                    border-radius: 12px;
+                    padding: 10px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                }
+                .sleep-stat-lbl {
+                    color: #64748B;
+                    font-size: 9px;
+                    font-weight: 800;
+                    text-transform: uppercase;
+                    letter-spacing: 0.4px;
+                }
+                .sleep-stat-val {
+                    color: #F8FAFC;
+                    font-size: 14px;
+                    font-weight: 800;
+                }
+                .sleep-stat-val.cyan { color: #38BDF8; }
+                .sleep-stat-val.gold { color: #FBBF24; }
+                .sleep-stat-val.green { color: #34D399; }
+
+                .sleep-log-card {
+                    background: rgba(11, 15, 25, 0.85);
+                    border: 1px solid rgba(30, 41, 59, 0.8);
+                    border-radius: 10px;
+                    padding: 8px 12px;
+                    font-size: 10px;
+                    color: #94A3B8;
+                    font-family: Consolas, Monaco, monospace;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                /* iOS Slide To Unlock Slider */
+                .unlock-slider-track {
+                    position: relative;
+                    width: 100%;
+                    max-width: 320px;
+                    height: 54px;
+                    background: rgba(30, 41, 59, 0.7);
+                    border: 1px solid rgba(56, 189, 248, 0.35);
+                    border-radius: 30px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    overflow: hidden;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+                }
+                .unlock-track-text {
+                    color: #94A3B8;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                    pointer-events: none;
+                    animation: unlockShimmer 2.5s infinite;
+                }
+                @keyframes unlockShimmer {
+                    0%, 100% { opacity: 0.4; }
+                    50% { opacity: 0.9; color: #E0F2FE; }
+                }
+                .unlock-slider-thumb {
+                    position: absolute;
+                    left: 3px;
+                    top: 3px;
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 50%;
+                    background: linear-gradient(135deg, #0284C7, #38BDF8);
+                    box-shadow: 0 2px 10px rgba(2, 132, 199, 0.6);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #FFFFFF;
+                    font-size: 18px;
+                    font-weight: 800;
+                    cursor: grab;
+                    transition: transform 0.05s ease;
+                }
+                .unlock-slider-thumb:active {
+                    cursor: grabbing;
+                }
+
+                /* Floating Toast */
+                #hud-toast {
+                    position: fixed;
+                    bottom: 24px;
+                    left: 50%;
+                    transform: translateX(-50%) translateY(20px);
+                    background: rgba(16, 185, 129, 0.95);
+                    color: #FFFFFF;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: all 0.25s ease;
+                    z-index: 2147483647;
+                }
+                #hud-toast.show {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
                 }
             `;
             shadow.appendChild(style);
@@ -13748,123 +14210,279 @@
                             <span class="header-title">3Q ĐÀO ĐÀO ĐÀO</span>
                             <span class="header-badge">v3.0 FINAL</span>
                         </div>
-                        <button class="btn-icon" id="btn-close-hud" title="Thu nhỏ">✕</button>
+                        <div class="header-actions">
+                            <button class="btn-icon" id="btn-quick-sleep" title="Chế độ treo máy tiết kiệm pin">🌙</button>
+                            <button class="btn-icon" id="btn-close-hud" title="Thu nhỏ">✕</button>
+                        </div>
+                    </div>
+
+                    <!-- Multi-Tab Header -->
+                    <div class="hud-tabs">
+                        <button class="hud-tab-btn active" data-tab="tab-auto">⚡ Auto</button>
+                        <button class="hud-tab-btn" data-tab="tab-stats">📊 Thống Kê</button>
+                        <button class="hud-tab-btn" data-tab="tab-sleep">🌙 Treo Máy</button>
+                        <button class="hud-tab-btn" data-tab="tab-account">📋 Tài Khoản</button>
                     </div>
 
                     <div class="panel-body">
-                        <!-- Stats Grid -->
-                        <div class="stat-grid">
-                            <div class="stat-card">
-                                <div class="stat-label">Lực Chiến</div>
-                                <div class="stat-value stat-power" id="hud-val-power">--</div>
+                        <!-- TAB 1: AUTO CONTROLS -->
+                        <div class="tab-pane active" id="tab-auto">
+                            <!-- Mini Stat Cards -->
+                            <div class="stat-grid">
+                                <div class="stat-card">
+                                    <div class="stat-label">Lực Chiến</div>
+                                    <div class="stat-value gold" id="hud-val-power">--</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Tiến Độ</div>
+                                    <div class="stat-value cyan" id="hud-val-stage">Ải -- | Tháp --</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Tài Phú (Vàng / KNB)</div>
+                                    <div class="stat-value green" id="hud-val-money">-- V | -- N</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Xẻng Đào Bảo</div>
+                                    <div class="stat-value" id="hud-val-shovels">-- xẻng</div>
+                                </div>
                             </div>
-                            <div class="stat-card">
-                                <div class="stat-label">Ải & Tháp</div>
-                                <div class="stat-value stat-stage" id="hud-val-stage">Ải -- | Tháp --</div>
+
+                            <!-- Speed Bar -->
+                            <div class="speed-bar">
+                                <span class="speed-label">⚡ Tốc Độ:</span>
+                                <button class="btn-speed" data-spd="1">1x</button>
+                                <button class="btn-speed active" data-spd="2">2x</button>
+                                <button class="btn-speed" data-spd="3">3x</button>
+                                <button class="btn-speed" data-spd="5">5x</button>
                             </div>
-                            <div class="stat-card">
-                                <div class="stat-label">Vàng & Ngọc</div>
-                                <div class="stat-value stat-gold" id="hud-val-money">-- | --</div>
+
+                            <!-- 1-Click Clean Daily Button -->
+                            <button class="btn-clean-daily" id="btn-clean-daily">✨ 1-BẤM LÀM SẠCH (100Đ NV + HẾT QUÀ)</button>
+
+                            <!-- Toggles Grid -->
+                            <div class="section-title">Tính Năng Tự Động</div>
+                            <div class="toggle-grid">
+                                <div class="toggle-item active" data-key="auto_daily_rewards" data-type="setting">
+                                    <span class="toggle-name">🎁 Quà Ngày & Mốc</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item" data-key="auto_stage">
+                                    <span class="toggle-name">⚔️ Vượt Ải</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item" data-key="auto_tower">
+                                    <span class="toggle-name">🏰 Leo Tháp</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="skip_battle" data-type="setting">
+                                    <span class="toggle-name">⚡ Skip 0s</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="skip_ads" data-type="setting">
+                                    <span class="toggle-name">🚫 Bỏ QC 0s</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_host">
+                                    <span class="toggle-name">🏡 Gia Viên</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item" data-key="auto_rescue_knb" data-type="setting">
+                                    <span class="toggle-name">💎 Farm 50 KNB</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_dispatch">
+                                    <span class="toggle-name">🗺️ Phái Tướng</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item" data-key="auto_treasure">
+                                    <span class="toggle-name">⛏️ Đào Bảo</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_guild_mine">
+                                    <span class="toggle-name">🌾 Mỏ Bang (2Đ)</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_touhu">
+                                    <span class="toggle-name">🎯 Aimbot Hũ</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_feidao">
+                                    <span class="toggle-name">🗡️ Phi Kiếm</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_recycle_fragments" data-type="setting">
+                                    <span class="toggle-name">🧩 Tách Mảnh</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_yyzq_core" data-type="setting">
+                                    <span class="toggle-name">🔮 Lõi Tần Lĩnh</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item" data-key="auto_defjz" data-type="setting">
+                                    <span class="toggle-name">🛡️ Auto Bí Cảnh</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_skvs">
+                                    <span class="toggle-name">🐯 Long Hổ Max</span>
+                                    <div class="switch-dot"></div>
+                                </div>
+                                <div class="toggle-item active" data-key="auto_rank">
+                                    <span class="toggle-name">👑 Bái 7 BXH</span>
+                                    <div class="switch-dot"></div>
+                                </div>
                             </div>
-                            <div class="stat-card">
-                                <div class="stat-label">Xẻng Đào</div>
-                                <div class="stat-value stat-tower" id="hud-val-shovels">-- xẻng</div>
+
+                            <!-- Master Action -->
+                            <button class="btn-master" id="btn-master-toggle">TẠM DỪNG TẤT CẢ AUTO</button>
+                        </div>
+
+                        <!-- TAB 2: LIVE TELEMETRY & CONSOLE -->
+                        <div class="tab-pane" id="tab-stats">
+                            <div class="section-title">📊 Báo Cáo Phiên Này (Telemetry)</div>
+                            <div class="stat-grid">
+                                <div class="stat-card">
+                                    <div class="stat-label">Thời Gian Treo</div>
+                                    <div class="stat-value cyan" id="stat-val-uptime">00:00:00</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">KNB Đã Farm</div>
+                                    <div class="stat-value gold" id="stat-val-knb">+0 KNB</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Ải Đã Vượt</div>
+                                    <div class="stat-value green" id="stat-val-stages">+0 Ải</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Tháp Đã Leo</div>
+                                    <div class="stat-value green" id="stat-val-tower">+0 Tầng</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Tỉ Lệ Thắng</div>
+                                    <div class="stat-value" id="stat-val-winrate">0 T / 0 B</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-label">Gia Viên Đã Cứu</div>
+                                    <div class="stat-value" id="stat-val-rescued">0 lần</div>
+                                </div>
+                            </div>
+
+                            <div class="section-title">
+                                <span>Nhật Ký Thời Gian Thực</span>
+                                <button class="btn-secondary-action" id="btn-clear-console" style="padding: 2px 8px; font-size: 9px;">Xóa</button>
+                            </div>
+                            <div class="console-box" id="hud-console">
+                                <div class="log-line"><span class="log-time">[Init]</span> <span class="log-ok">Sẵn sàng vận hành v3.0 Final.</span></div>
                             </div>
                         </div>
 
-                        <!-- Speed Hack -->
-                        <div class="speed-bar">
-                            <span class="speed-label">⚡ Tốc Độ:</span>
-                            <button class="btn-speed" data-spd="1">1x</button>
-                            <button class="btn-speed active" data-spd="2">2x</button>
-                            <button class="btn-speed" data-spd="3">3x</button>
-                            <button class="btn-speed" data-spd="5">5x</button>
-                        </div>
+                        <!-- TAB 3: SLEEP MODE (TIẾT KIỆM PIN & KHÓA MÀN HÌNH) -->
+                        <div class="tab-pane" id="tab-sleep">
+                            <div class="section-title">🌙 Chế Độ Treo Máy Tiết Kiệm Pin</div>
+                            <button class="btn-primary-action" id="btn-enter-sleep">🌙 BẬT TIẾT KIỆM PIN & KHÓA MÀN HÌNH</button>
 
-                        <!-- Toggles Grid -->
-                        <div class="section-title">Tính Năng Tự Động</div>
-                        <div class="toggle-grid">
-                            <div class="toggle-item active" data-key="auto_daily_rewards" data-type="setting">
-                                <span class="toggle-name">🎁 Quà Ngày & Mốc</span>
-                                <div class="switch-dot"></div>
+                            <div class="info-card">
+                                <div class="info-item">
+                                    <span class="info-icon">🔋</span>
+                                    <span><strong>Tiết Kiệm 60% Pin:</strong> Tự động hạ tốc độ render xuống 20 FPS (thay vì 60 FPS), tối ưu hóa GPU/CPU, chống nóng máy khi treo đêm.</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-icon">📱</span>
+                                    <span><strong>OLED Saver Tối Tuyệt Đối:</strong> Màn hình đen 96% tắt tối đa bóng bán dẫn OLED, bảo vệ màn hình và kéo dài tuổi thọ pin.</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-icon">🔒</span>
+                                    <span><strong>Chống Chạm Nhầm Túi Quần:</strong> Trang bị thanh trượt "Vuốt để mở khóa" theo chuẩn iOS, không lo cấn túi gián đoạn Auto.</span>
+                                </div>
                             </div>
-                            <div class="toggle-item" data-key="auto_stage">
-                                <span class="toggle-name">⚔️ Vượt Ải</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item" data-key="auto_tower">
-                                <span class="toggle-name">🏰 Leo Tháp</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="skip_battle" data-type="setting">
-                                <span class="toggle-name">⚡ Skip 0s</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="skip_ads" data-type="setting">
-                                <span class="toggle-name">🚫 Bỏ QC 0s</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_host">
-                                <span class="toggle-name">🏡 Gia Viên</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item" data-key="auto_rescue_knb" data-type="setting">
-                                <span class="toggle-name">💎 Farm 50 KNB</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_dispatch">
-                                <span class="toggle-name">🗺️ Phái Tướng</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item" data-key="auto_treasure">
-                                <span class="toggle-name">⛏️ Đào Bảo</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_guild_mine">
-                                <span class="toggle-name">🌾 Mỏ Bang (2Đ)</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_touhu">
-                                <span class="toggle-name">🎯 Aimbot Hũ</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_feidao">
-                                <span class="toggle-name">🗡️ Phi Kiếm</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_recycle_fragments" data-type="setting">
-                                <span class="toggle-name">🧩 Tách Mảnh</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_yyzq_core" data-type="setting">
-                                <span class="toggle-name">🔮 Lõi Tần Lĩnh</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item" data-key="auto_defjz" data-type="setting">
-                                <span class="toggle-name">🛡️ Auto Bí Cảnh</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_skvs">
-                                <span class="toggle-name">🐯 Long Hổ Max</span>
-                                <div class="switch-dot"></div>
-                            </div>
-                            <div class="toggle-item active" data-key="auto_rank">
-                                <span class="toggle-name">👑 Bái 7 BXH</span>
+
+                            <div class="toggle-item active" id="toggle-auto-sleep" style="margin-top: 4px;">
+                                <span class="toggle-name">⏰ Tự động khóa sau 3 phút rảnh</span>
                                 <div class="switch-dot"></div>
                             </div>
                         </div>
 
-                        <!-- Console Box -->
-                        <div class="section-title">Nhật Ký Thời Gian Thực</div>
-                        <div class="console-box" id="hud-console">
-                            <div class="log-line"><span class="log-time">[Init]</span> <span class="log-ok">Sẵn sàng vận hành.</span></div>
-                        </div>
+                        <!-- TAB 4: CHARACTER DUMPER & SETTINGS -->
+                        <div class="tab-pane" id="tab-account">
+                            <div class="section-title">📋 Thông Tin Nhân Vật & Server</div>
+                            <div class="account-card">
+                                <div class="acc-row">
+                                    <span class="acc-lbl">Tên Nhân Vật:</span>
+                                    <span class="acc-val" id="acc-val-name">Đang tải...</span>
+                                </div>
+                                <div class="acc-row">
+                                    <span class="acc-lbl">Cấp Độ:</span>
+                                    <span class="acc-val" id="acc-val-level">--</span>
+                                </div>
+                                <div class="acc-row">
+                                    <span class="acc-lbl">Lực Chiến:</span>
+                                    <span class="acc-val gold" id="acc-val-power">--</span>
+                                </div>
+                                <div class="acc-row">
+                                    <span class="acc-lbl">Kim Nguyên Bảo:</span>
+                                    <span class="acc-val cyan" id="acc-val-jade">--</span>
+                                </div>
+                                <div class="acc-row">
+                                    <span class="acc-lbl">Vàng:</span>
+                                    <span class="acc-val green" id="acc-val-gold">--</span>
+                                </div>
+                                <div class="acc-row">
+                                    <span class="acc-lbl">Ải / Tháp:</span>
+                                    <span class="acc-val" id="acc-val-stage-tower">--</span>
+                                </div>
+                            </div>
 
-                        <!-- Action Buttons -->
-                        <button class="btn-clean-daily" id="btn-clean-daily">✨ 1-BẤM LÀM SẠCH (100Đ NV + HẾT QUÀ)</button>
-                        <button class="btn-master" id="btn-master-toggle">TẠM DỪNG TẤT CẢ AUTO</button>
+                            <button class="btn-primary-action" id="btn-copy-account">📋 SAO CHÉP THÔNG TIN (ZALO / TELEGRAM)</button>
+                            <button class="btn-secondary-action" id="btn-refresh-cache">🔄 TẢI LẠI DỮ LIỆU (REFRESH CACHE)</button>
+                            <button class="btn-secondary-action" id="btn-reset-default" style="color: #F87171;">🧹 KHÔI PHỤC CÀI ĐẶT GỐC (RESET)</button>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Fullscreen OLED Saver Sleep Overlay -->
+                <div id="hud-sleep-overlay">
+                    <div class="sleep-header-box">
+                        <div class="sleep-moon-icon">🌙</div>
+                        <div class="sleep-title">CHẾ ĐỘ TREO MÁY TIẾT KIỆM PIN</div>
+                        <div class="sleep-sub">
+                            <div class="sleep-pulse-dot"></div>
+                            <span>ĐANG TỰ ĐỘNG CHẠY NGẦM (20 FPS - OLED SAVER)</span>
+                        </div>
+                    </div>
+
+                    <div class="sleep-stats-container">
+                        <div class="sleep-grid">
+                            <div class="sleep-stat-card">
+                                <div class="sleep-stat-lbl">⏱️ Thời Gian Treo</div>
+                                <div class="sleep-stat-val cyan" id="sleep-stat-uptime">00:00:00</div>
+                            </div>
+                            <div class="sleep-stat-card">
+                                <div class="sleep-stat-lbl">💎 KNB Đã Farm</div>
+                                <div class="sleep-stat-val gold" id="sleep-stat-knb">+0 KNB</div>
+                            </div>
+                            <div class="sleep-stat-card">
+                                <div class="sleep-stat-lbl">⚔️ Tiến Độ Ải / Tháp</div>
+                                <div class="sleep-stat-val green" id="sleep-stat-progress">Ải -- | Tháp --</div>
+                            </div>
+                            <div class="sleep-stat-card">
+                                <div class="sleep-stat-lbl">🏆 Tỉ Lệ Thắng</div>
+                                <div class="sleep-stat-val" id="sleep-stat-winrate">0 T / 0 B</div>
+                            </div>
+                        </div>
+
+                        <div class="sleep-log-card" id="sleep-latest-log">
+                            [Hệ Thống] Bot v3.0 Final đang tự động hóa trơn tru...
+                        </div>
+                    </div>
+
+                    <!-- Slide to Unlock Slider -->
+                    <div class="unlock-slider-track" id="unlock-slider-track">
+                        <div class="unlock-track-text">Vuốt sang phải để mở khóa ❯❯❯</div>
+                        <div class="unlock-slider-thumb" id="unlock-slider-thumb">❯</div>
+                    </div>
+                </div>
+
+                <!-- Toast Notification -->
+                <div id="hud-toast">Thông báo</div>
             `;
             shadow.appendChild(container);
 
@@ -13872,69 +14490,255 @@
             const pill = shadow.getElementById('hud-pill');
             const panel = shadow.getElementById('hud-panel');
             const btnClose = shadow.getElementById('btn-close-hud');
+            const btnQuickSleep = shadow.getElementById('btn-quick-sleep');
             const panelHeader = shadow.getElementById('panel-drag-handle');
             const consoleBox = shadow.getElementById('hud-console');
             const btnMaster = shadow.getElementById('btn-master-toggle');
             const pillStage = shadow.getElementById('hud-pill-stage');
+            const toast = shadow.getElementById('hud-toast');
 
             const valPower = shadow.getElementById('hud-val-power');
             const valStage = shadow.getElementById('hud-val-stage');
             const valMoney = shadow.getElementById('hud-val-money');
             const valShovels = shadow.getElementById('hud-val-shovels');
 
+            const sleepOverlay = shadow.getElementById('hud-sleep-overlay');
+            const sleepUptime = shadow.getElementById('sleep-stat-uptime');
+            const sleepKnb = shadow.getElementById('sleep-stat-knb');
+            const sleepProgress = shadow.getElementById('sleep-stat-progress');
+            const sleepWinrate = shadow.getElementById('sleep-stat-winrate');
+            const sleepLatestLog = shadow.getElementById('sleep-latest-log');
+
+            const statUptime = shadow.getElementById('stat-val-uptime');
+            const statKnb = shadow.getElementById('stat-val-knb');
+            const statStages = shadow.getElementById('stat-val-stages');
+            const statTower = shadow.getElementById('stat-val-tower');
+            const statWinrate = shadow.getElementById('stat-val-winrate');
+            const statRescued = shadow.getElementById('stat-val-rescued');
+
+            const accName = shadow.getElementById('acc-val-name');
+            const accLevel = shadow.getElementById('acc-val-level');
+            const accPower = shadow.getElementById('acc-val-power');
+            const accJade = shadow.getElementById('acc-val-jade');
+            const accGold = shadow.getElementById('acc-val-gold');
+            const accStageTower = shadow.getElementById('acc-val-stage-tower');
+
+            function showToast(msg) {
+                toast.textContent = msg;
+                toast.classList.add('show');
+                setTimeout(() => { toast.classList.remove('show'); }, 2200);
+            }
+
+            // Restore Saved Pill Position
+            try {
+                const saved = JSON.parse(localStorage.getItem('__3Q_PILL_POS__') || 'null');
+                if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+                    const screenW = window.innerWidth || document.documentElement.clientWidth;
+                    const screenH = window.innerHeight || document.documentElement.clientHeight;
+                    const left = Math.max(10, Math.min(screenW - 130, saved.left));
+                    const top = Math.max(15, Math.min(screenH - 50, saved.top));
+                    pill.style.left = left + 'px';
+                    pill.style.top = top + 'px';
+                    pill.style.right = 'auto';
+                }
+            } catch (e) { }
+
             // Open / Close Panel
-            pill.addEventListener('click', () => {
+            pill.addEventListener('click', (e) => {
+                if (pill.__wasDragging) return;
                 pill.style.display = 'none';
                 panel.style.display = 'flex';
+                updateTelemetryUI();
             });
+
             btnClose.addEventListener('click', () => {
                 panel.style.display = 'none';
                 pill.style.display = 'flex';
             });
 
-            // Draggable Pill
-            makeDraggable(pill);
-            makeDraggable(panel, panelHeader);
+            btnQuickSleep.addEventListener('click', () => {
+                panel.style.display = 'none';
+                pill.style.display = 'none';
+                if (typeof bot.enterSleepMode === "function") {
+                    bot.enterSleepMode();
+                }
+            });
 
-            function makeDraggable(element, handle) {
+            // Multi-Tab Switching
+            const tabBtns = shadow.querySelectorAll('.hud-tab-btn');
+            const tabPanes = shadow.querySelectorAll('.tab-pane');
+            tabBtns.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    tabBtns.forEach((b) => b.classList.remove('active'));
+                    tabPanes.forEach((p) => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    const targetId = btn.getAttribute('data-tab');
+                    const targetPane = shadow.getElementById(targetId);
+                    if (targetPane) targetPane.classList.add('active');
+                    updateTelemetryUI();
+                });
+            });
+
+            // Magnetic Edge Snapping Pill Dragger (GhostSoul APHoverButton Pattern)
+            setupPillDrag(pill);
+            setupPanelDrag(panel, panelHeader);
+
+            function setupPillDrag(element) {
                 let isDragging = false;
                 let startX, startY, origX, origY;
-                const target = handle || element;
+                let moveDist = 0;
 
-                target.addEventListener('mousedown', (e) => {
-                    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+                const onPointerDown = (clientX, clientY) => {
                     isDragging = true;
-                    startX = e.clientX;
-                    startY = e.clientY;
+                    element.__wasDragging = false;
+                    startX = clientX;
+                    startY = clientY;
                     const rect = element.getBoundingClientRect();
                     origX = rect.left;
                     origY = rect.top;
-                    e.preventDefault();
-                });
+                    moveDist = 0;
+                    element.style.transition = 'none';
+                };
 
-                window.addEventListener('mousemove', (e) => {
+                const onPointerMove = (clientX, clientY) => {
                     if (!isDragging) return;
-                    const dx = e.clientX - startX;
-                    const dy = e.clientY - startY;
-                    let newX = Math.max(10, Math.min(window.innerWidth - element.offsetWidth - 10, origX + dx));
-                    let newY = Math.max(10, Math.min(window.innerHeight - element.offsetHeight - 10, origY + dy));
+                    const dx = clientX - startX;
+                    const dy = clientY - startY;
+                    moveDist = Math.hypot(dx, dy);
+                    if (moveDist > 6) element.__wasDragging = true;
+
+                    const screenW = window.innerWidth || document.documentElement.clientWidth;
+                    const screenH = window.innerHeight || document.documentElement.clientHeight;
+                    let newX = Math.max(10, Math.min(screenW - element.offsetWidth - 10, origX + dx));
+                    let newY = Math.max(15, Math.min(screenH - element.offsetHeight - 15, origY + dy));
                     element.style.left = newX + 'px';
                     element.style.top = newY + 'px';
                     element.style.right = 'auto';
+                };
+
+                const onPointerUp = () => {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    if (moveDist > 6) {
+                        snapPillToEdge(element, true);
+                    }
+                };
+
+                element.addEventListener('mousedown', (e) => {
+                    onPointerDown(e.clientX, e.clientY);
+                    const onMove = (ev) => onPointerMove(ev.clientX, ev.clientY);
+                    const onUp = () => {
+                        window.removeEventListener('mousemove', onMove);
+                        window.removeEventListener('mouseup', onUp);
+                        onPointerUp();
+                    };
+                    window.addEventListener('mousemove', onMove);
+                    window.addEventListener('mouseup', onUp);
                 });
 
-                window.addEventListener('mouseup', () => {
-                    isDragging = false;
+                element.addEventListener('touchstart', (e) => {
+                    if (e.touches && e.touches[0]) {
+                        onPointerDown(e.touches[0].clientX, e.touches[0].clientY);
+                    }
+                }, { passive: true });
+
+                element.addEventListener('touchmove', (e) => {
+                    if (e.touches && e.touches[0]) {
+                        onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+                        if (moveDist > 6) e.preventDefault();
+                    }
+                }, { passive: false });
+
+                element.addEventListener('touchend', onPointerUp, { passive: true });
+            }
+
+            function snapPillToEdge(el, animated) {
+                const rect = el.getBoundingClientRect();
+                const screenW = window.innerWidth || document.documentElement.clientWidth;
+                const screenH = window.innerHeight || document.documentElement.clientHeight;
+                const midX = screenW / 2;
+                const curCenterX = rect.left + rect.width / 2;
+                const snapLeft = (curCenterX < midX) ? 10 : (screenW - rect.width - 10);
+                const clampedTop = Math.max(15, Math.min(screenH - rect.height - 15, rect.top));
+
+                if (animated) {
+                    el.style.transition = 'left 0.22s cubic-bezier(0.16, 1, 0.3, 1), top 0.22s cubic-bezier(0.16, 1, 0.3, 1)';
+                    setTimeout(() => { el.style.transition = 'none'; }, 240);
+                }
+                el.style.left = snapLeft + 'px';
+                el.style.top = clampedTop + 'px';
+                el.style.right = 'auto';
+
+                try {
+                    localStorage.setItem('__3Q_PILL_POS__', JSON.stringify({ left: snapLeft, top: clampedTop }));
+                } catch (e) { }
+            }
+
+            function setupPanelDrag(panelEl, handleEl) {
+                let isDragging = false;
+                let startX, startY, origX, origY;
+                const target = handleEl || panelEl;
+
+                const startDrag = (clientX, clientY) => {
+                    isDragging = true;
+                    startX = clientX;
+                    startY = clientY;
+                    const rect = panelEl.getBoundingClientRect();
+                    origX = rect.left;
+                    origY = rect.top;
+                    panelEl.style.transition = 'none';
+                };
+
+                const doDrag = (clientX, clientY) => {
+                    if (!isDragging) return;
+                    const dx = clientX - startX;
+                    const dy = clientY - startY;
+                    const screenW = window.innerWidth || document.documentElement.clientWidth;
+                    const screenH = window.innerHeight || document.documentElement.clientHeight;
+                    let newX = Math.max(10, Math.min(screenW - panelEl.offsetWidth - 10, origX + dx));
+                    let newY = Math.max(15, Math.min(screenH - panelEl.offsetHeight - 15, origY + dy));
+                    panelEl.style.left = newX + 'px';
+                    panelEl.style.top = newY + 'px';
+                    panelEl.style.right = 'auto';
+                };
+
+                const stopDrag = () => { isDragging = false; };
+
+                target.addEventListener('mousedown', (e) => {
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+                    startDrag(e.clientX, e.clientY);
+                    const onMove = (ev) => doDrag(ev.clientX, ev.clientY);
+                    const onUp = () => {
+                        window.removeEventListener('mousemove', onMove);
+                        window.removeEventListener('mouseup', onUp);
+                        stopDrag();
+                    };
+                    window.addEventListener('mousemove', onMove);
+                    window.addEventListener('mouseup', onUp);
                 });
+
+                target.addEventListener('touchstart', (e) => {
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+                    if (e.touches && e.touches[0]) startDrag(e.touches[0].clientX, e.touches[0].clientY);
+                }, { passive: true });
+
+                target.addEventListener('touchmove', (e) => {
+                    if (isDragging && e.touches && e.touches[0]) {
+                        doDrag(e.touches[0].clientX, e.touches[0].clientY);
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+
+                target.addEventListener('touchend', stopDrag, { passive: true });
             }
 
             // Bind Toggles
             const toggleItems = shadow.querySelectorAll('.toggle-item');
             toggleItems.forEach((item) => {
                 const key = item.getAttribute('data-key');
+                if (!key) return;
                 const isSetting = item.getAttribute('data-type') === 'setting';
 
-                // Initial sync
                 let active = false;
                 if (key === 'auto_stage') {
                     active = typeof bot.isAutoStageOn === "function" ? bot.isAutoStageOn() : false;
@@ -13953,18 +14757,10 @@
 
                     if (isSetting) {
                         bot.settings[key] = nowActive;
-                        if (key === 'skip_ads' && typeof bot.setSkipAds === "function") {
-                            bot.setSkipAds(nowActive);
-                        }
-                        if (key === 'skip_battle' && typeof bot.setSkipBattle === "function") {
-                            bot.setSkipBattle(nowActive);
-                        }
-                        if (key === 'auto_recycle_fragments') {
-                            bot.settings.auto_split_purple_shard = nowActive;
-                        }
-                        if (key === 'auto_yyzq_core' && bot.state) {
-                            bot.state.isAutoYyzqCoreActive = nowActive;
-                        }
+                        if (key === 'skip_battle') bot.setSkipBattle(nowActive);
+                        if (key === 'skip_ads') bot.setSkipAds(nowActive);
+                        if (key === 'auto_recycle_fragments') bot.settings.auto_split_purple_shard = nowActive;
+                        if (key === 'auto_yyzq_core' && bot.state) bot.state.isAutoYyzqCoreActive = nowActive;
                         if (key === 'auto_rescue_knb') {
                             if (bot.state) bot.state.isAutoRescueKnbActive = nowActive;
                             if (nowActive && typeof bot.runAutoRescueKnbSmart === "function") {
@@ -14035,7 +14831,7 @@
                 });
             });
 
-                        // 1-Click Clean Daily Button
+            // 1-Click Clean Daily Button
             const btnCleanDaily = shadow.getElementById('btn-clean-daily');
             if (btnCleanDaily) {
                 btnCleanDaily.onclick = async () => {
@@ -14072,6 +14868,211 @@
                 }
             });
 
+            // Clear Console Log
+            const btnClearConsole = shadow.getElementById('btn-clear-console');
+            if (btnClearConsole) {
+                btnClearConsole.addEventListener('click', () => {
+                    consoleBox.innerHTML = '';
+                    bot.logs = [];
+                    showToast("🧹 Đã làm sạch nhật ký.");
+                });
+            }
+
+            // Sleep Mode Actions
+            const btnEnterSleep = shadow.getElementById('btn-enter-sleep');
+            if (btnEnterSleep) {
+                btnEnterSleep.addEventListener('click', () => {
+                    panel.style.display = 'none';
+                    pill.style.display = 'none';
+                    if (typeof bot.enterSleepMode === "function") {
+                        bot.enterSleepMode();
+                    }
+                });
+            }
+
+            // Toggle Auto-Sleep Idle
+            const toggleAutoSleep = shadow.getElementById('toggle-auto-sleep');
+            if (toggleAutoSleep) {
+                toggleAutoSleep.addEventListener('click', () => {
+                    const active = !toggleAutoSleep.classList.contains('active');
+                    if (active) toggleAutoSleep.classList.add('active');
+                    else toggleAutoSleep.classList.remove('active');
+                    if (bot.state) bot.state.autoSleepIdle = active;
+                    bot.log(`[Treo Máy] Tự động khóa sau 3 phút: ${active ? 'BẬT' : 'TẮT'}`);
+                });
+            }
+
+            // Account Tab Actions
+            const btnCopyAccount = shadow.getElementById('btn-copy-account');
+            if (btnCopyAccount) {
+                btnCopyAccount.addEventListener('click', async () => {
+                    if (typeof bot.copyCharacterSummary === "function") {
+                        await bot.copyCharacterSummary();
+                        showToast("✅ Đã sao chép báo cáo tài khoản!");
+                    }
+                });
+            }
+
+            const btnRefreshCache = shadow.getElementById('btn-refresh-cache');
+            if (btnRefreshCache) {
+                btnRefreshCache.addEventListener('click', () => {
+                    bot.updateStats();
+                    updateTelemetryUI();
+                    showToast("🔄 Đã làm mới dữ liệu tài khoản!");
+                });
+            }
+
+            const btnResetDefault = shadow.getElementById('btn-reset-default');
+            if (btnResetDefault) {
+                btnResetDefault.addEventListener('click', () => {
+                    try {
+                        localStorage.removeItem("3qdao_bot_settings");
+                        localStorage.removeItem("__3Q_PILL_POS__");
+                        showToast("🧹 Đã khôi phục cài đặt mặc định!");
+                        setTimeout(() => { location.reload(); }, 600);
+                    } catch (e) { }
+                });
+            }
+
+            // Slide to Unlock Slider Implementation (iOS Lockscreen Pattern)
+            const unlockTrack = shadow.getElementById('unlock-slider-track');
+            const unlockThumb = shadow.getElementById('unlock-slider-thumb');
+            if (unlockTrack && unlockThumb) {
+                let isSliding = false;
+                let startX = 0;
+                let maxDist = 0;
+
+                const startSlide = (clientX) => {
+                    isSliding = true;
+                    startX = clientX;
+                    maxDist = unlockTrack.offsetWidth - unlockThumb.offsetWidth - 6;
+                    unlockThumb.style.transition = 'none';
+                };
+
+                const doSlide = (clientX) => {
+                    if (!isSliding) return;
+                    let dx = clientX - startX;
+                    dx = Math.max(0, Math.min(maxDist, dx));
+                    unlockThumb.style.transform = `translateX(${dx}px)`;
+
+                    // If dragged >= 75% of track width, unlock immediately!
+                    if (dx >= maxDist * 0.75) {
+                        isSliding = false;
+                        unlockThumb.style.transform = 'translateX(0px)';
+                        if (typeof bot.exitSleepMode === "function") {
+                            bot.exitSleepMode();
+                        }
+                    }
+                };
+
+                const endSlide = () => {
+                    if (!isSliding) return;
+                    isSliding = false;
+                    unlockThumb.style.transition = 'transform 0.25s ease-out';
+                    unlockThumb.style.transform = 'translateX(0px)';
+                };
+
+                unlockThumb.addEventListener('mousedown', (e) => {
+                    startSlide(e.clientX);
+                    const onMove = (ev) => doSlide(ev.clientX);
+                    const onUp = () => {
+                        window.removeEventListener('mousemove', onMove);
+                        window.removeEventListener('mouseup', onUp);
+                        endSlide();
+                    };
+                    window.addEventListener('mousemove', onMove);
+                    window.addEventListener('mouseup', onUp);
+                });
+
+                unlockThumb.addEventListener('touchstart', (e) => {
+                    if (e.touches && e.touches[0]) startSlide(e.touches[0].clientX);
+                }, { passive: true });
+
+                unlockThumb.addEventListener('touchmove', (e) => {
+                    if (isSliding && e.touches && e.touches[0]) {
+                        doSlide(e.touches[0].clientX);
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+
+                unlockThumb.addEventListener('touchend', endSlide, { passive: true });
+            }
+
+            // Real-time Telemetry Updater
+            function updateTelemetryUI() {
+                try {
+                    const st = bot.stats || {};
+                    const uptimeSec = Math.floor((Date.now() - (st.sessionStartTime || Date.now())) / 1000);
+                    const h = String(Math.floor(uptimeSec / 3600)).padStart(2, '0');
+                    const m = String(Math.floor((uptimeSec % 3600) / 60)).padStart(2, '0');
+                    const s = String(uptimeSec % 60).padStart(2, '0');
+                    const uptimeStr = `${h}:${m}:${s}`;
+
+                    if (statUptime) statUptime.textContent = uptimeStr;
+                    if (sleepUptime) sleepUptime.textContent = uptimeStr;
+
+                    const knbFarmed = Number(st.sessionKnbFarmed || st.rescuedKnbTotal || 0);
+                    const knbStr = `+${knbFarmed.toLocaleString()} KNB`;
+                    if (statKnb) statKnb.textContent = knbStr;
+                    if (sleepKnb) sleepKnb.textContent = knbStr;
+
+                    const stagesStr = `+${st.sessionStagesCleared || 0} Ải`;
+                    if (statStages) statStages.textContent = stagesStr;
+
+                    const towerStr = `+${st.sessionTowerFloors || 0} Tầng`;
+                    if (statTower) statTower.textContent = towerStr;
+
+                    const curProg = `Ải ${st.stage || '--'} | Tháp ${st.towerFloor || '--'}`;
+                    if (sleepProgress) sleepProgress.textContent = curProg;
+
+                    const wins = Number(st.sessionWins || 0);
+                    const losses = Number(st.sessionLosses || 0);
+                    const totalB = wins + losses;
+                    const winPct = totalB > 0 ? ((wins / totalB) * 100).toFixed(0) + '%' : '100%';
+                    const winStr = `${wins} T / ${losses} B (${winPct})`;
+                    if (statWinrate) statWinrate.textContent = winStr;
+                    if (sleepWinrate) sleepWinrate.textContent = winStr;
+
+                    if (statRescued) statRescued.textContent = `${st.rescuedCount || 0} lần`;
+
+                    // Account Tab
+                    if (accName) accName.textContent = st.roleName || 'Đang tải...';
+                    if (accLevel) accLevel.textContent = `Lv.${st.level || 1}`;
+                    if (accPower) {
+                        const p = Number(st.power || 0);
+                        accPower.textContent = isNaN(p) ? st.power : p.toLocaleString();
+                    }
+                    if (accJade) accJade.textContent = `${Number(st.jade || 0).toLocaleString()} KNB`;
+                    if (accGold) accGold.textContent = `${Number(st.gold || 0).toLocaleString()} Vàng`;
+                    if (accStageTower) accStageTower.textContent = curProg;
+                } catch (e) { }
+            }
+
+            // Periodic Uptime Loop & Auto-Sleep Idle Watchdog
+            setInterval(() => {
+                updateTelemetryUI();
+
+                // Auto-sleep idle check: 3 minutes without user touch
+                if (bot.state && bot.state.autoSleepIdle && !bot.state.isSleepMode) {
+                    const idleTime = Date.now() - (bot.state.lastUserInteractionTime || Date.now());
+                    const isAnyAutoActive = bot.state.isAutoStageActive || bot.state.isAutoTowerActive || bot.state.isAutoRescueKnbActive;
+                    if (idleTime >= 180000 && isAnyAutoActive) {
+                        if (typeof bot.enterSleepMode === "function") {
+                            panel.style.display = 'none';
+                            pill.style.display = 'none';
+                            bot.enterSleepMode();
+                        }
+                    }
+                }
+            }, 1000);
+
+            // Track user touches to reset idle timer
+            ['touchstart', 'mousedown', 'keydown'].forEach(evt => {
+                window.addEventListener(evt, () => {
+                    if (bot.state) bot.state.lastUserInteractionTime = Date.now();
+                }, { passive: true });
+            });
+
             // Global HUD Hooks for Live Updates
             window.__UPDATE_HUD_STATS__ = function (stats) {
                 try {
@@ -14092,6 +15093,7 @@
                     if (stats.shovels !== undefined) {
                         valShovels.textContent = `${stats.shovels || 0} xẻng`;
                     }
+                    updateTelemetryUI();
                 } catch (e) { }
             };
 
@@ -14107,11 +15109,29 @@
 
                     line.innerHTML = `<span class="log-time">[${entry.time || ''}]</span> <span class="${cls}">${msg}</span>`;
                     consoleBox.appendChild(line);
-                    if (consoleBox.children.length > 25) {
+                    if (consoleBox.children.length > 30) {
                         consoleBox.removeChild(consoleBox.children[0]);
                     }
                     consoleBox.scrollTop = consoleBox.scrollHeight;
+
+                    if (sleepLatestLog) {
+                        sleepLatestLog.textContent = `[${entry.time || ''}] ${msg}`;
+                    }
                 } catch (e) { }
+            };
+
+            window.__SHOW_SLEEP_OVERLAY__ = function (show) {
+                if (sleepOverlay) {
+                    if (show) {
+                        sleepOverlay.style.display = 'flex';
+                        panel.style.display = 'none';
+                        pill.style.display = 'none';
+                        updateTelemetryUI();
+                    } else {
+                        sleepOverlay.style.display = 'none';
+                        pill.style.display = 'flex';
+                    }
+                }
             };
         }
 
