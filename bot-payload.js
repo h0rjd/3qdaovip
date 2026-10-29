@@ -165,7 +165,7 @@
             auto_free_lottery: true,
             auto_daily_rewards: true,
             reserve_gold: 500000,
-            mod_skin: true,
+            mod_skin: false,
             mod_headframe_title: true,
             mod_headframe: null,
             mod_title: null,
@@ -219,7 +219,7 @@
             _skvsLastVsingReq: 0,
             _skvsLastRedPackReq: 0,
             rankLikedDate: null,
-            mod_skin: true,
+            mod_skin: false,
             mod_headframe_title: true,
             cooldowns: {}
         },
@@ -339,7 +339,7 @@
                     hi.prototype.__QA_MOD_BATTLE_SKIN__ = true;
 
                     const applyHeroFashion = function (item, e) {
-                        if (!e || bot.state.mod_skin === false) return;
+                        if (!e || bot.state.mod_skin !== true) return;
                         try {
                             const isPlayer = (e._pos !== 2 && e._camp !== 2);
                             if (isPlayer && e._hero_id) {
@@ -384,7 +384,7 @@
                         hi.prototype.onlyResetBaseData = function (e) {
                             applyHeroFashion(this, e);
                             const res = origOnlyResetBaseData.call(this, e);
-                            if (bot.state.mod_skin !== false && e && e._fashion && e._fashion.length > 0) {
+                            if (bot.state.mod_skin === true && e && e._fashion && e._fashion.length > 0) {
                                 if (!this.lastHaveSkin || !this.skeletonNode) {
                                     this.lastHaveSkin = true;
                                     this.restHeroSpine(e, null);
@@ -407,7 +407,7 @@
                     bsm.__QA_MOD_SPINE__ = true;
                     const origCreateBatteSpineById = bsm.createBatteSpineById;
                     bsm.createBatteSpineById = function (heroId, isLeft, type, viewBelong) {
-                        if (bot.state.mod_skin !== false && isLeft !== false && heroId) {
+                        if (bot.state.mod_skin === true && isLeft !== false && heroId) {
                             try {
                                 const customFid = bot.settings.hero_skins && (bot.settings.hero_skins[heroId] || bot.settings.hero_skins[String(heroId)]);
                                 const fid = customFid || bot.getBestFashionIdForHero(heroId);
@@ -429,7 +429,7 @@
                     sm.__QA_MOD_SPINE__ = true;
                     const origCreatSpineByBaseId = sm.creatSpineByBaseId;
                     sm.creatSpineByBaseId = function (heroBaseId, viewBelong) {
-                        if (bot.state.mod_skin !== false && heroBaseId) {
+                        if (bot.state.mod_skin === true && heroBaseId) {
                             try {
                                 const customFid = bot.settings.hero_skins && (bot.settings.hero_skins[heroBaseId] || bot.settings.hero_skins[String(heroBaseId)]);
                                 const fid = customFid || bot.getBestFashionIdForHero(heroBaseId);
@@ -2485,12 +2485,18 @@
                     // 1. Hook onLoginKickSc: Khi máy chủ gửi mã kick (bất kể mã nào đều là do thiết bị khác đăng nhập)
                     const origKick = nwProto.onLoginKickSc;
                     nwProto.onLoginKickSc = function (event, data) {
-                        const resCode = data && data._res != null ? data._res : 0;
-                        bot.log(`🛡️ [Anti-Kick] Nhận thông điệp kick từ máy chủ: ${JSON.stringify(data || {})}`);
+                        const payload = (data && data._res != null) ? data : ((event && event._res != null) ? event : (event || data || {}));
+                        const resCode = payload._res != null ? payload._res : (payload._code != null ? payload._code : 0);
+                        bot.log(`🛡️ [Anti-Kick] Nhận thông điệp kick từ máy chủ: ${JSON.stringify(payload)}`);
 
                         // Server gửi kick khi có thiết bị khác (Điện thoại) đăng nhập
                         // Lập tức kích hoạt Nhường Máy, cắt toàn bộ kết nối và dừng hẳn, tuyệt đối không tự reconnect đè phiên
-                        this.kickData = data;
+                        this.kickData = payload;
+                        this._isCanReconnect = false;
+                        this.isManualClose = true;
+                        this.isReconnecting = false;
+                        try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
+                        try { if (this._wsClient && typeof this._wsClient.close === "function") this._wsClient.close(); } catch (e) { }
                         bot.triggerEmergencyYield("Mã kick máy chủ (onLoginKickSc: " + resCode + ")");
                         return;
                     };
@@ -2550,7 +2556,7 @@
                     // 2. Hook onClose: Tự động khôi phục ngầm, nhưng nếu bị Điện thoại kick thì nhường ngay
                     const origOnClose = nwProto.onClose;
                     nwProto.onClose = function () {
-                        if (bot.state.kickedByOtherDevice) {
+                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) {
                             this._isCanReconnect = false;
                             this.isManualClose = true;
                             this.isReconnecting = false;
@@ -2558,19 +2564,28 @@
                             return;
                         }
                         if (bot.state.hasLoggedInOnce) {
+                            const hadKick = !!this.kickData;
+                            if (hadKick) {
+                                this.kickData = null;
+                                this._isCanReconnect = false;
+                                this.isManualClose = true;
+                                this.isReconnecting = false;
+                                try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
+                                bot.log("📱 [Nhường Máy] Phát hiện đóng socket sau khi nhận kick -> Nhường máy ngay!");
+                                bot.triggerEmergencyYield("onClose with kickData (Điện thoại đăng nhập)");
+                                return;
+                            }
                             this._reconnectFailStreak = (this._reconnectFailStreak || 0) + 1;
-                            const hadKick = !!this.kickData || !!this._needFullRelogin || (this._reconnectFailStreak >= 2);
-                            this.kickData = null;
+                            if (this._reconnectFailStreak >= 4) {
+                                bot.log("📱 [Nhường Máy] Mất kết nối liên tục 4 lần -> Có thể do Điện thoại đang vào, kích hoạt Nhường Máy!");
+                                bot.triggerEmergencyYield("Rớt mạng liên tiếp 4 lần");
+                                return;
+                            }
                             this._isCanReconnect = true;
                             this.isManualClose = false;
                             this.isReconnecting = false;
                             try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
-                            if (hadKick) {
-                                this._needFullRelogin = true;
-                                bot.scheduleSafeReconnect(this, "close_after_kick", 2200);
-                            } else {
-                                bot.scheduleSafeReconnect(this, "socket_close", 1800);
-                            }
+                            bot.scheduleSafeReconnect(this, "socket_close", 2000);
                             return;
                         }
                         this.kickData = null;
@@ -5051,7 +5066,7 @@
                     hdi.prototype.__QA_MOD_SKIN__ = true;
                     const origGetSkinOnWear = hdi.prototype.getSkinOnWear;
                     hdi.prototype.getSkinOnWear = function () {
-                        if (bot.state.mod_skin !== false) {
+                        if (bot.state.mod_skin === true) {
                             try {
                                 if ((!this.skinSortDatas || this.skinSortDatas.length === 0) && typeof this.setSkinDefautData === "function" && this.getSkinCount && this.getSkinCount() > 0) {
                                     this.setSkinDefautData(false, false);
@@ -5080,7 +5095,7 @@
                     if (origGetHeroFashionData) {
                         hdi.prototype.getHeroFashionData = function () {
                             const res = origGetHeroFashionData.apply(this, arguments);
-                            if (bot.state.mod_skin !== false && Array.isArray(res)) {
+                            if (bot.state.mod_skin === true && Array.isArray(res)) {
                                 for (let s of res) {
                                     if (s && s.useIndex === 2) {
                                         s.useIndex = 0; // Unlock in CardFashionView
@@ -6016,6 +6031,10 @@
                         const origDispatch = disp.dispatchEvent;
                         disp.dispatchEvent = function (evt, ...args) {
                             try {
+                                if (evt === "evt_LoginKickSc") {
+                                    bot.log("📱 [Nhường Máy] Bắt được sự kiện evt_LoginKickSc từ Dispatcher -> Nhường máy ngay!");
+                                    bot.triggerEmergencyYield("Dispatcher evt_LoginKickSc (10103)");
+                                }
                                 const evType = (gm && gm.EventType) || window.EventType || {};
                                 if (evt === "skvs_pre_guess_role_update" || evt === evType.skvs_pre_guess_role_update) {
                                     const data = args[0];
@@ -6437,7 +6456,7 @@
                             if (typeof bot.applyModCosmetics === "function") {
                                 bot.applyModCosmetics();
                             }
-                            if (bot.state.mod_skin !== false && typeof bot.refreshBattleMainCopySkins === "function") {
+                            if (bot.state.mod_skin === true && typeof bot.refreshBattleMainCopySkins === "function") {
                                 if (!bot.state._lastSkinRefresh || Date.now() - bot.state._lastSkinRefresh > 5000) {
                                     bot.state._lastSkinRefresh = Date.now();
                                     bot.refreshBattleMainCopySkins();
@@ -12170,7 +12189,7 @@
                         if (typeof bot.checkBattleWatchdog === "function") {
                             bot.checkBattleWatchdog();
                         }
-                        if (bot.state.mod_skin !== false && typeof bot.refreshBattleMainCopySkins === "function") {
+                        if (bot.state.mod_skin === true && typeof bot.refreshBattleMainCopySkins === "function") {
                             bot.refreshBattleMainCopySkins();
                         }
 
@@ -12889,25 +12908,27 @@
     // ====================================================================
     // NATIVE D-AUTO INTEGRATION & TOGGLE DISPATCHER
     // ====================================================================
+    const isNativeApp = !!(typeof jsb !== "undefined" || (window.cc && window.cc.sys && window.cc.sys.isNative));
+
     window.__DAUTO_CONFIG = {
         master: true,
-        FEAT_SPEED_SCALE: true,
+        FEAT_SPEED_SCALE: !isNativeApp,
         FEAT_SKIP_ADS: true,
         FEAT_SKIP_BATTLE: true,
         FEAT_AUTO_STAGE: false,
-        FEAT_MOD_SKIN: true,
+        FEAT_MOD_SKIN: false, // TẮT HẲN MẶC ĐỊNH ĐỂ KHÔNG BỊ MẤT HOẠT ẢNH / TÀNG HÌNH TƯỚNG!
         FEAT_MOD_FRAME_TITLE: true,
-        FEAT_AUTO_RANK: true,
-        FEAT_AUTO_HOST: true,
-        FEAT_AUTO_RESCUE_KNB: true,
+        FEAT_AUTO_RANK: !isNativeApp,
+        FEAT_AUTO_HOST: !isNativeApp,
+        FEAT_AUTO_RESCUE_KNB: !isNativeApp, // Trên Điện thoại: Mặc định TẮT quét ngầm để không bị giật lag / nghẽn mạng
         FEAT_AUTO_YYZQ_CORE: true,
-        FEAT_AUTO_TOUHU: true,
+        FEAT_AUTO_TOUHU: !isNativeApp,
         FEAT_AUTO_FEIDAO: true,
         FEAT_AUTO_HONGBAO: true,
         FEAT_AUTO_ACT_TASK: true,
         FEAT_AUTO_LONGMACH: true,
-        FEAT_AUTO_SKVS: true,
-        FEAT_AUTO_GUILD_MINE: true,
+        FEAT_AUTO_SKVS: !isNativeApp,
+        FEAT_AUTO_GUILD_MINE: !isNativeApp,
         FEAT_AUTO_RECYCLE_FRAGMENTS: true,
         FEAT_AUTO_DEFJZ: false,
         FEAT_AUTO_DAILY_REWARDS: true
