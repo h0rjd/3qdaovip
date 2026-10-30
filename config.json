@@ -12,7 +12,7 @@
     }
   ],
   "settings": {
-    "show_browser": true,
+    "show_browser": false,
     "skip_ads": true,
     "skip_battle": true,
     "speed_hack": 2,
@@ -22,14 +22,14 @@
   "telegram": {
     "bot_token": "8918744112:AAHy6EyEud73Ta3D42awSlJlDzRaFhCcjXk",
     "chat_id": "7182418544",
-    "report_interval_min": 2
+    "report_interval_min": 30
   },
   "toggles": {
     "auto_stage": false,
     "auto_tower": false,
     "auto_hero_up": false,
     "auto_dispatch": false,
-    "auto_host": false,
+    "auto_host": true,
     "auto_rescue_knb": true,
     "auto_star_up": false,
     "auto_manual": false,
@@ -42,12 +42,12 @@
     "auto_split_purple_shard": true,
     "auto_touhu": true,
     "auto_feidao": false,
-    "auto_hongbao": false,
+    "auto_hongbao": true,
     "auto_act_task": true,
     "auto_daily_rewards": true,
     "auto_buy_gold": true,
     "auto_free_lottery": true,
-    "auto_longmach": false,
+    "auto_longmach": true,
     "auto_skvs": true,
     "auto_guild_mine": true,
     "mod_skin": true,
