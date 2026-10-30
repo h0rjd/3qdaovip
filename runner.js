@@ -1273,7 +1273,10 @@ async function launchAndEnterGame(sessionState) {
     writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v3.0 Final)...`);
     const botPayloadCode = fs.readFileSync(payloadFile, 'utf8');
 
-    await page.evaluate((code, cfg) => {
+    await page.evaluate((code, cfg, isCloudHeadless) => {
+        if (isCloudHeadless) {
+            window.__CLOUD_HEADLESS_BOT__ = true;
+        }
         const script = document.createElement('script');
         script.textContent = code;
         document.body.appendChild(script);
@@ -1294,7 +1297,7 @@ async function launchAndEnterGame(sessionState) {
                 window.AutoBot.startScheduleLoop();
             }
         }
-    }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles });
+    }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles }, isGitHubActions);
 
     writeLog("[Bot] ✅ AutoBot v3.0 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
     await new Promise(r => setTimeout(r, 4000));

@@ -1,4 +1,4 @@
-name: 3Q Dao Dao Dao - Cloud AutoBot v3.9.34 (24/7 Farm KNB & Telegram)
+name: 3Q Dao Dao Dao - Cloud AutoBot v3.9.36 (24/7 Farm KNB & Telegram)
 
 on:
   # schedule:
@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   run-bot:
-    name: 3Q AutoBot v3.9.34 (24/7 Farm KNB + Điều Khiển Telegram)
+    name: 3Q AutoBot v3.9.36 (24/7 Farm KNB + Điều Khiển Telegram)
     runs-on: ubuntu-24.04
     timeout-minutes: 350
 
@@ -72,7 +72,7 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
-      - name: 🎮 Khởi chạy AutoBot v3.9.34 (Treo 24/7 + Điều Khiển Nút Bấm Telegram)
+      - name: 🎮 Khởi chạy AutoBot v3.9.36 (Treo 24/7 + Điều Khiển Nút Bấm Telegram)
         env:
           JOYPLAY_EMAIL: ${{ secrets.JOYPLAY_EMAIL }}
           JOYPLAY_PASSWORD: ${{ secrets.JOYPLAY_PASSWORD }}

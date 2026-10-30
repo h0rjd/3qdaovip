@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3Q Đào Đào Đào - AutoBot v3.0 Final (Bản Chính Thức - Siêu Mượt, Skip Battle & Chống Khưng Giật)
 // @namespace    https://joyplay.vn/
-// @version      3.9.35
+// @version      3.9.36
 // @description  AutoBot v3.0 Final: Tích hợp đầy đủ Auto Vượt Ải, Farm KNB (+50 KNB/lượt không giới hạn), Skip Battle tức thì, chống giật lag khi khiêu chiến.
 // @author       Antigravity
 // @match        *://3qdao.joyplay.vn/*
@@ -114,9 +114,9 @@
     // Tuyệt đối KHÔNG gộp Bí Cảnh Tần Lĩnh (9), Ải Chính Tuyến (1), Leo Hạng Liên Server / Lôi Đài (105), và các loại Boss (4, 6, 10, v.v.) vào đây!
     function canNativeSkipBattle(gameplayType) {
         const t = Number(gameplayType);
-        // Bỏ qua trận tức thì 0s cho tất cả các chế độ (Ải 1, Tháp 2, Phụ bản 3, Boss 4/6/10, Đấu trường 101, Gia viên 105/106, Tháp nguyên tố 12..16)
-        // CHỈ NGOẠI TRỪ: Bí Cảnh Tần Lĩnh (9) để người chơi tự chọn buff/lõi giữa các tầng
-        return t !== 9;
+        // Hỗ trợ Skip kết toán tức thì ~0.1s cho tất cả chế độ chiến đấu (Tháp 2, Phụ bản 3, Boss 4/6/10.., Nhiều đội 20..25/112, Đấu trường 101/102, Gia viên 104/105/106..)
+        // Ngoại trừ: Ải Chính Tuyến (1 - xử lý riêng qua BattleMainCopyView), Bí Cảnh Tần Lĩnh (9 - chọn buff/lõi giữa tầng) và Preset kịch bản (>= 240)
+        return !isNaN(t) && t >= 2 && t !== 9 && t < 240;
     }
 
     window.__AUTO_STAGE_ENABLED__ = false;
@@ -1028,12 +1028,212 @@
         },
 
         lastBattleData: null,
+        _warDataCache: {},
+        _warDataKeys: [],
+        _lastWarDataByType: {},
+
+        cacheWarData: function (war) {
+            try {
+                const w = (war && war.battleData) ? war.battleData : war;
+                if (!w || typeof w !== "object") return null;
+                if (!Array.isArray(w.rounds) || w.rounds.length === 0 || !Array.isArray(w.units) || w.units.length === 0) {
+                    return null;
+                }
+                const snap = JSON.parse(JSON.stringify(w));
+                delete snap.skipRounds;
+                snap.Overwhelming = 0;
+                if (snap._id != null) {
+                    const key = String(snap._id);
+                    if (!bot._warDataCache[key]) {
+                        bot._warDataKeys.push(key);
+                        if (bot._warDataKeys.length > 35) {
+                            const oldest = bot._warDataKeys.shift();
+                            if (oldest) delete bot._warDataCache[oldest];
+                        }
+                    }
+                    bot._warDataCache[key] = snap;
+                }
+                if (snap._type != null) {
+                    bot._lastWarDataByType[Number(snap._type)] = {
+                        data: snap,
+                        time: Date.now()
+                    };
+                }
+                if (Number(snap._type) !== 106) {
+                    bot.lastBattleData = snap;
+                }
+                return snap;
+            } catch (e) { }
+            return null;
+        },
+
+        resolveFullBattleData: function (bData) {
+            try {
+                if (!bData || typeof bData !== "object") return bData;
+                const raw = bData.battleData ? bData.battleData : bData;
+                const hasFull = Array.isArray(raw.rounds) && raw.rounds.length > 0 && Array.isArray(raw.units) && raw.units.length > 0;
+                if (hasFull) {
+                    bot.cacheWarData(raw);
+                    return raw;
+                }
+                let cached = null;
+                const warId = raw._id != null ? raw._id : raw._war_id;
+                if (warId != null && bot._warDataCache[String(warId)]) {
+                    cached = bot._warDataCache[String(warId)];
+                }
+                if (!cached && warId != null && raw._type != null) {
+                    const fm = bot.getFightManager();
+                    if (fm && typeof fm.getRecordWarData === "function") {
+                        const rec = fm.getRecordWarData(raw._type, warId);
+                        if (rec && Array.isArray(rec.rounds) && rec.rounds.length > 0) {
+                            cached = bot.cacheWarData(rec) || rec;
+                        }
+                    }
+                }
+                if (!cached && raw._type != null) {
+                    const byType = bot._lastWarDataByType[Number(raw._type)];
+                    if (byType && byType.data && (Date.now() - byType.time < 30000)) {
+                        if (!warId || String(byType.data._id) === String(warId) || Number(byType.data._copy_id) === Number(raw._copy_id)) {
+                            cached = byType.data;
+                        }
+                    }
+                }
+                if (!cached && Number(raw._type) === 1) {
+                    const mm = bot.getModelManager();
+                    const hangup = mm && mm.BattleModel && mm.BattleModel.getHangupBattleInfo ? mm.BattleModel.getHangupBattleInfo() : null;
+                    if (hangup && Array.isArray(hangup.rounds) && hangup.rounds.length > 0) {
+                        cached = bot.cacheWarData(hangup) || hangup;
+                    }
+                }
+                if (cached) {
+                    const fresh = JSON.parse(JSON.stringify(cached));
+                    raw.rounds = fresh.rounds;
+                    raw.units = fresh.units;
+                    if (!raw._data_role || raw._data_role.length === 0) raw._data_role = fresh._data_role || [];
+                    if (!raw._dungeon_id && fresh._dungeon_id) raw._dungeon_id = fresh._dungeon_id;
+                    if (!raw._round_max && fresh._round_max) raw._round_max = fresh._round_max;
+                    if (!raw._copy_id && fresh._copy_id) raw._copy_id = fresh._copy_id;
+                    if (raw._id == null && fresh._id != null) raw._id = fresh._id;
+                    if (raw._type == null && fresh._type != null) raw._type = fresh._type;
+                    if (raw._winner == null && fresh._winner != null) raw._winner = fresh._winner;
+                    delete raw.skipRounds;
+                    raw.Overwhelming = 0;
+                }
+                return raw;
+            } catch (e) { }
+            return bData;
+        },
+
+        isReplayBattle: function (bsv) {
+            try {
+                if (bot.state && bot.state.isReplaying) {
+                    const vm = bot.getViewManager();
+                    const isOpen = vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleBeginView");
+                    if (isOpen || (Date.now() - (bot.state.replayStartTime || 0) < 6000)) {
+                        return true;
+                    }
+                    bot.state.isReplaying = false;
+                }
+                const target = bsv || window.__CURRENT_BATTLE_SCENES_VIEW__;
+                if (target) {
+                    if (target._args && target._args.isRecord) return true;
+                    if (target.fightDate && target.fightDate._args && target.fightDate._args.isRecord) return true;
+                }
+            } catch (e) { }
+            return false;
+        },
+
+        triggerBattleReplay: function (rawData) {
+            try {
+                const gm = window.G_Mapping;
+                const disp = (gm && gm.Dispatcher) || window.Dispatcher;
+                const evType = (gm && gm.EventType) || window.EventType;
+                const fm = bot.getFightManager();
+                const vm = bot.getViewManager();
+                const mm = bot.getModelManager();
+
+                const resolved = bot.resolveFullBattleData(rawData || bot.lastBattleData || (mm && mm.BattleModel && mm.BattleModel.getHangupBattleInfo && mm.BattleModel.getHangupBattleInfo()));
+                if (!resolved) {
+                    bot.log("⚠️ Không tìm thấy dữ liệu trận đấu để phát lại.");
+                    return false;
+                }
+
+                if ((!Array.isArray(resolved.rounds) || resolved.rounds.length === 0) && (resolved._id || resolved._war_id)) {
+                    const warId = resolved._id || resolved._war_id;
+                    if (fm && typeof fm.requestWarLog === "function") {
+                        bot.state.isReplaying = true;
+                        bot.state.replayStartTime = Date.now();
+                        bot.log(`🎬 [Replay] Đang tải chiến báo #${warId} từ máy chủ để phát lại...`);
+                        fm.requestWarLog(warId, 1);
+                        return true;
+                    }
+                }
+
+                if (!Array.isArray(resolved.rounds) || resolved.rounds.length === 0 || !Array.isArray(resolved.units) || resolved.units.length === 0) {
+                    bot.log("⚠️ Trận đấu này không có dữ liệu hiệp đấu để xem lại.");
+                    return false;
+                }
+
+                const replayData = JSON.parse(JSON.stringify(resolved));
+                delete replayData.skipRounds;
+                replayData.Overwhelming = 0;
+
+                bot.state.isReplaying = true;
+                bot.state.replayStartTime = Date.now();
+
+                try {
+                    if (window.cc && window.cc.director) {
+                        const sched = window.cc.director.getScheduler();
+                        if (sched && sched.setTimeScale) sched.setTimeScale(1.0);
+                    }
+                } catch (eTs) { }
+
+                if (mm && replayData._id != null) {
+                    const multiModels = [mm.TeamRestricteModel, mm.YinfuModel, mm.YyzqModel, mm.Yyzq2Model, mm.TianshiModel];
+                    for (let i = 0; i < multiModels.length; i++) {
+                        const m = multiModels[i];
+                        if (m && typeof m.playRecord === "function") {
+                            try { m.playRecord(replayData._id); } catch (ePr) { }
+                        }
+                    }
+                }
+
+                const rType = Number(replayData._type || 0);
+                if (fm && (!vm || !vm.isOpenView("BattleBeginView"))) {
+                    try {
+                        if (typeof fm.removeFight === "function" && fm.haveFight && fm.haveFight(rType)) {
+                            fm.removeFight(rType);
+                        }
+                        if (fm.fightList && fm.fightList[rType]) {
+                            delete fm.fightList[rType];
+                        }
+                    } catch (eClean) { }
+                }
+
+                if (disp && evType) {
+                    if (evType.Battle_replayRecord_again) {
+                        disp.dispatchEvent(evType.Battle_replayRecord_again, replayData);
+                    }
+                    if (evType.Battle_replayRecord) {
+                        bot.log(`🎬 [Replay] Đang phát lại trận đấu (Type: ${rType}, Hiệp: ${replayData.rounds.length})...`);
+                        disp.dispatchEvent(evType.Battle_replayRecord, replayData);
+                        return true;
+                    }
+                }
+            } catch (eRep) {
+                bot.state.isReplaying = false;
+                console.error("[triggerBattleReplay Error]", eRep);
+            }
+            return false;
+        },
 
         openLastBattleData: function () {
             try {
                 const vm = bot.getViewManager();
-                const bData = bot.lastBattleData || (window.ModelManager && window.ModelManager.BattleModel && window.ModelManager.BattleModel.getHangupBattleInfo());
+                const raw = bot.lastBattleData || (window.ModelManager && window.ModelManager.BattleModel && window.ModelManager.BattleModel.getHangupBattleInfo());
+                const bData = bot.resolveFullBattleData(raw);
                 if (vm && bData) {
+                    bot.state.viewingBattleData = true;
                     bot.log("📊 Đang mở bảng thống kê dữ liệu thông số trận vừa đánh (BattledataView)...");
                     vm.open("BattledataView", bData);
                 } else {
@@ -1048,17 +1248,17 @@
             try {
                 const vm = bot.getViewManager();
                 if (!vm) return;
-                // 1. Tuyệt đối KHÔNG đóng bất kỳ cửa sổ nào nếu người chơi đang mở xem thống kê thông số trận đấu
-                if (bot.state.viewingBattleData) return;
-                if (typeof vm.isOpenView === "function" && (vm.isOpenView("BattledataView") || vm.isOpenView("PanelBattleData"))) {
+                // 1. Tuyệt đối KHÔNG đóng bất kỳ cửa sổ nào nếu người chơi đang mở xem thống kê thông số hoặc đang xem lại trận đấu
+                if (bot.state.viewingBattleData || bot.state.isReplaying) return;
+                if (typeof vm.isOpenView === "function" && (vm.isOpenView("BattledataView") || vm.isOpenView("PanelBattleData") || vm.isOpenView("BattleBeginView"))) {
                     return;
                 }
                 if (typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
                     const brv = typeof vm.getView === "function" ? vm.getView("BattleResultView") : null;
                     if (brv) {
-                        const bType = (brv.battleData && brv.battleData._type) || (brv._args && brv._args.battleData && brv._args.battleData._type) || (brv._args && brv._args.arrayType) || 0;
-                        // Tự động dập tắt ngay lập tức nếu là trận Giải Cứu Gia Viên (Revolt = 106 / CityFight = 105) kể cả khi tắt auto_stage
-                        if (Number(bType) === 106 || Number(bType) === 105) {
+                        const bType = Number((brv.battleData && brv.battleData._type) || (brv._args && brv._args.battleData && brv._args.battleData._type) || (brv._args && brv._args.arrayType) || 0);
+                        // 2. Tự động dập tắt ngay lập tức nếu là trận Giải Cứu Gia Viên (Revolt = 106 hoặc CityFight chạy ngầm = 105)
+                        if (bType === 106 || (bType === 105 && (bot.state.rescueFightActive || window.__CLOUD_HEADLESS_BOT__))) {
                             try {
                                 if (brv.view) { brv.view.visible = false; brv.view.alpha = 0; }
                                 if (brv.node) brv.node.active = false;
@@ -1070,30 +1270,21 @@
                             }
                             return;
                         }
-                    }
-                }
-                // 2. Tự động dọn dẹp BattleResultView nếu đang bật skip_battle hoặc đang chạy auto
-                if (!bot.isAutoStageOn() && !bot.state.isAutoTowerActive && !(bot.settings && bot.settings.skip_battle)) {
-                    return;
-                }
-                if (typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
-                    const brv = typeof vm.getView === "function" ? vm.getView("BattleResultView") : null;
-                    if (brv) {
-                        const bType = (brv.battleData && brv.battleData._type) || (brv._args && brv._args.battleData && brv._args.battleData._type) || (brv._args && brv._args.arrayType) || 0;
-                        // Chỉ giữ lại DefJz (9 - Tần Lĩnh) để người chơi tự chọn buff/lõi
-                        const isDefJz = (Number(bType) === 9);
-                        if (isDefJz) return;
-
-                        if (brv._curPageClass && typeof brv._curPageClass.okClick === "function") {
-                            brv._curPageClass.okClick();
-                        } else if (typeof brv.closeView === "function") {
-                            brv.closeView();
+                        // 3. Trên Cloud Headless Bot (GitHub Actions treo 24/7) hoặc tác vụ Auto chạy ngầm: tự đóng bảng kết quả để không chặn luồng
+                        // Trên Điện thoại / Trình duyệt người chơi: GIỮ NGUYÊN bảng kết quả khi bấm Khiêu Chiến thủ công để xem thông số & xem lại!
+                        const isCloudAuto = !!(window.__CLOUD_HEADLESS_BOT__ && bot.settings && bot.settings.skip_battle && bType !== 9);
+                        const isAutoBgTower = (bType === 2 && bot.state.isAutoTowerActive && bot.state.towerInProgress && !vm.isOpenView("ClimbtowerView"));
+                        const isAutoBgArena = (bType === 101 && bot.state.autoArenaFighting && !vm.isOpenView("ArenaView"));
+                        const isAutoStageBg = (bType === 1 && bot.isAutoStageOn());
+                        if (isCloudAuto || isAutoBgTower || isAutoBgArena || isAutoStageBg) {
+                            if (brv._curPageClass && typeof brv._curPageClass.okClick === "function") {
+                                brv._curPageClass.okClick();
+                            } else if (typeof brv.closeView === "function") {
+                                brv.closeView();
+                            }
                         }
-                    } else if (vm.close) {
-                        vm.close("BattleResultView");
                     }
                 }
-                // Tuyệt đối không đóng BattleBeginView ở đây để các trận Boss, Tần Lĩnh, v.v. diễn ra bình thường
             } catch (e) { }
         },
 
@@ -1195,6 +1386,7 @@
         doBattleSkip: function (battleSecnesView) {
             const self = battleSecnesView || window.__CURRENT_BATTLE_SCENES_VIEW__;
             if (!self || !self.view) return false;
+            if (bot.isReplayBattle(self)) return false;
             const nowTs = Date.now();
             if (self.__is_skipping__ && nowTs - (self.__skip_time__ || 0) < 250) return false;
             self.__is_skipping__ = true;
@@ -1222,8 +1414,11 @@
                 if (fd) {
                     if (!fd.battleData && self.battleData) fd.battleData = self.battleData;
                     if (!fd._args && self._args) fd._args = self._args;
-                    if (fd.battleData && fd.battleData._id) {
-                        window.__LAST_WAR_ID__ = fd.battleData._id;
+                    if (fd.battleData) {
+                        bot.cacheWarData(fd.battleData);
+                        if (fd.battleData._id) {
+                            window.__LAST_WAR_ID__ = fd.battleData._id;
+                        }
                     }
                 }
 
@@ -1269,21 +1464,13 @@
                 bot.state.lastBattleEndTime = Date.now() + 300;
                 bot.log(`⚔️ [Skip-Battle] Bỏ qua trận đấu tức thì (Type: ${aType || "unknown"}, WarID: ${warId || "unknown"})`);
 
-                // 1. Kích hoạt nút native quickEnd trên UI (chắc chắn chạy)
-                if (self.quickEnd && typeof self.quickEnd.callClickListener === "function") {
-                    try { self.quickEnd.callClickListener(); } catch (eClk) { }
-                }
-                // 2. Dispatch event battle_Next trực tiếp vào FightManager / BattleController
+                // Dispatch event battle_Next chuẩn engine (tuyệt đối KHÔNG gửi WarJumpCs _id=warId để giữ nguyên 100% thông số units/rounds!)
                 if (disp && evType && evType.battle_Next && fd) {
-                    try { disp.dispatchEvent(evType.battle_Next, fd); } catch (eBn) { }
-                }
-                // 3. Gửi lệnh WarJumpCs thẳng lên socket server
-                if (warId && gm && gm.RPCReq && gm.WarJumpCs) {
                     try {
-                        gm.RPCReq.send(gm.WarJumpCs.protocol, { _type: aType || 1, _id: warId, _cli: 1, _ext: [] });
-                    } catch (eJump) { }
+                        disp.dispatchEvent(evType.battle_Next, fd);
+                        return true;
+                    } catch (eBn) { }
                 }
-                // 4. Nếu có hàm trực tiếp btn_quickEnd
                 if (typeof self.btn_quickEnd === "function") {
                     try { self.btn_quickEnd(); } catch (eBqe) { }
                 }
@@ -1316,6 +1503,20 @@
 
                 // Nếu không có trận đấu nào đang hiển thị trên foreground
                 if (!bsv || !bsv.view || !bsv.view.parent || bsv.view.visible === false) {
+                    bot.state.battleStuckTimer = 0;
+                    bot.state.lastWatchdogWarId = null;
+                    return;
+                }
+
+                // TUYỆT ĐỐI KHÔNG tự động skip hay watchdog kick khi người chơi đang chủ động XEM LẠI TRẬN ĐẤU (Replay)!
+                if (bot.isReplayBattle(bsv)) {
+                    if (bsv.quickEndState && typeof bsv.quickEndState.setSelectedPage === "function") {
+                        try { bsv.quickEndState.setSelectedPage("normal"); } catch (e) { }
+                    }
+                    if (bsv.quickEnd) {
+                        try { bsv.quickEnd.setVisible(true); } catch (e) { }
+                        try { bsv.quickEnd.setTouchable(true); } catch (e) { }
+                    }
                     bot.state.battleStuckTimer = 0;
                     bot.state.lastWatchdogWarId = null;
                     return;
@@ -2898,13 +3099,14 @@
                     vm.__QA_HOOKED__ = true;
                     const origOpen = vm.open;
                     vm.open = function (viewName, args, cb) {
-                        if (viewName === "BattleBeginView" && bot.settings && bot.settings.skip_battle) {
+                        if (viewName === "BattleBeginView" && bot.settings && bot.settings.skip_battle && !bot.state.isReplaying && !(args && args.isRecord)) {
                             setTimeout(() => {
                                 try {
+                                    if (bot.state.isReplaying) return;
                                     const vmInst = bot.getViewManager();
                                     const bbv = vmInst && typeof vmInst.getView === "function" ? vmInst.getView("BattleBeginView") : null;
                                     const bsv = bbv && bbv.ctlView && bbv.ctlView.BattleSecnesView;
-                                    if (bsv) {
+                                    if (bsv && !bot.isReplayBattle(bsv)) {
                                         bot.doBattleSkip(bsv);
                                     }
                                 } catch (e) { }
@@ -2925,9 +3127,9 @@
                 // Tuyệt đối KHÔNG gộp Bí Cảnh Tần Lĩnh (9), Ải Chính Tuyến (1), Leo Hạng Liên Server / Lôi Đài (105), và các loại Boss (4, 6, 10, v.v.) vào đây!
                 function canNativeSkipBattle(gameplayType) {
         const t = Number(gameplayType);
-        // Bỏ qua trận tức thì 0s cho tất cả các chế độ (Ải 1, Tháp 2, Phụ bản 3, Boss 4/6/10, Đấu trường 101, Gia viên 105/106, Tháp nguyên tố 12..16)
-        // CHỈ NGOẠI TRỪ: Bí Cảnh Tần Lĩnh (9) để người chơi tự chọn buff/lõi giữa các tầng
-        return t !== 9;
+        // Hỗ trợ Skip kết toán tức thì ~0.1s cho tất cả chế độ chiến đấu (Tháp 2, Phụ bản 3, Boss 4/6/10.., Nhiều đội 20..25/112, Đấu trường 101/102, Gia viên 104/105/106..)
+        // Ngoại trừ: Ải Chính Tuyến (1 - xử lý riêng qua BattleMainCopyView), Bí Cảnh Tần Lĩnh (9 - chọn buff/lõi giữa tầng) và Preset kịch bản (>= 240)
+        return !isNaN(t) && t >= 2 && t !== 9 && t < 240;
     }
 
                 // Hook 2: BattleController & FightManager - Quản lý cờ skipBattle, triệt tiêu toast "Hãy chờ tổng kết trận này"
@@ -2947,9 +3149,70 @@
                         if (bcProto && !bcProto.__QA_HOOKED__) {
                             bcProto.__QA_HOOKED__ = true;
 
+                            const origStartWarBattleData = bcProto.startWarBattleData;
+                            if (origStartWarBattleData) {
+                                bcProto.startWarBattleData = function (e) {
+                                    if (e) {
+                                        bot.cacheWarData(e);
+                                        if (Number(e._type) === 1 && bot.state.pendingManualStageInstant && !bot.isAutoStageOn()) {
+                                            bot.state.pendingManualStageInstant = false;
+                                            const res = origStartWarBattleData.apply(this, arguments);
+                                            try {
+                                                const snap = JSON.parse(JSON.stringify(e));
+                                                delete snap.skipRounds;
+                                                snap.Overwhelming = 0;
+                                                bot.state.lastManualSettledStageWarId = e._id;
+                                                const bmvInst = window.__BMV_INSTANCE__;
+                                                if (bmvInst) {
+                                                    bot.state.manualStageFight = true;
+                                                    bot.state.manualStageFightTime = Date.now();
+                                                    bmvInst.playData = e;
+                                                    if (typeof bmvInst.moveNext === "function") {
+                                                        bmvInst.moveNext();
+                                                    }
+                                                }
+                                                const vmInst = bot.getViewManager();
+                                                if (vmInst && typeof vmInst.open === "function" && (Number(snap._winner) === 1 || !vmInst.isOpenView("BattleResultView"))) {
+                                                    vmInst.open("BattleResultView", {
+                                                        battleData: snap,
+                                                        isBackGroud: false,
+                                                        isOffLine: false
+                                                    });
+                                                }
+                                            } catch (eManualStage) {
+                                                console.warn("[Manual Stage Instant Settle Error]", eManualStage);
+                                            }
+                                            return res;
+                                        }
+                                    }
+                                    return origStartWarBattleData.apply(this, arguments);
+                                };
+                            }
+
+                            const origStartWarLogBattle = bcProto.startWarLogBattle;
+                            if (origStartWarLogBattle) {
+                                bcProto.startWarLogBattle = function (e) {
+                                    if (e) {
+                                        delete e.skipRounds;
+                                        e.Overwhelming = 0;
+                                        bot.cacheWarData(e);
+                                        const fmInst = window.FightManager || (gm && gm.FightManager);
+                                        if (fmInst && fmInst.warLogType === 1) {
+                                            bot.state.isReplaying = true;
+                                            bot.state.replayStartTime = Date.now();
+                                        } else if (fmInst && fmInst.warLogType === 0) {
+                                            bot.state.viewingBattleData = true;
+                                        }
+                                    }
+                                    return origStartWarLogBattle.apply(this, arguments);
+                                };
+                            }
+
                             const origStartBttle = bcProto.startBttle;
                             bcProto.startBttle = function (battleData) {
                                 if (battleData) {
+                                    bot.state.isReplaying = false;
+                                    bot.cacheWarData(battleData);
                                     if (battleData._id) {
                                         window.__LAST_WAR_ID__ = battleData._id;
                                     }
@@ -2997,7 +3260,7 @@
 
                             const origOpenPrepare = bcProto.openPrepareView;
                             bcProto.openPrepareView = function (e) {
-                                if (Number(e) === 105) {
+                                if (Number(e && e.arrayType ? e.arrayType : e) === 105) {
                                     const fmInst = window.FightManager || (gm && gm.FightManager);
                                     if (fmInst && typeof fmInst.removeFight === "function" && fmInst.haveFight && fmInst.haveFight(105)) {
                                         try { fmInst.removeFight(105); } catch (err) { }
@@ -3008,21 +3271,19 @@
 
                             const origCheckConfig = bcProto.checkBattleConfigFun;
                             bcProto.checkBattleConfigFun = function (e, t) {
+                                if (bot.state.isReplaying || (t && t.isRecord)) {
+                                    return this.tryToOpen(e, t);
+                                }
                                 if (canNativeSkipBattle(e) && bot.settings.skip_battle) {
                                     if (!this.BattleConfigs) this.BattleConfigs = {};
                                     this.BattleConfigs[e] = this.BattleConfigs[e] || {};
                                     this.BattleConfigs[e].skipBattle = true;
                                     this.BattleConfigs[e].quickNext = false;
                                     if (t) {
+                                        if (t.battleData) bot.cacheWarData(t.battleData);
                                         t.isBackGroud = true;
                                         t.hideMainBottom = false;
                                     }
-                                }
-                                let res;
-                                if (origCheckConfig) {
-                                    res = origCheckConfig.apply(this, arguments);
-                                }
-                                if (canNativeSkipBattle(e) && bot.settings.skip_battle) {
                                     try {
                                         const vmInst = bot.getViewManager();
                                         if (vmInst && typeof vmInst.close === "function") {
@@ -3030,16 +3291,265 @@
                                             vmInst.close("TeamArrayView");
                                         }
                                     } catch (errVm) { }
+                                    let res;
+                                    if (origCheckConfig) {
+                                        res = origCheckConfig.apply(this, arguments);
+                                    }
+                                    const fmInst = window.FightManager || (gm && gm.FightManager);
+                                    if (fmInst) {
+                                        if (typeof fmInst.removeFight === "function") {
+                                            try { fmInst.removeFight(e); } catch (err) { }
+                                        }
+                                        if (fmInst.fightList && fmInst.fightList[e]) {
+                                            delete fmInst.fightList[e];
+                                        }
+                                        if (fmInst.copyRequstStatus) {
+                                            fmInst.copyRequstStatus[e] = 0;
+                                        }
+                                    }
+                                    return res;
                                 }
-                                return res;
+                                if (origCheckConfig) return origCheckConfig.apply(this, arguments);
                             };
 
                             const origHasSkip = bcProto.hasSkipBattle;
                             bcProto.hasSkipBattle = function (e) {
+                                if (bot.state.isReplaying) return false;
                                 if (canNativeSkipBattle(e) && bot.settings.skip_battle) return true;
                                 if (origHasSkip) return origHasSkip.apply(this, arguments);
                                 return false;
                             };
+
+                            const origBattleBegin = bcProto.battle_begin;
+                            if (origBattleBegin) {
+                                bcProto.battle_begin = function (e, t) {
+                                    try {
+                                        const gType = t && t.arrayType != null ? Number(t.arrayType) : 0;
+                                        const vmInst = bot.getViewManager();
+                                        if (!bot.state.isReplaying && canNativeSkipBattle(gType) && bot.settings.skip_battle) {
+                                            if (!this.BattleConfigs) this.BattleConfigs = {};
+                                            this.BattleConfigs[gType] = this.BattleConfigs[gType] || {};
+                                            this.BattleConfigs[gType].skipBattle = true;
+                                            this.BattleConfigs[gType].quickNext = false;
+                                            if (vmInst && typeof vmInst.close === "function") {
+                                                vmInst.close("BattlePrepareView");
+                                                vmInst.close("TeamArrayView");
+                                            }
+                                        } else if (gType === 1 && !bot.isAutoStageOn()) {
+                                            bot.state.manualStageFight = true;
+                                            bot.state.manualStageFightTime = Date.now();
+                                            if (bot.settings.skip_battle) {
+                                                bot.state.pendingManualStageInstant = true;
+                                            }
+                                            if (vmInst && typeof vmInst.close === "function") {
+                                                vmInst.close("BattlePrepareView");
+                                                vmInst.close("TeamArrayView");
+                                            }
+                                        }
+                                    } catch (eBg) { }
+                                    return origBattleBegin.apply(this, arguments);
+                                };
+                            }
+
+                            const origBattleEnd = bcProto.battle_end;
+                            if (origBattleEnd) {
+                                bcProto.battle_end = function (e, t, i) {
+                                    if (t && t.isRecord) {
+                                        bot.state.isReplaying = false;
+                                    }
+                                    return origBattleEnd.apply(this, arguments);
+                                };
+                            }
+
+                            const origCheckClear = bcProto.checkClearBattleConfig;
+                            if (origCheckClear) {
+                                bcProto.checkClearBattleConfig = function (e, t) {
+                                    const res = origCheckClear.apply(this, arguments);
+                                    if (canNativeSkipBattle(e) && bot.settings.skip_battle && !bot.state.isReplaying) {
+                                        if (!this.BattleConfigs) this.BattleConfigs = {};
+                                        this.BattleConfigs[e] = this.BattleConfigs[e] || {};
+                                        this.BattleConfigs[e].skipBattle = true;
+                                    }
+                                    return res;
+                                };
+                            }
+
+                            const origReplayRecord = bcProto.Battle_replayRecord;
+                            if (origReplayRecord) {
+                                bcProto.Battle_replayRecord = function (e, t) {
+                                    if (!t) return;
+                                    const r = Number(t._type || 0);
+                                    const fmInst = window.FightManager || (gm && gm.FightManager);
+                                    const vmInst = bot.getViewManager();
+                                    const mm = window.ModelManager || (gm && gm.ModelManager);
+                                    const disp = (gm && gm.Dispatcher) || window.Dispatcher;
+                                    const evType = (gm && gm.EventType) || window.EventType;
+
+                                    bot.cacheWarData(t);
+
+                                    if (bot.state.isReplaying) {
+                                        delete t.skipRounds;
+                                        t.Overwhelming = 0;
+                                        if (typeof this.checkWarRecord === "function") {
+                                            try { this.checkWarRecord(t); } catch (err) { }
+                                        }
+                                        try {
+                                            if (window.cc && window.cc.director) {
+                                                const sched = window.cc.director.getScheduler();
+                                                if (sched && sched.setTimeScale) sched.setTimeScale(1.0);
+                                            }
+                                        } catch (eTs) { }
+
+                                        const isBattleOpen = vmInst && typeof vmInst.isOpenView === "function" && vmInst.isOpenView("BattleBeginView");
+                                        if (!isBattleOpen && fmInst) {
+                                            try {
+                                                if (typeof fmInst.removeFight === "function" && fmInst.haveFight && fmInst.haveFight(r)) {
+                                                    fmInst.removeFight(r);
+                                                }
+                                                if (fmInst.fightList && fmInst.fightList[r]) {
+                                                    delete fmInst.fightList[r];
+                                                }
+                                            } catch (eRm) { }
+                                        }
+
+                                        if (isBattleOpen && fmInst && fmInst.haveFight && fmInst.haveFight(r)) {
+                                            return this.nextFight(t);
+                                        }
+
+                                        const l = {
+                                            battleData: t,
+                                            battleFunc: undefined,
+                                            isRecord: true,
+                                            playData: t,
+                                            hideMainBottom: false,
+                                            isBackGroud: false,
+                                            autoClose: false
+                                        };
+                                        try {
+                                            let fsmMod = null;
+                                            if (typeof window.__require === "function") {
+                                                try { fsmMod = window.__require("FsmMachine"); } catch (eF) { }
+                                            }
+                                            const fsm = (fsmMod && (fsmMod.FsmMachine || fsmMod.default || fsmMod)) || (gm && gm.FsmMachine) || window.FsmMachine;
+                                            if (fsm && typeof fsm.changeBattleState === "function") {
+                                                fsm.changeBattleState("begin");
+                                            }
+                                        } catch (eFsm) { }
+                                        if (fmInst && typeof fmInst.openFight === "function") {
+                                            return fmInst.openFight(r, l);
+                                        }
+                                        return origReplayRecord.apply(this, arguments);
+                                    }
+
+                                    if (canNativeSkipBattle(r) && bot.settings.skip_battle) {
+                                        if (typeof this.checkWarRecord === "function") {
+                                            try { this.checkWarRecord(t); } catch (err) { }
+                                        }
+                                        if (vmInst && typeof vmInst.close === "function") {
+                                            vmInst.close("BattlePrepareView");
+                                            vmInst.close("TeamArrayView");
+                                        }
+
+                                        const isMultiTeam = (r === 20 || r === 21 || r === 23 || r === 24 || r === 25 || r === 112);
+                                        const s = {
+                                            battleData: t,
+                                            battleFunc: this.BattleFunc ? this.BattleFunc[r] : undefined,
+                                            isRecord: isMultiTeam,
+                                            playData: t,
+                                            hideMainBottom: false,
+                                            isBackGroud: true,
+                                            autoClose: false
+                                        };
+                                        if (fmInst && typeof fmInst.addFight === "function") {
+                                            fmInst.addFight(r, s);
+                                        }
+
+                                        if (!isMultiTeam) {
+                                            if (disp && evType && evType.battle_end) {
+                                                disp.dispatchEvent(evType.battle_end, s);
+                                            }
+                                            if (fmInst) {
+                                                try { if (typeof fmInst.removeFight === "function") fmInst.removeFight(r); } catch (eR) { }
+                                                if (fmInst.fightList && fmInst.fightList[r]) delete fmInst.fightList[r];
+                                            }
+                                            return;
+                                        }
+
+                                        let tries = 0;
+                                        const warId = t._id;
+                                        const advanceMultiTeam = function () {
+                                            try {
+                                                let targetModel = null;
+                                                let isLastWar = true;
+                                                let hasQueuedNext = false;
+
+                                                if (r === 20 && mm && mm.TeamRestricteModel) {
+                                                    targetModel = mm.TeamRestricteModel;
+                                                    const list = targetModel._curBattleData && targetModel._curBattleData._war_list;
+                                                    if (Array.isArray(list) && list.length > 0) {
+                                                        isLastWar = (list[list.length - 1]._war_id === warId);
+                                                    }
+                                                    hasQueuedNext = !!targetModel._nextWarLogData;
+                                                } else if (r === 21 && mm && mm.YinfuModel) {
+                                                    targetModel = mm.YinfuModel;
+                                                    const list = targetModel._curBattleData && targetModel._curBattleData._war_log;
+                                                    if (Array.isArray(list) && list.length > 0) {
+                                                        isLastWar = (list[list.length - 1]._war_id === warId);
+                                                    }
+                                                    hasQueuedNext = !!(targetModel._warLogList && targetModel._warLogList.length > 0);
+                                                } else if (r === 23 && mm && mm.YyzqModel) {
+                                                    targetModel = mm.YyzqModel;
+                                                    const list = targetModel._lastBattleData && targetModel._lastBattleData._war_id_list;
+                                                    if (Array.isArray(list) && list.length > 0) {
+                                                        isLastWar = (list[list.length - 1]._val === warId);
+                                                    }
+                                                    hasQueuedNext = !!(targetModel._warLogList && targetModel._warLogList.length > 0);
+                                                } else if ((r === 24 || r === 25) && mm && mm.Yyzq2Model) {
+                                                    targetModel = mm.Yyzq2Model;
+                                                    const bData = targetModel.getLastBattleDataByType ? targetModel.getLastBattleDataByType(r) : null;
+                                                    const list = bData && bData._war_id_list;
+                                                    if (Array.isArray(list) && list.length > 0) {
+                                                        isLastWar = (list[list.length - 1]._val === warId);
+                                                    }
+                                                    const q = targetModel.getWarLogList ? targetModel.getWarLogList(r) : [];
+                                                    hasQueuedNext = !!(q && q.length > 0);
+                                                } else if (r === 112 && mm && mm.TianshiModel) {
+                                                    targetModel = mm.TianshiModel;
+                                                    const list = targetModel._warLog && targetModel._warLog._war_ids;
+                                                    if (Array.isArray(list) && list.length > 0) {
+                                                        isLastWar = (list[list.length - 1]._val === warId);
+                                                    }
+                                                    hasQueuedNext = !!(targetModel._warLogList && targetModel._warLogList.length > 0);
+                                                }
+
+                                                if (!isLastWar && !hasQueuedNext && tries < 15) {
+                                                    tries++;
+                                                    setTimeout(advanceMultiTeam, 20);
+                                                    return;
+                                                }
+
+                                                if (targetModel && typeof targetModel.onBattleNext === "function") {
+                                                    targetModel.onBattleNext(null, s);
+                                                } else if (disp && evType && evType.battle_end) {
+                                                    disp.dispatchEvent(evType.battle_end, s);
+                                                }
+
+                                                if (isLastWar && fmInst) {
+                                                    try { if (typeof fmInst.removeFight === "function") fmInst.removeFight(r); } catch (eR) { }
+                                                    if (fmInst.fightList && fmInst.fightList[r]) delete fmInst.fightList[r];
+                                                    if (fmInst.copyRequstStatus) fmInst.copyRequstStatus[r] = 0;
+                                                }
+                                            } catch (eAdv) {
+                                                console.warn("[MultiTeam Skip Advance Error]", eAdv);
+                                            }
+                                        };
+                                        setTimeout(advanceMultiTeam, 0);
+                                        return;
+                                    }
+
+                                    return origReplayRecord.apply(this, arguments);
+                                };
+                            }
 
                             const origBattleReset = bcProto.battle_reset;
                             bcProto.battle_reset = function (e, t) {
@@ -3092,7 +3602,7 @@
 
                             const origTryToOpen = bcProto.tryToOpen;
                             bcProto.tryToOpen = function (e, t) {
-                                if (Number(e) === 105) {
+                                if (!bot.state.isReplaying && Number(e) === 105) {
                                     const fmInst = window.FightManager || (gm && gm.FightManager);
                                     if (fmInst && typeof fmInst.removeFight === "function" && fmInst.haveFight && fmInst.haveFight(105)) {
                                         try { fmInst.removeFight(105); } catch (err) { }
@@ -3119,42 +3629,72 @@
                 };
                 bot.hookBattleController();
 
-                // Hook 2.1: FightManager.haveFightOnPlay - Chống kẹt trận ngầm chiếm foreground gây chặn thao tác
+                // Hook 2.1: FightManager.haveFightOnPlay & requestWarLog - Chống kẹt trận ngầm và gắn cờ Replay cho chiến báo lịch sử
                 let fmMod = null;
                 if (typeof window.__require === "function") {
                     try { fmMod = window.__require("FightManager"); } catch (e) { }
                 }
                 const fmClass = (fmMod && (fmMod.FightManager || fmMod.default || fmMod)) || (gm && gm.FightManager) || window.FightManager;
-                if (fmClass && typeof fmClass.haveFightOnPlay === "function" && !fmClass.__QA_PLAY_HOOKED__) {
+                if (fmClass && !fmClass.__QA_PLAY_HOOKED__) {
                     fmClass.__QA_PLAY_HOOKED__ = true;
-                    const origHaveFightOnPlay = fmClass.haveFightOnPlay;
-                    fmClass.haveFightOnPlay = function () {
-                        const vmInst = window.ViewManager || (gm && gm.ViewManager);
-                        const isBattleOpen = vmInst && typeof vmInst.isOpenView === "function" && (vmInst.isOpenView("BattleBeginView") || vmInst.isOpenView("BatteJingzhouView"));
-                        if (!isBattleOpen) {
-                            if (this.fightList) {
-                                for (let k in this.fightList) {
-                                    const f = this.fightList[k];
-                                    if (f && typeof f.getArgsInfo === "function") {
-                                        const args = f.getArgsInfo();
-                                        if (args) {
-                                            args.isBackGroud = true;
-                                            args.hideMainBottom = false;
+                    if (typeof fmClass.haveFightOnPlay === "function") {
+                        const origHaveFightOnPlay = fmClass.haveFightOnPlay;
+                        fmClass.haveFightOnPlay = function () {
+                            const vmInst = window.ViewManager || (gm && gm.ViewManager);
+                            const isBattleOpen = vmInst && typeof vmInst.isOpenView === "function" && (vmInst.isOpenView("BattleBeginView") || vmInst.isOpenView("BatteJingzhouView"));
+                            if (!isBattleOpen) {
+                                if (this.fightList) {
+                                    for (let k in this.fightList) {
+                                        const f = this.fightList[k];
+                                        if (f && typeof f.getArgsInfo === "function") {
+                                            const args = f.getArgsInfo();
+                                            if (args) {
+                                                args.isBackGroud = true;
+                                                args.hideMainBottom = false;
+                                            }
                                         }
                                     }
                                 }
+                                return undefined;
                             }
-                            return undefined;
-                        }
-                        const activeFight = origHaveFightOnPlay ? origHaveFightOnPlay.apply(this, arguments) : undefined;
-                        return activeFight;
-                    };
+                            return origHaveFightOnPlay.apply(this, arguments);
+                        };
+                    }
+                    if (typeof fmClass.requestWarLog === "function") {
+                        const origReqWarLog = fmClass.requestWarLog;
+                        fmClass.requestWarLog = function (warId, logType) {
+                            if (Number(logType) === 1) {
+                                bot.state.isReplaying = true;
+                                bot.state.replayStartTime = Date.now();
+                            } else if (Number(logType) === 0) {
+                                bot.state.viewingBattleData = true;
+                            }
+                            return origReqWarLog.apply(this, arguments);
+                        };
+                    }
                 }
 
-                // Hook 2.5: FubenManager - Quản lý cờ skipBattle đúng chế độ hỗ trợ
+                // Hook 2.5: FubenManager - Quản lý cờ skipBattle & tắt WarJumpCs (BattleOverwhelmingView) để luôn có đầy đủ Bảng thông số + Xem lại!
                 const fm = (gm && gm.FubenManager) || window.FubenManager;
                 if (fm && fm.prototype && !fm.prototype.__QA_HOOKED__) {
                     fm.prototype.__QA_HOOKED__ = true;
+                    const origTriggerOverwhelming = fm.prototype.triggerBattleOverwhelming;
+                    if (origTriggerOverwhelming) {
+                        fm.prototype.triggerBattleOverwhelming = function (e) {
+                            if (bot.settings && bot.settings.skip_battle) {
+                                try {
+                                    if (e && Number(e.arrayType) === 2 && !e.dungeon_id) {
+                                        const tc = window.TowerConfiger || (gm && gm.TowerConfiger);
+                                        const cfg = tc && tc.getTowerCfgById ? tc.getTowerCfgById(e.copyId) : null;
+                                        if (cfg && cfg.dungeon) e.dungeon_id = cfg.dungeon;
+                                    }
+                                } catch (eTw) { }
+                                return false;
+                            }
+                            return origTriggerOverwhelming.apply(this, arguments);
+                        };
+                    }
+
                     const origReqWar = fm.prototype.reqWar;
                     fm.prototype.reqWar = function (e) {
                         if (bot.settings.skip_battle && this.param && canNativeSkipBattle(this.param.arrayType)) {
@@ -3194,7 +3734,105 @@
                     };
                 }
 
-                // Hook 2.65: BattleModel - Tua nhanh tốc độ trận đấu an toàn, mượt mà (60fps), không làm giật lag game
+                // Hook 2.62: PopWindowManager, CrossArenaController, DungeonConfiger & PathConfiger
+                try {
+                    let pwmMod = null;
+                    if (typeof window.__require === "function") {
+                        try { pwmMod = window.__require("PopWindowManager"); } catch (e) { }
+                    }
+                    const pwm = (pwmMod && (pwmMod.PopWindowManager || pwmMod.default || pwmMod)) || (gm && gm.PopWindowManager) || window.PopWindowManager;
+                    if (pwm && typeof pwm.pushWindowQues === "function" && !pwm.__QA_POP_HOOKED__) {
+                        pwm.__QA_POP_HOOKED__ = true;
+                        const origPushQues = pwm.pushWindowQues;
+                        pwm.pushWindowQues = function (t) {
+                            try {
+                                const vmInst = bot.getViewManager();
+                                if (vmInst) {
+                                    if (this._currentPopData && this._currentPopData.name && typeof vmInst.isOpenView === "function" && !vmInst.isOpenView(this._currentPopData.name)) {
+                                        this._currentPopData = null;
+                                    }
+                                    if (t && t.name === "BattleResultView" && !bot.state.isReplaying && typeof vmInst.close === "function") {
+                                        vmInst.close("BattlePrepareView");
+                                        vmInst.close("TeamArrayView");
+                                    }
+                                }
+                            } catch (ePop) { }
+                            return origPushQues.apply(this, arguments);
+                        };
+                    }
+                } catch (e) { }
+
+                try {
+                    let cacMod = null;
+                    if (typeof window.__require === "function") {
+                        try { cacMod = window.__require("CrossArenaController"); } catch (e) { }
+                    }
+                    const cacCls = (cacMod && (cacMod.CrossArenaController || cacMod.default || cacMod)) || (gm && gm.CrossArenaController) || window.CrossArenaController;
+                    const cacProto = (cacCls && cacCls.prototype) || (window.ControllerManager && window.ControllerManager._controllers && window.ControllerManager._controllers.CrossArenaController && Object.getPrototypeOf(window.ControllerManager._controllers.CrossArenaController));
+                    if (cacProto && cacProto.evt_ArenaCrossMatchSc && !cacProto.__QA_MATCH_HOOKED__) {
+                        cacProto.__QA_MATCH_HOOKED__ = true;
+                        const origCrossMatch = cacProto.evt_ArenaCrossMatchSc;
+                        cacProto.evt_ArenaCrossMatchSc = function (e, t) {
+                            if (bot.settings && bot.settings.skip_battle) {
+                                const mm = window.ModelManager || (gm && gm.ModelManager);
+                                if (mm && mm.CrossArenaModel && typeof mm.CrossArenaModel.startCrossArenaFight === "function") {
+                                    mm.CrossArenaModel.startCrossArenaFight();
+                                }
+                                return;
+                            }
+                            return origCrossMatch.apply(this, arguments);
+                        };
+                    }
+                } catch (e) { }
+
+                try {
+                    let dcMod = null;
+                    if (typeof window.__require === "function") {
+                        try { dcMod = window.__require("DungeonConfiger"); } catch (e) { }
+                    }
+                    const dcCls = (dcMod && (dcMod.DungeonConfiger || dcMod.default || dcMod)) || (gm && gm.DungeonConfiger) || window.DungeonConfiger;
+                    if (dcCls && typeof dcCls.getDungeonCfgByType === "function" && !dcCls.__QA_DC_HOOKED__) {
+                        dcCls.__QA_DC_HOOKED__ = true;
+                        const origGetDungeonCfg = dcCls.getDungeonCfgByType;
+                        dcCls.getDungeonCfgByType = function (e, t) {
+                            if (Number(e) === 1) {
+                                try {
+                                    let bcfgMod = null;
+                                    if (typeof window.__require === "function") {
+                                        try { bcfgMod = window.__require("BattleConfiger"); } catch (err) { }
+                                    }
+                                    const bcfg = (bcfgMod && (bcfgMod.BattleConfiger || bcfgMod.default || bcfgMod)) || (gm && gm.BattleConfiger) || window.BattleConfiger;
+                                    const mainCfg = bcfg && bcfg.getMainCopyConfig ? bcfg.getMainCopyConfig(t) : null;
+                                    if (mainCfg) return mainCfg;
+                                } catch (eMc) { }
+                            }
+                            return origGetDungeonCfg.apply(this, arguments);
+                        };
+                    }
+
+                    let pcMod = null;
+                    if (typeof window.__require === "function") {
+                        try { pcMod = window.__require("PathConfiger"); } catch (e) { }
+                    }
+                    const pcCls = (pcMod && (pcMod.PathConfiger || pcMod.default || pcMod)) || (gm && gm.PathConfiger) || window.PathConfiger;
+                    if (pcCls && typeof pcCls.getFightBg === "function" && !pcCls.__QA_BG_HOOKED__) {
+                        pcCls.__QA_BG_HOOKED__ = true;
+                        const origGetFightBg = pcCls.getFightBg;
+                        pcCls.getFightBg = function (e, t) {
+                            try {
+                                const res = origGetFightBg.apply(this, arguments);
+                                if (res && res.indexOf("undefined") === -1 && res.indexOf("null") === -1) return res;
+                            } catch (eBg) { }
+                            try {
+                                return origGetFightBg.call(this, e, 0);
+                            } catch (eFallback) {
+                                return "Bg/BatteBg/batte_bg_1.jpg";
+                            }
+                        };
+                    }
+                } catch (e) { }
+
+                // Hook 2.65: BattleModel - Tua nhanh tốc độ trận đấu an toàn, mượt mà (60fps); khi Xem Lại (Replay) giữ chuẩn tốc độ nút x1/x2/x3 của game!
                 try {
                     const bm = (gm && gm.BattleModel) || (window.ModelManager && window.ModelManager.BattleModel);
                     if (bm && bm.prototype && !bm.prototype.__QA_SPEED_HOOKED__) {
@@ -3202,6 +3840,7 @@
                         const origGetSpeedVal = bm.prototype.getBatteSpeedVal;
                         bm.prototype.getBatteSpeedVal = function (e) {
                             const base = origGetSpeedVal ? origGetSpeedVal.apply(this, arguments) : 1;
+                            if (bot.isReplayBattle()) return base;
                             const spd = (bot.settings && bot.settings.speed_hack) || 1;
                             return Math.min(3.0, base * spd);
                         };
@@ -3209,10 +3848,16 @@
                         const origChangeSpeed = bm.prototype.changeSpeedIndex;
                         bm.prototype.changeSpeedIndex = function (e, t) {
                             if (origChangeSpeed) origChangeSpeed.apply(this, arguments);
-                            const spd = (bot.settings && bot.settings.speed_hack) || 1;
-                            if (spd > 1 && window.cc && window.cc.director) {
+                            if (window.cc && window.cc.director) {
                                 const s = window.cc.director.getScheduler();
-                                if (s && s.setTimeScale) s.setTimeScale(Math.min(2.5, spd));
+                                if (s && s.setTimeScale) {
+                                    if (bot.isReplayBattle()) {
+                                        s.setTimeScale(1.0);
+                                    } else {
+                                        const spd = (bot.settings && bot.settings.speed_hack) || 1;
+                                        if (spd > 1) s.setTimeScale(Math.min(2.5, spd));
+                                    }
+                                }
                             }
                         };
 
@@ -3834,17 +4479,21 @@
                             if (origBattleSetData) origBattleSetData.apply(this, arguments);
                             const self = this;
                             window.__CURRENT_BATTLE_SCENES_VIEW__ = self;
-                            if (self.battleData && self.battleData._id) {
-                                window.__LAST_WAR_ID__ = self.battleData._id;
+                            if (self.battleData) {
+                                bot.cacheWarData(self.battleData);
+                                if (self.battleData._id) {
+                                    window.__LAST_WAR_ID__ = self.battleData._id;
+                                }
                             }
                             if (self.quickEndState) self.quickEndState.setSelectedPage("normal");
                             if (self.quickEnd) {
                                 self.quickEnd.setVisible(true);
                                 self.quickEnd.setTouchable(true);
                             }
-                            if (bot.settings && bot.settings.skip_battle) {
+                            if (bot.settings && bot.settings.skip_battle && !bot.isReplayBattle(self)) {
                                 setTimeout(() => {
                                     try {
+                                        if (bot.isReplayBattle(self)) return;
                                         if (self.view && self.view.parent && (self.view.visible !== false)) {
                                             bot.doBattleSkip(self);
                                         }
@@ -3858,28 +4507,31 @@
                             if (origInitUI) origInitUI.apply(this, arguments);
                             const self = this;
                             window.__CURRENT_BATTLE_SCENES_VIEW__ = self;
+                            if (this.battleData) bot.cacheWarData(this.battleData);
                             if (this.quickEndState) this.quickEndState.setSelectedPage("normal");
                             if (this.quickEnd) {
                                 this.quickEnd.setVisible(true);
                                 this.quickEnd.setTouchable(true);
                             }
-                            try {
-                                const mm = window.ModelManager;
-                                if (mm && mm.BattleModel && typeof mm.BattleModel.changeSpeedIndex === "function") {
-                                    mm.BattleModel.changeSpeedIndex(3, true);
-                                    if (typeof this.setSpeedBtnState === "function") this.setSpeedBtnState(3);
-                                }
-                            } catch (eSpd) { }
+                            if (!bot.isReplayBattle(this)) {
+                                try {
+                                    const mm = window.ModelManager;
+                                    if (mm && mm.BattleModel && typeof mm.BattleModel.changeSpeedIndex === "function") {
+                                        mm.BattleModel.changeSpeedIndex(3, true);
+                                        if (typeof this.setSpeedBtnState === "function") this.setSpeedBtnState(3);
+                                    }
+                                } catch (eSpd) { }
 
-                            // AUTO SKIP: Kích hoạt bỏ qua trận đấu ngay tức thì sau khi UI sẵn sàng (50ms)
-                            if (bot.settings && bot.settings.skip_battle) {
-                                setTimeout(() => {
-                                    try {
-                                        if (self.view && (self.view.visible !== false)) {
-                                            bot.doBattleSkip(self);
-                                        }
-                                    } catch (err) { }
-                                }, 50);
+                                if (bot.settings && bot.settings.skip_battle) {
+                                    setTimeout(() => {
+                                        try {
+                                            if (bot.isReplayBattle(self)) return;
+                                            if (self.view && (self.view.visible !== false)) {
+                                                bot.doBattleSkip(self);
+                                            }
+                                        } catch (err) { }
+                                    }, 50);
+                                }
                             }
                         };
 
@@ -3894,7 +4546,7 @@
                     }
                 } catch (e) { }
 
-                // Hook 2.695: BattleBeginView - Tự động bỏ qua trận đấu ngay khi BattleSecnesView được mở
+                // Hook 2.695: BattleBeginView - Tự động bỏ qua khi chiến đấu thường & bảo toàn Replay khi Xem Lại
                 try {
                     let bbvMod = null;
                     if (typeof window.__require === "function") {
@@ -3903,15 +4555,23 @@
                     const BattleBeginViewClass = (bbvMod && (bbvMod.BattleBeginView || bbvMod.default || bbvMod)) || (gm && gm.BattleBeginView) || window.BattleBeginView;
                     if (BattleBeginViewClass && BattleBeginViewClass.prototype && !BattleBeginViewClass.prototype.__QA_BBV_HOOKED__) {
                         BattleBeginViewClass.prototype.__QA_BBV_HOOKED__ = true;
+                        const origBbvExit = BattleBeginViewClass.prototype._exit;
+                        if (origBbvExit) {
+                            BattleBeginViewClass.prototype._exit = function () {
+                                bot.state.isReplaying = false;
+                                return origBbvExit.apply(this, arguments);
+                            };
+                        }
                         const origShowBsv = BattleBeginViewClass.prototype.showBattleSecnesView;
                         BattleBeginViewClass.prototype.showBattleSecnesView = function () {
                             const res = origShowBsv ? origShowBsv.apply(this, arguments) : null;
                             const self = this;
-                            if (bot.settings && bot.settings.skip_battle) {
+                            if (bot.settings && bot.settings.skip_battle && !bot.state.isReplaying) {
                                 setTimeout(() => {
                                     try {
+                                        if (bot.state.isReplaying) return;
                                         const bsv = self.ctlView && self.ctlView.BattleSecnesView;
-                                        if (bsv) {
+                                        if (bsv && !bot.isReplayBattle(bsv)) {
                                             bot.doBattleSkip(bsv);
                                         }
                                     } catch (err) { }
@@ -3995,8 +4655,10 @@
                     if (bcInst && bcInst.BattleConfigs) {
                         for (const k in bcInst.BattleConfigs) {
                             if (bcInst.BattleConfigs[k]) {
-                                if (bot.settings && bot.settings.skip_battle && Number(k) !== 9) {
+                                if (canNativeSkipBattle(k) && bot.settings.skip_battle && !bot.state.isReplaying) {
                                     bcInst.BattleConfigs[k].skipBattle = true;
+                                } else {
+                                    bcInst.BattleConfigs[k].skipBattle = false;
                                 }
                             }
                         }
@@ -4090,13 +4752,39 @@
                             }
                         };
 
+                        const origBrvInit = BattleResultViewClass.prototype.init;
+                        if (origBrvInit) {
+                            BattleResultViewClass.prototype.init = function () {
+                                origBrvInit.apply(this, arguments);
+                                if (this.battleData) {
+                                    this.battleData = bot.resolveFullBattleData(this.battleData);
+                                }
+                            };
+                        }
+
+                        const origBrvShowAgain = BattleResultViewClass.prototype._onUIShowAgain;
+                        if (origBrvShowAgain) {
+                            BattleResultViewClass.prototype._onUIShowAgain = function (e) {
+                                if (e && e.battleData) {
+                                    e.battleData = bot.resolveFullBattleData(e.battleData);
+                                }
+                                return origBrvShowAgain.apply(this, arguments);
+                            };
+                        }
+
                         const origShowView = BattleResultViewClass.prototype.showView;
                         BattleResultViewClass.prototype.showView = function () {
-                            const bType = (this.battleData && this.battleData._type) || (this._args && this._args.battleData && this._args.battleData._type) || (this._args && this._args.arrayType) || 0;
+                            try {
+                                if (this.battleData) {
+                                    this.battleData = bot.resolveFullBattleData(this.battleData);
+                                    bot.cacheWarData(this.battleData);
+                                }
+                            } catch (eHydrate) { }
 
-                            // TẮT HOÀN TOÀN BẢNG THẮNG/THUA & QUÀ 50 KNB CỦA GIẢI CỨU GIA VIÊN (Revolt = 106 / CityFight = 105)
-                            // Xử lý ẩn ngay lập tức TRƯỚC KHI RENDER để loại bỏ triệt để nhấp nháy trên màn hình người chơi
-                            if (Number(bType) === 106 || Number(bType) === 105) {
+                            const bType = Number((this.battleData && this.battleData._type) || (this._args && this._args.battleData && this._args.battleData._type) || (this._args && this._args.arrayType) || 0);
+
+                            // TẮT HOÀN TOÀN BẢNG THẮNG/THUA & QUÀ 50 KNB CỦA GIẢI CỨU GIA VIÊN CHẠY NGẦM (Revolt = 106 / CityFight ngầm = 105)
+                            if (bType === 106 || (bType === 105 && (bot.state.rescueFightActive || window.__CLOUD_HEADLESS_BOT__))) {
                                 try {
                                     if (this.view) {
                                         this.view.visible = false;
@@ -4119,7 +4807,9 @@
 
                             if (origShowView) origShowView.apply(this, arguments);
                             try {
-                                if (this.battleData) bot.lastBattleData = this.battleData;
+                                if (this.battleData && bType !== 106) {
+                                    bot.lastBattleData = this.battleData;
+                                }
                                 this._bgClose = false;
                                 if (this._closeBtn && typeof this._closeBtn.addClickListener === "function") {
                                     this._closeBtn.addClickListener(() => {
@@ -4127,56 +4817,38 @@
                                         this.closeView();
                                     });
                                 }
-                                if (this.view && typeof this.view.addClickListener === "function" && !this.view.__QA_CLICK_DISMISS__) {
-                                    this.view.__QA_CLICK_DISMISS__ = true;
-                                    this.view.addClickListener(() => {
-                                        bot.state.viewingBattleData = false;
-                                        if (this._curPageClass && typeof self._curPageClass.okClick === "function") {
-                                            this._curPageClass.okClick();
-                                        } else {
-                                            this.closeView();
-                                        }
-                                    });
-                                }
                             } catch (e) { }
 
-                            // Tự động đóng bảng kết quả ngay sau 0.3s (300ms) cho mọi loại trận (Ải 1, Tháp 2, Phụ bản 3, Boss 4/6/10, Đấu trường 101, Gia viên 105/106, v.v.)
-                            // Chỉ giữ lại DefJz (9 - Tần Lĩnh) để người chơi tự chọn buff/lõi giữa các tầng
-                            const isDefJz = (Number(bType) === 9);
+                            const vm = bot.getViewManager();
+                            const isCloudAuto = !!(window.__CLOUD_HEADLESS_BOT__ && bot.settings && bot.settings.skip_battle && bType !== 9);
+                            const isAutoBgTower = (bType === 2 && bot.state.towerInProgress && bot.state.isAutoTowerActive && !(vm && vm.isOpenView && vm.isOpenView("ClimbtowerView")));
+                            const isAutoBgArena = (bType === 101 && bot.state.autoArenaFighting && !(vm && vm.isOpenView && vm.isOpenView("ArenaView")));
+                            const isAutoStageBg = (bType === 1 && bot.isAutoStageOn());
 
-                            // Tự động đóng bảng kết quả ngay sau 0.3s (300ms) nếu bật skip_battle
-                            if (bot.settings && bot.settings.skip_battle && !isDefJz) {
+                            if (isCloudAuto || isAutoBgTower || isAutoBgArena || isAutoStageBg) {
                                 const self = this;
+                                const closeDelay = isCloudAuto ? 300 : 2500;
                                 setTimeout(() => {
                                     try {
-                                        if (bot.state.viewingBattleData) return;
+                                        if (bot.state.viewingBattleData || bot.state.isReplaying) return;
                                         const curVm = bot.getViewManager();
-                                        if (curVm && typeof curVm.isOpenView === "function" && (curVm.isOpenView("BattledataView") || curVm.isOpenView("PanelBattleData"))) {
+                                        if (curVm && typeof curVm.isOpenView === "function" && (curVm.isOpenView("BattledataView") || curVm.isOpenView("PanelBattleData") || curVm.isOpenView("BattleBeginView"))) {
                                             return;
                                         }
                                         if (bot.isViewVisible(self)) {
                                             if (self._curPageClass && typeof self._curPageClass.okClick === "function") {
                                                 self._curPageClass.okClick();
-                                            } else {
-                                                const mmTower = window.ModelManager || (gm && gm.ModelManager);
-                                                const args = (self._curPageClass && self._curPageClass._args) || self._args;
-                                                if (args && (args.arrayType === 2 || (args.arrayType >= 12 && args.arrayType <= 16) || (args.battleData && args.battleData._type === 2))) {
-                                                    if (mmTower && mmTower.RewardModel && typeof mmTower.RewardModel.setBackCall === "function") {
-                                                        try { mmTower.RewardModel.setBackCall(args); } catch (eCall) { }
-                                                    }
-                                                }
-                                                if (typeof self.closeView === "function") {
-                                                    self.closeView();
-                                                }
+                                            } else if (typeof self.closeView === "function") {
+                                                self.closeView();
                                             }
                                         }
                                     } catch (e) { }
-                                }, 300);
+                                }, closeDelay);
                             }
                         };
                     }
 
-                    // Hook BattleResult: Cho phép xem đầy đủ thông số / dữ liệu trận đấu (BattledataView) và xử lý click an toàn
+                    // Hook BattleResult: Đảm bảo đầy đủ Bảng thông số (BattledataView), Xem lại trận đấu (Replay) & sửa thứ tự đóng view trước khi chạy callback "Ải tiếp"
                     let brMod = null;
                     if (typeof window.__require === "function") {
                         try { brMod = window.__require("BattleResult"); } catch (e) { }
@@ -4185,19 +4857,25 @@
                     if (BattleResultClass && BattleResultClass.prototype && !BattleResultClass.prototype.__QA_SAFE_CLICK__) {
                         BattleResultClass.prototype.__QA_SAFE_CLICK__ = true;
 
-                        // 1. Cho phép xem data thông số trận đấu bất kỳ lúc nào cho mọi loại trận (kể cả ải chính)
                         const origDataClick = BattleResultClass.prototype.dataClick;
                         BattleResultClass.prototype.dataClick = function () {
                             try {
                                 bot.state.viewingBattleData = true;
                                 const vm = bot.getViewManager();
-                                if (vm && typeof vm.open === "function") {
-                                    const bData = this._battleData || this.battleData || (this._curPageClass && this._curPageClass._battleData) || (this._parentTarget && (this._parentTarget.battleData || this._parentTarget._battleData)) || this._args || bot.lastBattleData || (window.ModelManager && window.ModelManager.BattleModel && window.ModelManager.BattleModel.getHangupBattleInfo());
-                                    if (bData) {
-                                        bot.log("📊 Đang mở bảng thống kê dữ liệu thông số trận đấu (BattledataView)...");
-                                        vm.open("BattledataView", bData);
-                                        return;
+                                const raw = this._args || this._battleData || this.battleData || (this.fightDatas && this.fightDatas[0]) || (this._parentTarget && (this._parentTarget.battleData || this._parentTarget._battleData)) || bot.lastBattleData || (window.ModelManager && window.ModelManager.BattleModel && window.ModelManager.BattleModel.getHangupBattleInfo());
+                                const bData = bot.resolveFullBattleData(raw);
+                                if (vm && typeof vm.open === "function" && bData) {
+                                    if ((!Array.isArray(bData.units) || bData.units.length === 0) && (bData._id || bData._war_id)) {
+                                        const fmInst = bot.getFightManager();
+                                        if (fmInst && typeof fmInst.requestWarLog === "function") {
+                                            bot.log(`📊 Đang tải bảng thông số chi tiết chiến báo #${bData._id || bData._war_id}...`);
+                                            fmInst.requestWarLog(bData._id || bData._war_id, 0);
+                                            return;
+                                        }
                                     }
+                                    bot.log("📊 Đang mở bảng thống kê dữ liệu thông số trận đấu (BattledataView)...");
+                                    vm.open("BattledataView", bData);
+                                    return;
                                 }
                             } catch (e) {
                                 console.warn("[BattleResult dataClick Guard]", e);
@@ -4205,12 +4883,31 @@
                             if (origDataClick) return origDataClick.apply(this, arguments);
                         };
 
-                        // 2. Luôn hiển thị nút "Dữ liệu" (btn_data) và "Xem lại" (btn_replay) trong mọi kết quả trận đấu
+                        const origReplayClick = BattleResultClass.prototype.replayClick;
+                        BattleResultClass.prototype.replayClick = function () {
+                            try {
+                                const raw = this._args || this._battleData || this.battleData || (this.fightDatas && this.fightDatas[0]) || (this._parentTarget && (this._parentTarget.battleData || this._parentTarget._battleData)) || bot.lastBattleData;
+                                if (bot.triggerBattleReplay(raw)) {
+                                    return;
+                                }
+                            } catch (eRep) {
+                                console.warn("[BattleResult replayClick Guard]", eRep);
+                            }
+                            if (origReplayClick) return origReplayClick.apply(this, arguments);
+                        };
+
                         const origRefreshUI = BattleResultClass.prototype.refreshUI;
                         BattleResultClass.prototype.refreshUI = function (e, t, i) {
-                            if (origRefreshUI) origRefreshUI.apply(this, arguments);
+                            let fullData = e;
                             try {
-                                if (e) bot.lastBattleData = e;
+                                if (e) {
+                                    fullData = bot.resolveFullBattleData(e);
+                                    bot.cacheWarData(fullData);
+                                }
+                            } catch (eHyd) { }
+                            if (origRefreshUI) origRefreshUI.call(this, fullData, t, i);
+                            try {
+                                if (fullData && Number(fullData._type) !== 106) bot.lastBattleData = fullData;
                                 if (this.battle_handler) {
                                     this.battle_handler.setVisible(true);
                                 }
@@ -4227,21 +4924,37 @@
 
                         BattleResultClass.prototype.okClick = function () {
                             bot.state.viewingBattleData = false;
+                            const okFn = this._okCall;
+                            const argsSnap = this._args;
+
                             try {
-                                if (typeof this._okCall === "function") {
-                                    this._okCall();
-                                } else if (this._args) {
-                                    // Khi game không gán callback cho nút Xác nhận (như ở BattleTowerEx), tự động gọi setBackCall để quay về giao diện Tháp và làm mới
+                                const vm = bot.getViewManager();
+                                if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
+                                    vm.close("BattleResultView");
+                                } else if (this._parentTarget && !this._parentTarget.isDisposed && typeof this._parentTarget.closeView === "function") {
+                                    this._parentTarget.closeView();
+                                }
+                            } catch (eClose) { }
+
+                            try {
+                                if (typeof okFn === "function") {
+                                    okFn();
+                                } else if (argsSnap) {
                                     const mm = window.ModelManager || (gm && gm.ModelManager);
                                     if (mm && mm.RewardModel && typeof mm.RewardModel.setBackCall === "function") {
-                                        mm.RewardModel.setBackCall(this._args);
+                                        mm.RewardModel.setBackCall(argsSnap);
                                     }
                                 }
                             } catch (e) {
                                 console.error("[BattleResult okClick Error]", e);
                             }
+                        };
 
-                            // Đóng view an toàn (chỉ gọi 1 lần qua ViewManager)
+                        BattleResultClass.prototype.nextClick = function () {
+                            bot.state.viewingBattleData = false;
+                            const nextFn = this._nextCall;
+                            const argsSnap = this._args;
+
                             try {
                                 const vm = bot.getViewManager();
                                 if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
@@ -4249,36 +4962,58 @@
                                 } else if (this._parentTarget && !this._parentTarget.isDisposed && typeof this._parentTarget.closeView === "function") {
                                     this._parentTarget.closeView();
                                 }
-                            } catch (e) { }
-                        };
+                            } catch (eClose) { }
 
-                        BattleResultClass.prototype.nextClick = function () {
-                            bot.state.viewingBattleData = false;
                             try {
-                                if (typeof this._nextCall === "function") {
-                                    this._nextCall();
-                                } else if (this._args) {
+                                if (typeof nextFn === "function") {
+                                    nextFn();
+                                } else if (argsSnap) {
                                     const mm = window.ModelManager || (gm && gm.ModelManager);
                                     if (mm && mm.RewardModel && typeof mm.RewardModel.setBackCall === "function") {
-                                        mm.RewardModel.setBackCall(this._args);
+                                        mm.RewardModel.setBackCall(argsSnap);
                                     }
                                 }
                             } catch (e) {
                                 console.error("[BattleResult nextClick Error]", e);
                             }
-
-                            try {
-                                const vm = bot.getViewManager();
-                                if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) {
-                                    vm.close("BattleResultView");
-                                } else if (this._parentTarget && !this._parentTarget.isDisposed && typeof this._parentTarget.closeView === "function") {
-                                    this._parentTarget.closeView();
-                                }
-                            } catch (e) { }
                         };
                     }
 
-                    // Hook PanelBattleData (Giao diện hiển thị thống kê dữ liệu thông số DPS / Sát thương / Trị liệu): Chống crash và cho phép đóng mở mượt mà
+                    // Hook BattleWin: Hiển thị tiêu đề, phần thưởng ải & nút Xác nhận đẹp mắt khi Khiêu Chiến thủ công Ải Chính Tuyến (_type === 1)
+                    try {
+                        let bwMod = null;
+                        if (typeof window.__require === "function") {
+                            try { bwMod = window.__require("BattleWin"); } catch (e) { }
+                        }
+                        const BattleWinClass = (bwMod && (bwMod.BattleWin || bwMod.default || bwMod)) || (gm && gm.BattleWin) || window.BattleWin;
+                        if (BattleWinClass && BattleWinClass.prototype && !BattleWinClass.prototype.__QA_MAINCOPY_WIN__) {
+                            BattleWinClass.prototype.__QA_MAINCOPY_WIN__ = true;
+                            const origWinRefresh = BattleWinClass.prototype.refreshUI;
+                            BattleWinClass.prototype.refreshUI = function (e, t, i) {
+                                if (origWinRefresh) origWinRefresh.apply(this, arguments);
+                                try {
+                                    if (this._args && Number(this._args._type) === 1) {
+                                        if (typeof this.setTitle === "function") this.setTitle("Khiêu Chiến Thành Công");
+                                        if (typeof this.setBtnNum === "function") this.setBtnNum(1);
+                                        if (typeof this.setOkBtn === "function") this.setOkBtn("Xác nhận", function () { });
+                                        if ((!this.itemDataList || this.itemDataList.length === 0) && this._args._copy_id && typeof this.showReward === "function") {
+                                            let bcfgMod = null;
+                                            if (typeof window.__require === "function") {
+                                                try { bcfgMod = window.__require("BattleConfiger"); } catch (err) { }
+                                            }
+                                            const bcfg = (bcfgMod && (bcfgMod.BattleConfiger || bcfgMod.default || bcfgMod)) || (gm && gm.BattleConfiger) || window.BattleConfiger;
+                                            const cfg = bcfg && bcfg.getMainCopyConfig ? bcfg.getMainCopyConfig(this._args._copy_id) : null;
+                                            if (cfg && cfg.reward) {
+                                                this.showReward(cfg.reward);
+                                            }
+                                        }
+                                    }
+                                } catch (eWin) { }
+                            };
+                        }
+                    } catch (e) { }
+
+                    // Hook PanelBattleData (Giao diện hiển thị thống kê dữ liệu thông số DPS / Sát thương / Trị liệu): Hydrate dữ liệu đầy đủ, gắn Replay chuẩn & chống crash
                     try {
                         let pbdMod = null;
                         if (typeof window.__require === "function") {
@@ -4287,8 +5022,29 @@
                         const PanelBattleDataClass = (pbdMod && (pbdMod.PanelBattleData || pbdMod.default || pbdMod)) || (gm && gm.PanelBattleData) || window.PanelBattleData;
                         if (PanelBattleDataClass && PanelBattleDataClass.prototype && !PanelBattleDataClass.prototype.__QA_SAFE_DATA__) {
                             PanelBattleDataClass.prototype.__QA_SAFE_DATA__ = true;
+
+                            const origSetPlayerHead = PanelBattleDataClass.prototype.setPlayerHead;
+                            if (origSetPlayerHead) {
+                                PanelBattleDataClass.prototype.setPlayerHead = function (e, t) {
+                                    if (!t) return;
+                                    try {
+                                        return origSetPlayerHead.apply(this, arguments);
+                                    } catch (eHead) { }
+                                };
+                            }
+
+                            const origSetHeroList = PanelBattleDataClass.prototype.setHeroList;
+                            if (origSetHeroList) {
+                                PanelBattleDataClass.prototype.setHeroList = function (e, t, i, a) {
+                                    const stat = this.getStaticsData ? this.getStaticsData(t) : null;
+                                    const hasItems = stat && Array.isArray(stat.statisDatas) && stat.statisDatas.length > 0;
+                                    return origSetHeroList.call(this, e, t, i, hasItems ? a : false);
+                                };
+                            }
+
                             const origInitPbdUI = PanelBattleDataClass.prototype._initUI;
                             PanelBattleDataClass.prototype._initUI = function () {
+                                const self = this;
                                 try {
                                     bot.state.viewingBattleData = true;
                                     if (this._args && this._args.battleData) {
@@ -4297,14 +5053,27 @@
                                     if (!this._args && bot.lastBattleData) {
                                         this._args = bot.lastBattleData;
                                     }
-                                    if (this._args && !this._args.rounds) {
-                                        this._args.rounds = [];
+                                    this._args = bot.resolveFullBattleData(this._args);
+                                    if (this._args) {
+                                        if (!Array.isArray(this._args.rounds)) this._args.rounds = [];
+                                        if (!Array.isArray(this._args.units)) this._args.units = [];
+                                        if (!Array.isArray(this._args._data_role)) this._args._data_role = [];
                                     }
                                 } catch (err) {
                                     console.warn("[PanelBattleData _initUI Guard]", err);
                                 }
                                 if (origInitPbdUI) origInitPbdUI.apply(this, arguments);
                                 try {
+                                    if (this.btnReplay) {
+                                        this.btnReplay.setVisible(true);
+                                        this.btnReplay.setTouchable(true);
+                                        if (typeof this.btnReplay.removeClickListener === "function") {
+                                            this.btnReplay.removeClickListener();
+                                        }
+                                        this.btnReplay.addClickListener(() => {
+                                            bot.triggerBattleReplay(self._args);
+                                        });
+                                    }
                                     const closeBtn = this.view && (this.view.getChild("btn_close") || this.view.getChild("closeBtn") || this.view.getChild("btn_back"));
                                     if (closeBtn && typeof closeBtn.addClickListener === "function") {
                                         closeBtn.addClickListener(() => {
@@ -4927,6 +5696,65 @@
                             return origResetAndLoad.call(this, e, t);
                         };
                     }
+                    // 1.5 Hook btn_enterBattle: Khi người chơi bấm KHIÊU CHIẾN thủ công ở Ải Chính Tuyến -> Có kết quả ngay tức thì (~0.1s) + Hiện bảng thông số & Xem lại!
+                    const origBtnEnterBattle = bmv.prototype.btn_enterBattle;
+                    if (origBtnEnterBattle && !bmv.prototype.__QA_BTN_ENTER_HOOKED__) {
+                        bmv.prototype.__QA_BTN_ENTER_HOOKED__ = true;
+                        bmv.prototype.btn_enterBattle = function () {
+                            window.__BMV_INSTANCE__ = this;
+                            if (bot.isAutoStageOn()) {
+                                return origBtnEnterBattle.apply(this, arguments);
+                            }
+                            bot.state.manualStageFight = true;
+                            bot.state.manualStageFightTime = Date.now();
+                            if (bot.settings && bot.settings.skip_battle) {
+                                try {
+                                    if (typeof this.initBattleData === "function") {
+                                        this.initBattleData();
+                                    }
+                                    const mm = window.ModelManager || (gm && gm.ModelManager);
+                                    const pData = this.playData || (mm && mm.BattleModel && mm.BattleModel.getHangupBattleInfo ? mm.BattleModel.getHangupBattleInfo() : null);
+                                    const isFreshWar = pData && Array.isArray(pData.rounds) && pData.rounds.length > 0 && (pData._id == null || pData._id !== bot.state.lastManualSettledStageWarId);
+                                    if (isFreshWar) {
+                                        const snap = JSON.parse(JSON.stringify(pData));
+                                        delete snap.skipRounds;
+                                        snap.Overwhelming = 0;
+                                        bot.state.lastManualSettledStageWarId = pData._id;
+                                        bot.cacheWarData(snap);
+                                        this.playData = pData;
+                                        if (typeof this.moveNext === "function") {
+                                            this.moveNext();
+                                        }
+                                        const vm = bot.getViewManager();
+                                        if (vm && typeof vm.open === "function" && (Number(snap._winner) === 1 || !vm.isOpenView("BattleResultView"))) {
+                                            vm.open("BattleResultView", {
+                                                battleData: snap,
+                                                isBackGroud: false,
+                                                isOffLine: false
+                                            });
+                                        }
+                                        return;
+                                    }
+                                    bot.state.pendingManualStageInstant = true;
+                                    const prog = mm && mm.MainUIModel && mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : (mm && mm.MainUIModel && mm.MainUIModel.mainCopyProgress);
+                                    if (prog && typeof this.pullBatteData === "function") {
+                                        this.pullBatteData(prog);
+                                        return;
+                                    } else if (prog && prog._id) {
+                                        const fmInst = bot.getFightManager();
+                                        if (fmInst && typeof fmInst.requestCopyData === "function") {
+                                            fmInst.requestCopyData(prog._id);
+                                            return;
+                                        }
+                                    }
+                                } catch (eManual) {
+                                    console.warn("[btn_enterBattle Instant Error]", eManual);
+                                }
+                            }
+                            return origBtnEnterBattle.apply(this, arguments);
+                        };
+                    }
+
                     // 2. Hook moveNext: Ghi nhận kết quả trận đấu cho Defeat Guard
                     const origMoveNext = bmv.prototype.moveNext;
                     if (origMoveNext && !bmv.prototype.__QA_MOVENEXT_HOOKED__) {
@@ -13494,7 +14322,7 @@
         bot.enforceMineTeam2Unlock();
         bot.hookGameEngine();
         bot.startScheduleLoop();
-        if (!window.__HIDE_IN_GAME_HUD__ && typeof document !== "undefined" && typeof document.createElement === "function" && window.__INIT_3Q_HUD__) {
+        if (!window.__HIDE_IN_GAME_HUD__ && typeof jsb === "undefined" && typeof document !== "undefined" && typeof document.createElement === "function" && window.__INIT_3Q_HUD__) {
             try { window.__INIT_3Q_HUD__(bot); } catch (e) { }
         }
     }, 1500));
@@ -14197,6 +15025,7 @@
             container.innerHTML = `
                 <!-- Collapsed Floating Pill -->
                 <div id="hud-pill">
+                    <img class="pill-logo" src="data:image/png;base64,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" alt="3Q" style="width:22px;height:22px;border-radius:6px;object-fit:cover;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.4);" />
                     <div class="pulse-dot"></div>
                     <span class="pill-text">⚡ 3Q AUTO</span>
                     <span class="pill-badge" id="hud-pill-stage">Ải --</span>
@@ -14206,7 +15035,7 @@
                 <div id="hud-panel">
                     <div class="panel-header" id="panel-drag-handle">
                         <div class="header-title-box">
-                            <span style="font-size: 16px;">⚡</span>
+                            <img class="header-logo" src="data:image/png;base64,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" alt="3Q" style="width:24px;height:24px;border-radius:6px;object-fit:cover;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.4);" />
                             <span class="header-title">3Q ĐÀO ĐÀO ĐÀO</span>
                             <span class="header-badge">v3.0 FINAL</span>
                         </div>
