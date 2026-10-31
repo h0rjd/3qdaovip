@@ -144,6 +144,132 @@ function formatNum(n) {
     return isNaN(num) ? String(n || 0) : num.toLocaleString('en-US');
 }
 
+async function pushLiveTelemetryToGitHub(telemetryObj, sessionState) {
+    if (!isGitHubActions || typeof fetch !== 'function') return false;
+    const token = process.env.GH_TOKEN || '';
+    const repo = process.env.GH_REPO || '';
+    if (!token || !repo) return false;
+
+    const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': '3Q-AutoBot-Telemetry/3.8'
+    };
+    const apiBase = `https://api.github.com/repos/${repo}`;
+    const jsonText = JSON.stringify(telemetryObj, null, 2);
+    const contentB64 = Buffer.from(jsonText, 'utf8').toString('base64');
+
+    try {
+        let fileSha = (sessionState && sessionState._telemetryFileSha) || null;
+        if (!fileSha) {
+            const getRes = await fetch(`${apiBase}/contents/live_telemetry.json?ref=telemetry`, {
+                method: 'GET',
+                headers,
+                signal: AbortSignal.timeout(8000)
+            });
+            if (getRes.status === 200) {
+                const getJson = await getRes.json();
+                fileSha = getJson && getJson.sha ? getJson.sha : null;
+            } else if (getRes.status === 404) {
+                const refRes = await fetch(`${apiBase}/git/ref/heads/telemetry`, {
+                    method: 'GET',
+                    headers,
+                    signal: AbortSignal.timeout(8000)
+                });
+                if (refRes.status === 404) {
+                    const blobRes = await fetch(`${apiBase}/git/blobs`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ content: contentB64, encoding: 'base64' }),
+                        signal: AbortSignal.timeout(8000)
+                    });
+                    if (!blobRes.ok) return false;
+                    const blobJson = await blobRes.json();
+
+                    const treeRes = await fetch(`${apiBase}/git/trees`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            tree: [{ path: 'live_telemetry.json', mode: '100644', type: 'blob', sha: blobJson.sha }]
+                        }),
+                        signal: AbortSignal.timeout(8000)
+                    });
+                    if (!treeRes.ok) return false;
+                    const treeJson = await treeRes.json();
+
+                    const commitRes = await fetch(`${apiBase}/git/commits`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            message: 'chore(telemetry): init live_telemetry.json branch',
+                            tree: treeJson.sha,
+                            parents: []
+                        }),
+                        signal: AbortSignal.timeout(8000)
+                    });
+                    if (!commitRes.ok) return false;
+                    const commitJson = await commitRes.json();
+
+                    const createRefRes = await fetch(`${apiBase}/git/refs`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ ref: 'refs/heads/telemetry', sha: commitJson.sha }),
+                        signal: AbortSignal.timeout(8000)
+                    });
+                    if (createRefRes.ok && sessionState) {
+                        sessionState._telemetryFileSha = blobJson.sha;
+                    }
+                    return createRefRes.ok;
+                }
+            }
+        }
+
+        const putBody = {
+            message: `chore(telemetry): run #${telemetryObj.runNumber || 0} (${telemetryObj.uptimeMin || 0}m, +${telemetryObj.totalRescuedKnb || 0} KNB)`,
+            content: contentB64,
+            branch: 'telemetry'
+        };
+        if (fileSha) putBody.sha = fileSha;
+
+        let putRes = await fetch(`${apiBase}/contents/live_telemetry.json`, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify(putBody),
+            signal: AbortSignal.timeout(8000)
+        });
+        if ((putRes.status === 409 || putRes.status === 422) && sessionState) {
+            sessionState._telemetryFileSha = null;
+            const retryGet = await fetch(`${apiBase}/contents/live_telemetry.json?ref=telemetry`, {
+                method: 'GET',
+                headers,
+                signal: AbortSignal.timeout(8000)
+            });
+            if (retryGet.status === 200) {
+                const retryJson = await retryGet.json();
+                if (retryJson && retryJson.sha) {
+                    putBody.sha = retryJson.sha;
+                    putRes = await fetch(`${apiBase}/contents/live_telemetry.json`, {
+                        method: 'PUT',
+                        headers,
+                        body: JSON.stringify(putBody),
+                        signal: AbortSignal.timeout(8000)
+                    });
+                }
+            }
+        }
+        if (putRes.ok) {
+            const putJson = await putRes.json();
+            if (sessionState && putJson && putJson.content && putJson.content.sha) {
+                sessionState._telemetryFileSha = putJson.content.sha;
+            }
+            return true;
+        }
+    } catch (eTel) { }
+    return false;
+}
+
 function saveConfigToDisk() {
     try {
         rawConfig.account = Object.assign(rawConfig.account || {}, {
@@ -2177,7 +2303,11 @@ async function run() {
             try {
                 status = await activePage.evaluate(async (t) => {
                     if (window.AutoBot && typeof window.AutoBot.runSmartCycle === "function") {
-                        return await window.AutoBot.runSmartCycle(t);
+                        const res = await window.AutoBot.runSmartCycle(t);
+                        if (res && !res.rescueTelemetry && typeof window.AutoBot.getRescueTelemetry === "function") {
+                            res.rescueTelemetry = window.AutoBot.getRescueTelemetry();
+                        }
+                        return res;
                     }
                     return null;
                 }, mergedToggles);
@@ -2288,6 +2418,48 @@ async function run() {
                     total_rescued_knb: curRescuedKnb,
                     total_inspected_homes: curInspectedHomes
                 };
+
+                // Đẩy Live Telemetry lên nhánh độc lập `telemetry` (lần đầu sau 1.2p vào sảnh, sau đó định kỳ mỗi 3p)
+                if (isGitHubActions && process.env.GH_TOKEN && process.env.GH_REPO) {
+                    const elapsedNowMin = Math.max(0.1, (Date.now() - sessionState.startTime) / 60000);
+                    const firstTelReady = !sessionState._firstTelemetryPushed && isLobbyHealthy && elapsedNowMin >= 1.2;
+                    const periodicTelReady = sessionState._lastTelemetryPushTime && (Date.now() - sessionState._lastTelemetryPushTime >= 180000);
+                    if (firstTelReady || periodicTelReady) {
+                        sessionState._firstTelemetryPushed = true;
+                        sessionState._lastTelemetryPushTime = Date.now();
+                        const telDispSt = isLobbyHealthy ? st : (sessionState.lastKnownStats || st);
+                        const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+                        const curJadeNum = Number(telDispSt.jade || 0);
+                        await pushLiveTelemetryToGitHub({
+                            schemaVersion: '3.8',
+                            runNumber: Number(process.env.GH_RUN_NUMBER || 0),
+                            runId: Number(process.env.GH_RUN_ID || 0),
+                            updatedAtIso: new Date().toISOString(),
+                            updatedAtVn: vnNow,
+                            uptimeMin: Number(elapsedNowMin.toFixed(2)),
+                            server: CONFIG.server,
+                            isLobbyHealthy,
+                            roleName: telDispSt.roleName || null,
+                            level: Number(telDispSt.level || 0),
+                            stage: Number(telDispSt.stage || 0),
+                            towerFloor: Number(telDispSt.towerFloor || 0),
+                            basePower: Number(telDispSt.basePower || 0),
+                            currentPower: Number(telDispSt.power || 0),
+                            initialJade: sessionState.initialJade,
+                            jade: curJadeNum,
+                            deltaJade: (sessionState.initialJade !== null && curJadeNum > 0) ? (curJadeNum - Number(sessionState.initialJade)) : 0,
+                            totalRescued: curRescuedCount,
+                            totalRescuedKnb: curRescuedKnb,
+                            knbPerHour: Number(((curRescuedKnb / Math.max(1, elapsedNowMin)) * 60).toFixed(1)),
+                            rescuesPerHour: Number(((curRescuedCount / Math.max(1, elapsedNowMin)) * 60).toFixed(2)),
+                            totalScanned: curInspectedHomes,
+                            scansPerMin: Math.round(curInspectedHomes / elapsedNowMin),
+                            rescueTelemetry: (status && status.rescueTelemetry) || null,
+                            toggles: CONFIG.toggles,
+                            recentLogs: RECENT_LOGS.slice(-35)
+                        }, sessionState);
+                    }
+                }
 
                 // Gửi báo cáo khởi động lần đầu ngay khi tải xong dữ liệu nhân vật VÀ số dư KNB thực tế
                 sessionState.startupWaitTicks = (sessionState.startupWaitTicks || 0) + 1;

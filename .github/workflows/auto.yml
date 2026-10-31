@@ -82,6 +82,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_REPORT_INTERVAL_MIN: ${{ github.event.inputs.report_interval || '30' }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_NUMBER: ${{ github.run_number }}
+          GH_RUN_ID: ${{ github.run_id }}
           HEADLESS: 'true'
         run: |
           if [ -x "/usr/bin/google-chrome-stable" ]; then
