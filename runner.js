@@ -261,23 +261,44 @@ async function sendTelegramMessage(htmlText, photoPath = null, sessionState = nu
     }
 }
 
+function isStatsLoaded(st) {
+    return !!(
+        st &&
+        st.roleName &&
+        st.roleName !== 'Đang tải...' &&
+        st.roleName !== '---' &&
+        (Number(st.jade || 0) > 0 || Number(st.basePower || st.power || 0) > 0)
+    );
+}
+
 function buildTelegramReportHtml(title, stats, sessionState, extraNote = '') {
-    const st = stats || {};
+    const rawSt = stats || {};
+    const fallbackSt = (sessionState && sessionState.lastKnownStats) || {};
+    const isUnloaded = !rawSt.roleName || rawSt.roleName === 'Đang tải...' || rawSt.roleName === '---' ||
+        (Number(rawSt.jade || 0) <= 0 && Number(rawSt.basePower || rawSt.power || 0) <= 0);
+    const st = isUnloaded ? Object.assign({}, rawSt, fallbackSt, {
+        rescuedCount: rawSt.rescuedCount !== undefined ? rawSt.rescuedCount : fallbackSt.rescuedCount,
+        rescuedKnbTotal: rawSt.rescuedKnbTotal !== undefined ? rawSt.rescuedKnbTotal : fallbackSt.rescuedKnbTotal,
+        inspectedHomesCount: rawSt.inspectedHomesCount !== undefined ? rawSt.inspectedHomesCount : fallbackSt.inspectedHomesCount,
+        totalRescueScanned: rawSt.totalRescueScanned !== undefined ? rawSt.totalRescueScanned : fallbackSt.totalRescueScanned
+    }) : rawSt;
+
     const nowVn = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
     const elapsedMin = Math.max(1, Math.round((Date.now() - sessionState.startTime) / 60000));
     const remainMin = Math.max(0, Math.round((sessionState.endTime - Date.now()) / 60000));
 
-    const curJade = Number(st.jade || 0);
-    const startJade = sessionState.initialJade !== null ? sessionState.initialJade : curJade;
-    const deltaJade = curJade - startJade;
+    const curJade = Number(st.jade || fallbackSt.jade || 0);
+    const startJade = (sessionState.initialJade !== null && curJade > 0) ? sessionState.initialJade : curJade;
+    const deltaJade = curJade > 0 ? (curJade - startJade) : 0;
     const deltaJadeStr = deltaJade >= 0 ? `+${formatNum(deltaJade)}` : formatNum(deltaJade);
 
     const totalRescuedCount = (sessionState.baseRescuedCount || 0) + Number(st.rescuedCount || 0);
     const totalRescuedKnb = (sessionState.baseRescuedKnb || 0) + Number(st.rescuedKnbTotal || 0);
     const inspectedHomes = (sessionState.baseInspectedHomes || 0) + Number(st.inspectedHomesCount || st.totalRescueScanned || 0);
+    const avgScanPerMin = Math.round(inspectedHomes / elapsedMin);
 
-    const basePow = Number(st.basePower || st.power || 0);
-    const curPow = Number(st.power || 0);
+    const basePow = Number(st.basePower || st.power || fallbackSt.basePower || fallbackSt.power || 0);
+    const curPow = Number(st.power || basePow || 0);
     const powText = (basePow > curPow && curPow > 0)
         ? `${formatNum(basePow)} <i>(Đội dò: ${formatNum(curPow)})</i>`
         : `${formatNum(basePow || curPow)}`;
@@ -299,7 +320,7 @@ function buildTelegramReportHtml(title, stats, sessionState, extraNote = '') {
         `━━━━━━━━━━━━━━━━━━`,
         `💎 <b>THỐNG KÊ FARM KNB GIẢI CỨU:</b>`,
         `• <b>Giải cứu thành công:</b> <b>${totalRescuedCount} lượt</b> (<b>+${formatNum(totalRescuedKnb)} KNB</b>)`,
-        `• <b>Gia viên đã dò:</b> ${formatNum(inspectedHomes)} nhà`,
+        `• <b>Gia viên đã dò:</b> ${formatNum(inspectedHomes)} nhà (~${formatNum(avgScanPerMin)} nhà/phút)`,
         `━━━━━━━━━━━━━━━━━━`,
         `⚙️ <b>Đang bật:</b> ${activeFeatures.join(', ') || 'Tạm dừng'}`,
         `⏱️ <b>Đã treo:</b> ${elapsedMin}p (Còn ${remainMin}p trong phiên • Tự nối 24/7)`,
@@ -459,7 +480,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                             return null;
                                         });
                                         const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (stNow) sessionState.lastKnownStats = stNow;
+                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
                                         await page.screenshot({ path: snapPath });
                                     } catch (e) {}
                                 }
@@ -498,7 +519,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                 if (page && !page.isClosed()) {
                                     try {
                                         const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (stNow) sessionState.lastKnownStats = stNow;
+                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
                                         await page.screenshot({ path: snapPath });
                                     } catch (e) {}
                                 }
@@ -577,7 +598,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                 if (page && !page.isClosed()) {
                                     try {
                                         const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (stNow) sessionState.lastKnownStats = stNow;
+                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
                                         await page.screenshot({ path: snapPath });
                                     } catch (e) {}
                                 }
@@ -600,7 +621,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                             return null;
                                         });
                                         const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (stNow) sessionState.lastKnownStats = stNow;
+                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
                                         await page.screenshot({ path: snapPath });
                                     } catch (e) {}
                                 }
@@ -945,6 +966,10 @@ async function launchAndEnterGame(sessionState) {
         '--disable-dev-shm-usage',
         '--no-first-run',
         '--no-zygote',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-ipc-flooding-protection',
         '--window-size=450,850'
     ];
     if (process.platform === 'linux') {
@@ -1026,8 +1051,13 @@ async function launchAndEnterGame(sessionState) {
         } catch (e) {}
     });
 
+    let bundleBootError = false;
     page.on('pageerror', err => {
-        writeLog(`[WebError] ${err.toString()}`);
+        const errStr = err ? err.toString() : '';
+        writeLog(`[WebError] ${errStr}`);
+        if (errStr.includes('is not a constructor') || errStr.includes('ChunkLoadError') || errStr.includes('Loading chunk')) {
+            bundleBootError = true;
+        }
     });
 
     writeLog(`[Nav] Điều hướng tới cổng game: ${CONFIG.gameUrl}...`);
@@ -1113,7 +1143,7 @@ async function launchAndEnterGame(sessionState) {
                 if (loginView) {
                     const btnReady = !!(loginView.loginBtn && loginView.loginBtn.visible !== false);
                     const barDone = !loginView.barNode || loginView.barNode.visible === false;
-                    if ((btnReady && barDone) || tick >= 25) {
+                    if ((btnReady && barDone) || tick >= 55) {
                         return "LOGIN_VIEW";
                     }
                 }
@@ -1228,14 +1258,15 @@ async function launchAndEnterGame(sessionState) {
         }
 
         writeLog("[Game] Đang đợi tải tài nguyên và chuyển tiếp vào sảnh...");
-        for (let i = 0; i < 8; i++) {
-            if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
-                writeLog("[Login] 🛑 Nhận lệnh Dừng trong lúc đợi vào sảnh -> Ngắt ngay lập tức!");
+        let enteredLobby = false;
+        for (let i = 0; i < 20; i++) {
+            if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog)) {
+                writeLog("[Login] 🛑 Nhận lệnh Dừng/Nhường máy trong lúc đợi vào sảnh -> Ngắt ngay lập tức!");
                 return { browser, page, inGame: false };
             }
             await new Promise(r => setTimeout(r, 2000));
             try {
-                const hasPlayer = await page.evaluate(() => {
+                const lobbyCheck = await page.evaluate((retryEnter) => {
                     function safeReq(name) {
                         if (typeof window.__require === "function") {
                             try {
@@ -1250,17 +1281,54 @@ async function launchAndEnterGame(sessionState) {
                     const mm = safeReq("ModelManager");
                     if (mm && mm.PlayerModel) {
                         const rInfo = typeof mm.PlayerModel.getRoleInfo === "function" ? mm.PlayerModel.getRoleInfo() : mm.PlayerModel.roleInfo;
-                        if (rInfo && (rInfo.roleId || rInfo.rid || rInfo.name || rInfo.roleName || rInfo.level)) return true;
+                        if (rInfo && (rInfo.roleId || rInfo.rid || rInfo._rid || rInfo.name || rInfo._name || rInfo.roleName || rInfo.level || rInfo._level)) {
+                            return { hasPlayer: true };
+                        }
                     }
-                    return false;
-                });
-                if (hasPlayer) break;
+                    if (retryEnter) {
+                        const vm = safeReq("ViewManager");
+                        const loginView = vm && typeof vm.getView === "function" ? vm.getView("LoginView") : null;
+                        if (loginView && typeof loginView.loginHandler === "function") {
+                            const barDone = !loginView.barNode || loginView.barNode.visible === false;
+                            if (barDone) {
+                                try { loginView.loginHandler(); } catch (e) {}
+                            }
+                        }
+                    }
+                    return { hasPlayer: false };
+                }, i === 8);
+                if (lobbyCheck && lobbyCheck.hasPlayer) {
+                    enteredLobby = true;
+                    break;
+                }
+                if (bundleBootError && i >= 5) {
+                    writeLog("[Login] ⚠️ Phát hiện lỗi khởi tạo bundle trên màn hình Login -> Ngắt sớm để thử lại phiên sạch!");
+                    break;
+                }
             } catch (e) {}
         }
-        try {
-            await page.click('#GameCanvas', { offset: { x: 225, y: 700 } });
-            await new Promise(r => setTimeout(r, 2000));
-        } catch (e) {}
+        if (!enteredLobby) {
+            try {
+                await page.click('#GameCanvas', { offset: { x: 225, y: 700 } });
+                await new Promise(r => setTimeout(r, 2500));
+                enteredLobby = await page.evaluate(() => {
+                    try {
+                        const mm = window.ModelManager || (window.G_Mapping && window.G_Mapping.ModelManager);
+                        const pm = mm && mm.PlayerModel;
+                        const rInfo = pm ? (typeof pm.getRoleInfo === "function" ? pm.getRoleInfo() : pm.roleInfo) : null;
+                        return !!(rInfo && (rInfo.roleId || rInfo.rid || rInfo._rid || rInfo.name || rInfo._name || rInfo.roleName));
+                    } catch (e) { return false; }
+                });
+            } catch (e) {}
+        }
+        if (!enteredLobby && !(sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog))) {
+            try { await browser.close(); } catch (eClose) {}
+            if (sessionState && sessionState.currentBrowser === browser) {
+                sessionState.currentBrowser = null;
+                sessionState.currentPage = null;
+            }
+            throw new Error("Chưa vào được sảnh chính sau khi bấm Vào Game (kẹt LoginView hoặc lỗi bundle)");
+        }
     }
 
     if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
@@ -1297,7 +1365,7 @@ async function launchAndEnterGame(sessionState) {
                 window.AutoBot.startScheduleLoop();
             }
         }
-    }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles }, isGitHubActions);
+    }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles }, !!(isGitHubActions || CONFIG.headless));
 
     writeLog("[Bot] ✅ AutoBot v3.0 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
     await new Promise(r => setTimeout(r, 4000));
@@ -1530,7 +1598,7 @@ function startLocalGuiServer(sessionState, getActivePage) {
                     if (page && !page.isClosed()) {
                         try {
                             const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                            if (stNow) sessionState.lastKnownStats = stNow;
+                            if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
                             await page.screenshot({ path: snapPath });
                         } catch (e) {}
                     }
@@ -1569,7 +1637,7 @@ function startLocalGuiServer(sessionState, getActivePage) {
                             return null;
                         });
                         const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                        if (stNow) sessionState.lastKnownStats = stNow;
+                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
                     } catch (e) {
                         writeLog(`⚠️ [GUI Control] Lỗi khi thực thi 1-Click Daily: ${e.message}`);
                     }
@@ -1732,6 +1800,10 @@ async function run() {
             sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
             sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
             sessionState.baseInspectedHomes += Number(sessionState.lastKnownStats.inspectedHomesCount || sessionState.lastKnownStats.totalRescueScanned || 0);
+            sessionState.lastKnownStats.rescuedCount = 0;
+            sessionState.lastKnownStats.rescuedKnbTotal = 0;
+            sessionState.lastKnownStats.inspectedHomesCount = 0;
+            sessionState.lastKnownStats.totalRescueScanned = 0;
         }
         try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
         activeBrowser = null;
@@ -1739,7 +1811,7 @@ async function run() {
 
         const stopHtml = buildTelegramReportHtml(
             `🛑 [DỪNG HẲN BOT / BẢO TRÌ] ĐÃ NGẮT KẾT NỐI 100%`,
-            Object.assign({}, sessionState.lastKnownStats || {}, { rescuedCount: 0, rescuedKnbTotal: 0, inspectedHomesCount: 0 }),
+            Object.assign({}, sessionState.lastKnownStats || {}, { rescuedCount: 0, rescuedKnbTotal: 0, inspectedHomesCount: 0, totalRescueScanned: 0 }),
             sessionState,
             `🛑 <b>Lý do dừng:</b> <code>${String(reason).replace(/[<>&]/g, '')}</code>\n✅ <b>Đã đóng hoàn toàn Chromium & ngắt 100% vòng lặp Login/Reconnect (không gây lag tài khoản).</b>\n${isGitHubActions ? '⏹️ <i>Workflow GitHub Actions sẽ kết thúc ngay và KHÔNG tự kích hoạt lại cho tới khi anh bấm Run workflow mới!</i>' : '👉 <i>Bấm "▶️ Chạy Lại Ngay" trên GUI hoặc Telegram bất kỳ lúc nào khi anh muốn chạy lại!</i>'}`
         );
@@ -1840,12 +1912,17 @@ async function run() {
                     sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
                     sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
                     sessionState.baseInspectedHomes += Number(sessionState.lastKnownStats.inspectedHomesCount || sessionState.lastKnownStats.totalRescueScanned || 0);
+                    sessionState.lastKnownStats.rescuedCount = 0;
+                    sessionState.lastKnownStats.rescuedKnbTotal = 0;
+                    sessionState.lastKnownStats.inspectedHomesCount = 0;
+                    sessionState.lastKnownStats.totalRescueScanned = 0;
                 }
                 try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
                 activeBrowser = null;
                 activePage = null;
+                sessionState.deadSessionStreak = 0;
                 const reSession = await safeLaunchAndEnterGame(sessionState);
-                if (reSession && (reSession.browser || reSession.inGame)) {
+                if (reSession && reSession.browser && reSession.inGame) {
                     activeBrowser = reSession.browser;
                     activePage = reSession.page;
                     sessionState.activeBrowser = activeBrowser;
@@ -1870,15 +1947,20 @@ async function run() {
                 sessionState.kickDetectedFromLog = false;
                 sessionState.isYielding = true;
                 sessionState.forceResumeFromYield = false;
+                sessionState.deadSessionStreak = 0;
 
                 const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 15);
                 writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động chạy tiếp...`);
 
-                // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt
+                // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
                 if (sessionState.lastKnownStats) {
                     sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
                     sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
                     sessionState.baseInspectedHomes += Number(sessionState.lastKnownStats.inspectedHomesCount || sessionState.lastKnownStats.totalRescueScanned || 0);
+                    sessionState.lastKnownStats.rescuedCount = 0;
+                    sessionState.lastKnownStats.rescuedKnbTotal = 0;
+                    sessionState.lastKnownStats.inspectedHomesCount = 0;
+                    sessionState.lastKnownStats.totalRescueScanned = 0;
                 }
 
                 try {
@@ -1916,6 +1998,7 @@ async function run() {
                     }
                 }
 
+                const wasForcedResume = !!sessionState.forceResumeFromYield;
                 sessionState.isYielding = false;
                 sessionState.yieldEndTime = 0;
                 sessionState.forceResumeFromYield = false;
@@ -1932,8 +2015,7 @@ async function run() {
                     break;
                 }
 
-                writeLog(`🔄 [Nhường Máy] ${sessionState.forceResumeFromYield ? "Nhận lệnh Chạy Lại Ngay" : "Đã hết " + waitMin + " phút nhường máy"}! Đang đăng nhập lại mới 100%...`);
-                sessionState.forceResumeFromYield = false;
+                writeLog(`🔄 [Nhường Máy] ${wasForcedResume ? "Nhận lệnh Chạy Lại Ngay" : "Đã hết " + waitMin + " phút nhường máy"}! Đang đăng nhập lại mới 100%...`);
 
                 const resumed = await safeLaunchAndEnterGame(sessionState);
                 if (resumed && resumed.browser) {
@@ -1942,7 +2024,11 @@ async function run() {
                     sessionState.activeBrowser = activeBrowser;
                     sessionState.activePage = activePage;
                     const resumeSnap = path.join(CONFIG.screenshotDir, 'latest.png');
-                    try { await activePage.screenshot({ path: resumeSnap }); } catch (e) {}
+                    try {
+                        const stResumed = await activePage.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
+                        if (isStatsLoaded(stResumed)) sessionState.lastKnownStats = stResumed;
+                        await activePage.screenshot({ path: resumeSnap });
+                    } catch (e) {}
                     const resumeHtml = buildTelegramReportHtml(
                         `🟢 [KẾT NỐI LẠI] ĐÃ VÀO LẠI GAME SAU KHI NHƯỜNG MÁY`,
                         sessionState.lastKnownStats || {},
@@ -2013,9 +2099,61 @@ async function run() {
                 continue;
             }
 
+            // Watchdog chống treo màn hình "Đang tải..." / mất dữ liệu nhân vật / rớt sảnh
+            const rawStats = (status && status.stats) ? status.stats : null;
+            const isLobbyHealthy = !!(
+                status &&
+                status.ready &&
+                !status.isDisconnected &&
+                rawStats &&
+                rawStats.roleName &&
+                rawStats.roleName !== "Đang tải..." &&
+                rawStats.roleName !== "---" &&
+                Number(rawStats.basePower || rawStats.power || 0) > 0
+            );
+
+            if (!isLobbyHealthy) {
+                sessionState.deadSessionStreak = (sessionState.deadSessionStreak || 0) + 1;
+                if (sessionState.deadSessionStreak >= 2) {
+                    writeLog(`[Watchdog] ⚠️ Phiên game chưa tải được nhân vật / rớt kết nối sảnh (${sessionState.deadSessionStreak}/5)...`);
+                }
+                if (sessionState.deadSessionStreak >= 5) {
+                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 50s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100%!`);
+                    sessionState.deadSessionStreak = 0;
+                    if (sessionState.lastKnownStats) {
+                        sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
+                        sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
+                        sessionState.baseInspectedHomes += Number(sessionState.lastKnownStats.inspectedHomesCount || sessionState.lastKnownStats.totalRescueScanned || 0);
+                        sessionState.lastKnownStats.rescuedCount = 0;
+                        sessionState.lastKnownStats.rescuedKnbTotal = 0;
+                        sessionState.lastKnownStats.inspectedHomesCount = 0;
+                        sessionState.lastKnownStats.totalRescueScanned = 0;
+                    }
+                    try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
+                    activeBrowser = null;
+                    activePage = null;
+                    sessionState.activeBrowser = null;
+                    sessionState.activePage = null;
+                    const reSession = await safeLaunchAndEnterGame(sessionState);
+                    if (reSession && reSession.browser && reSession.inGame) {
+                        activeBrowser = reSession.browser;
+                        activePage = reSession.page;
+                        sessionState.activeBrowser = activeBrowser;
+                        sessionState.activePage = activePage;
+                        writeLog(`✅ [Watchdog] Đã tự động khôi phục kết nối vào lại sảnh chính thành công!`);
+                    } else {
+                        writeLog(`⚠️ [Watchdog] Đăng nhập lại chưa thành công, chờ 10s rồi thử tiếp...`);
+                        await new Promise(r => setTimeout(r, 10000));
+                    }
+                    continue;
+                }
+            } else {
+                sessionState.deadSessionStreak = 0;
+            }
+
             if (status && status.stats) {
                 const st = status.stats;
-                if (st.roleName && st.roleName !== "Đang tải...") {
+                if (isLobbyHealthy) {
                     sessionState.lastKnownStats = st;
                 }
 
@@ -2034,8 +2172,7 @@ async function run() {
                 // Gửi báo cáo khởi động lần đầu ngay khi tải xong dữ liệu nhân vật VÀ số dư KNB thực tế
                 sessionState.startupWaitTicks = (sessionState.startupWaitTicks || 0) + 1;
                 const canSendStartup = !sessionState.startupReported && 
-                    st.roleName && st.roleName !== "Đang tải..." && 
-                    Number(st.power || 0) > 0 && 
+                    isLobbyHealthy &&
                     (Number(st.jade || 0) > 0 || sessionState.startupWaitTicks >= 8);
                 if (canSendStartup) {
                     sessionState.startupReported = true;
@@ -2055,12 +2192,18 @@ async function run() {
                     await sendTelegramMessage(html, startSnap, sessionState);
                 }
                 if (cycle % 30 === 0) {
+                    const dispSt = isLobbyHealthy ? st : Object.assign({}, sessionState.lastKnownStats || {}, {
+                        rescuedCount: st.rescuedCount,
+                        rescuedKnbTotal: st.rescuedKnbTotal,
+                        inspectedHomesCount: st.inspectedHomesCount,
+                        totalRescueScanned: st.totalRescueScanned
+                    });
                     const totalRescued = sessionState.baseRescuedCount + Number(st.rescuedCount || 0);
                     const totalKnb = sessionState.baseRescuedKnb + Number(st.rescuedKnbTotal || 0);
                     const totalScanned = (sessionState.baseInspectedHomes || 0) + Number(st.inspectedHomesCount || st.totalRescueScanned || 0);
                     const elapsedMin = Math.max(0.1, (Date.now() - sessionState.startTime) / 60000);
                     const scanSpeed = Math.round(totalScanned / elapsedMin);
-                    writeLog(`[Trạng Thái] ${st.roleName || '---'} | Ải: ${st.stage || 1} | LC: ${formatNum(st.basePower || st.power)} | KNB: ${formatNum(st.jade)} | Giải cứu: ${totalRescued} lượt (+${totalKnb} KNB) | Đã quét: ${totalScanned.toLocaleString()} nhà (~${scanSpeed} nhà/p)`);
+                    writeLog(`[Trạng Thái] ${dispSt.roleName || '---'} | Ải: ${dispSt.stage || 1} | LC: ${formatNum(dispSt.basePower || dispSt.power)} | KNB: ${formatNum(dispSt.jade)} | Giải cứu: ${totalRescued} lượt (+${totalKnb} KNB) | Đã quét: ${totalScanned.toLocaleString()} nhà (~${scanSpeed} nhà/p)`);
 
                     if (process.env.GITHUB_STEP_SUMMARY && cycle % 6 === 0) {
                         try {
@@ -2068,9 +2211,9 @@ async function run() {
                                 `## ⚡ 3Q AutoBot v3.0 Final - Trạng Thái Farm KNB Realtime`,
                                 `| Chỉ số | Chi tiết |`,
                                 `| :--- | :--- |`,
-                                `| 👤 **Nhân vật** | **${st.roleName || '---' }** (Server: ${CONFIG.server}) |`,
-                                `| ⚔️ **Lực chiến** | ${formatNum(st.basePower || st.power)} |`,
-                                `| 💎 **KNB hiện có** | **${formatNum(st.jade)}** |`,
+                                `| 👤 **Nhân vật** | **${dispSt.roleName || '---' }** (Server: ${CONFIG.server}) |`,
+                                `| ⚔️ **Lực chiến** | ${formatNum(dispSt.basePower || dispSt.power)} |`,
+                                `| 💎 **KNB hiện có** | **${formatNum(dispSt.jade)}** |`,
                                 `| 🌾 **Đã giải cứu** | **${totalRescued} lượt (+${totalKnb.toLocaleString()} KNB)** |`,
                                 `| 🔍 **Tổng gia viên đã quét** | **${totalScanned.toLocaleString()}** gia viên |`,
                                 `| ⚡ **Tốc độ rà soát** | **~${scanSpeed.toLocaleString()}** nhà/phút |`,
@@ -2101,7 +2244,9 @@ async function run() {
                         `📊 BÁO CÁO ĐỊNH KỲ (${CONFIG.telegram.report_interval_min} PHÚT)`,
                         st,
                         sessionState,
-                        `🟢 <i>Đang treo liên tục ổn định. Bấm nút bên dưới hoặc mở GUI nếu anh muốn đổi tính năng!</i>`
+                        isLobbyHealthy
+                            ? `🟢 <i>Đang treo liên tục ổn định. Bấm nút bên dưới hoặc mở GUI nếu anh muốn đổi tính năng!</i>`
+                            : `🔄 <i>Đang đồng bộ / kết nối lại sảnh game tự động (hiển thị số liệu gần nhất của phiên).</i>`
                     );
                     await sendTelegramMessage(periodicHtml, reportSnap, sessionState);
                 }
