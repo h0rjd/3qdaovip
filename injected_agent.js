@@ -8822,8 +8822,8 @@
                     }
                 }
 
-                // C2. Cào sâu BXH Liên Server & Server (1 gói mỗi 0.85s: RankInfoCs 10903 -> RankPageCs 10905 trang 1..50 = tới 500 người/BXH!)
-                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && (Date.now() - (bot.state._lastRankCrawlTs || 0) >= 850)) {
+                // C2. Cào sâu BXH Liên Server & Server (1 gói mỗi 1.15s chuẩn >1.0s rate-limit 10903/10905: RankInfoCs -> RankPageCs trang 1..50 = tới 500 người/BXH!)
+                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && (Date.now() - (bot.state._lastRankCrawlTs || 0) >= 1150)) {
                     if (!bot.state._rankCrawlQueue) {
                         const rankIds = [];
                         const seenIds = {};
@@ -8877,14 +8877,19 @@
                             if (st.page === 0) {
                                 const rInfoExisting = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || (rnm.rankInfo && rnm.rankInfo[rType]);
                                 if (rInfoExisting && Number(rInfoExisting._tot_page) > 0) {
+                                    st.infoSentAt = 0;
                                     st.page = 1;
                                 } else {
                                     gm.RPCReq.send(pInfoProto, { _type: rType });
+                                    st.infoSentAt = Date.now();
                                     st.page = 1;
                                     sentCrawlRpc = true;
                                 }
                             } else {
                                 const rInfo = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || (rnm.rankInfo && rnm.rankInfo[rType]);
+                                if (!rInfo && st.infoSentAt && (Date.now() - st.infoSentAt < 2500)) {
+                                    break; // Đợi gói RankInfoSc (10904) từ cụm Liên Server trả về _tot_page đầy đủ!
+                                }
                                 const totPage = rInfo && Number(rInfo._tot_page) > 0 ? Math.min(50, Number(rInfo._tot_page)) : (st.page === 1 ? 1 : 0);
                                 if (st.page <= totPage) {
                                     const existingP = rnm.rankPage && rnm.rankPage[rType] && rnm.rankPage[rType][st.page];
