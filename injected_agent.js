@@ -6150,7 +6150,7 @@
                                     window.__LAST_10332_REJECT_TS__ = Date.now();
                                     window.__LAST_10332_SENT_TS__ = Date.now();
                                     return;
-                                } else if (proto === 10550 || proto === 10552 || proto === 10305 || proto === 10334 || proto === 11801 || proto === 10901 || proto === 10903 || proto === 10905 || proto === 12411 || proto === 10560 || proto === 10562) {
+                                } else if (proto === 10550 || proto === 10552 || proto === 10305 || proto === 10334 || proto === 11801 || proto === 10901 || proto === 10903 || proto === 10905 || proto === 12411 || proto === 10560 || proto === 10562 || proto === 15300 || proto === 14713) {
                                     // Gói dò danh sách Gia Viên / BXH / Phúc lợi / Hoa KHÔNG phải trận đánh -> chỉ giãn nhịp nhẹ 340ms cho 10550, KHÔNG khóa chiến đấu 3.5s!
                                     if (proto === 10550) window.__LAST_10550_SENT_TS__ = Date.now() + 340;
                                     return;
@@ -8639,29 +8639,31 @@
             } catch (e) { }
         },
 
-        recordScoutOutcome: function (kind, targetRid, robberRid, robberPower, victimName, robberName) {
+        recordScoutOutcome: function (kind, targetRid, robberRid, robberPower, victimName, robberName, sourceLabel) {
             try {
                 bot.ensureScoutTelemetryInit();
                 const hc = Math.min(5, Math.max(1, Number(bot.state.currentScoutHeroCount || 3)));
                 const ts = bot.state.scoutTierStats[hc];
                 const ck = bot.state.currentScoutComboKey;
                 const cs = ck ? (bot.state.scoutComboStats[ck] || (bot.state.scoutComboStats[ck] = { waves: 0, unique: 0, wins: 0, tooStrong: 0 })) : null;
+                const srcStr = sourceLabel ? String(sourceLabel) : "";
+                const isKenh3Wave = !srcStr || (srcStr.indexOf("Tuần Tra") < 0 && srcStr.indexOf("Mục Tiêu Nóng") < 0 && srcStr.indexOf("Cầu Cứu") < 0 && srcStr.indexOf("Tự Vệ") < 0);
                 if (kind === "occupied") {
-                    if (ts) ts.occupied++;
+                    if (ts && isKenh3Wave) ts.occupied++;
                     bot.state.occupiedFound = (bot.state.occupiedFound || 0) + 1;
                 } else if (kind === "winnable") {
-                    if (ts) ts.winnable++;
+                    if (ts && isKenh3Wave) ts.winnable++;
                     bot.state.winnableFights = (bot.state.winnableFights || 0) + 1;
                 } else if (kind === "win") {
-                    if (ts) ts.wins++;
-                    if (cs) cs.wins++;
+                    if (ts && isKenh3Wave) ts.wins++;
+                    if (cs && isKenh3Wave) cs.wins++;
                     bot.state.rescueWinCount = (bot.state.rescueWinCount || 0) + 1;
                 } else if (kind === "loss") {
-                    if (ts) ts.losses++;
+                    if (ts && isKenh3Wave) ts.losses++;
                     bot.state.rescueLossCount = (bot.state.rescueLossCount || 0) + 1;
                 } else if (kind === "too_strong") {
-                    if (ts) ts.tooStrong++;
-                    if (cs) cs.tooStrong++;
+                    if (ts && isKenh3Wave) ts.tooStrong++;
+                    if (cs && isKenh3Wave) cs.tooStrong++;
                     bot.state.skippedStrongRobbers = (bot.state.skippedStrongRobbers || 0) + 1;
                 } else if (kind === "code66") {
                     bot.state.rescueCode66Count = (bot.state.rescueCode66Count || 0) + 1;
@@ -8671,6 +8673,7 @@
                         t: Date.now(),
                         kind: kind,
                         tier: hc,
+                        src: srcStr || "Kênh 3",
                         victim: victimName || String(targetRid || ""),
                         robber: robberName || String(robberRid || ""),
                         robPow: Number(robberPower || 0)
@@ -8688,7 +8691,8 @@
                 if (numRid <= 0) return;
                 const myFull = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : 320000000;
                 const vPow = Number(power || 0);
-                if (!boostHot && vPow > 0 && myFull > 0 && vPow > myFull * 1.03) return;
+                const maxAllowedRatio = (Number(boostHot || 0) >= 2) ? 2.20 : 1.90;
+                if (vPow > 0 && myFull > 0 && vPow > myFull * maxAllowedRatio) return;
                 if (!boostHot && hostLv !== undefined && Number(hostLv) > 0 && Number(hostLv) < 5) return;
                 bot.ensureScoutTelemetryInit();
                 const map = bot.state.hotCrossServerVictims;
@@ -8700,8 +8704,8 @@
                     existing.seenAt = Date.now();
                 } else {
                     const keys = Object.keys(map);
-                    if (keys.length >= 2500) {
-                        for (let i = 0; i < keys.length && Object.keys(map).length > 2100; i++) {
+                    if (keys.length >= 5500) {
+                        for (let i = 0; i < keys.length && Object.keys(map).length > 4800; i++) {
                             const k = keys[i];
                             if (map[k] && (map[k].hotScore || 0) < 2) delete map[k];
                         }
@@ -8721,9 +8725,50 @@
         populateCrossServerPatrolTargets: function (addTarget, myRid, rnm, mm, gm, cacheRolePowerFromShow) {
             try {
                 const myFullPow = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats && bot.stats.fullPower) || Number(bot.stats && bot.stats.power) || 320000000);
-                const maxVictimPow = myFullPow > 0 ? (myFullPow * 1.03) : 0;
+                // Chủ nhà Gia Viên có LC tới 1.90x (~615M) vẫn thường xuyên cạn lính đồn trú và bị kẻ cướp 70M-320M chiếm đóng (đã chứng minh thực chiến trên s1..s18)!
+                const maxVictimPow = myFullPow > 0 ? (myFullPow * 1.90) : 0;
 
-                // A. Nạp toàn bộ Kho Gia Viên Liên Server s1..s12 đã cào từ KÊNH 3 vào hàng đợi Tuần Tra Trực Tiếp (HostViewCs 10552)!
+                // 0. Hook một lần cho BXH Mùa Giải Công Thành Liên SV (evt_Siege2SeasonRankSc - 15301) & Danh Sách Vận Tiêu Liên SV (evt_CaravanAtkListWinSc - 14715)
+                const disp = (gm && gm.Dispatcher) || window.Dispatcher;
+                if (disp && typeof disp.addEventListener === "function" && !window.__CROSS_SEASON_CARAVAN_HOOKED__) {
+                    window.__CROSS_SEASON_CARAVAN_HOOKED__ = true;
+                    disp.addEventListener("evt_Siege2SeasonRankSc", function (e, t) {
+                        try {
+                            const data = (t && Array.isArray(t._list)) ? t : (e && Array.isArray(e._list) ? e : null);
+                            if (!data || !Array.isArray(data._list)) return;
+                            for (let i = 0; i < data._list.length; i++) {
+                                const rs = data._list[i];
+                                if (!rs) continue;
+                                if (typeof cacheRolePowerFromShow === "function") cacheRolePowerFromShow(rs);
+                                const sRid = Number(rs._rid || rs.rid || (rs.getRoleId ? rs.getRoleId() : 0));
+                                if (!sRid) continue;
+                                const sPow = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : Number(rs._power || 0);
+                                const sName = rs._name || rs.name || (rs.getName ? rs.getName() : ("ID " + sRid));
+                                bot.harvestCrossServerVictim(sRid, sName, sPow, 10, 0);
+                            }
+                        } catch (eS2) { }
+                    }, { name: "CrossSiegeSeasonHarvester", uuid: "__QA_SIEGE2_HARVESTER__" });
+
+                    disp.addEventListener("evt_CaravanAtkListWinSc", function (e, t) {
+                        try {
+                            const data = (t && Array.isArray(t._list)) ? t : (e && Array.isArray(e._list) ? e : null);
+                            if (!data || !Array.isArray(data._list)) return;
+                            for (let i = 0; i < data._list.length; i++) {
+                                const item = data._list[i];
+                                const rs = item && (item._show || item._role_show);
+                                if (!rs) continue;
+                                if (typeof cacheRolePowerFromShow === "function") cacheRolePowerFromShow(rs);
+                                const cRid = Number(rs._rid || rs.rid || (rs.getRoleId ? rs.getRoleId() : 0));
+                                if (!cRid) continue;
+                                const cPow = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : Number(rs._power || 0);
+                                const cName = rs._name || rs.name || (rs.getName ? rs.getName() : ("ID " + cRid));
+                                bot.harvestCrossServerVictim(cRid, cName, cPow, 10, 1);
+                            }
+                        } catch (eCv) { }
+                    }, { name: "CrossCaravanHarvester", uuid: "__QA_CARAVAN_HARVESTER__" });
+                }
+
+                // A. Nạp toàn bộ Kho Gia Viên Liên Server s1..s20+ vào hàng đợi Tuần Tra Trực Tiếp (HostViewCs 10552)!
                 if (bot.state.hotCrossServerVictims) {
                     const hotVals = Object.values(bot.state.hotCrossServerVictims);
                     for (let i = 0; i < hotVals.length; i++) {
@@ -8734,7 +8779,7 @@
                     }
                 }
 
-                // B. Đọc chuẩn cấu trúc rnm.rankPage[rType][page]._ranks (cả BXH Server & BXH Liên Server s1..s12)!
+                // B. Đọc chuẩn cấu trúc rnm.rankPage[rType][page]._ranks (cả BXH Server & BXH Liên Server s1..s20+ trang 1..50)!
                 if (rnm && rnm.rankPage && typeof rnm.rankPage === "object") {
                     const rTypes = Object.keys(rnm.rankPage);
                     for (let ti = 0; ti < rTypes.length; ti++) {
@@ -8761,8 +8806,24 @@
                     }
                 }
 
-                // C. Cào ngầm BXH Liên Server & Server (1 gói nhẹ mỗi 4s: RankInfoCs 10903 -> RankPageCs 10905 trang 1..8)
-                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && bot.canDo("crawl_cross_rank_step", 4)) {
+                // C1. Cào danh sách người chơi Liên SV đang hoạt động trong Công Thành Mùa Giải (15300) & Vận Tiêu Liên SV (14713)
+                if (gm && gm.RPCReq && typeof gm.RPCReq.send === "function") {
+                    if (gm.Siege2SeasonRankCs && gm.Siege2SeasonRankCs.protocol && bot.canDo("crawl_siege2_season_rank", 1200)) {
+                        bot.markDone("crawl_siege2_season_rank");
+                        gm.RPCReq.send(gm.Siege2SeasonRankCs.protocol, { _nth: 0 });
+                    }
+                    const vmLoc = (bot.getViewManager ? bot.getViewManager() : null) || window.ViewManager;
+                    const caravanUiOpen = !!(vmLoc && typeof vmLoc.isOpenView === "function" && vmLoc.isOpenView("CaravanAtkListWin"));
+                    if (!caravanUiOpen && gm.CaravanAtkListWinCs && gm.CaravanAtkListWinCs.protocol && bot.canDo("crawl_caravan_active_list", 45)) {
+                        bot.markDone("crawl_caravan_active_list");
+                        const cvPage = Number(bot.state._caravanCrawlPage || 0) % 5;
+                        bot.state._caravanCrawlPage = cvPage + 1;
+                        gm.RPCReq.send(gm.CaravanAtkListWinCs.protocol, { _color: 0, _page: cvPage });
+                    }
+                }
+
+                // C2. Cào sâu BXH Liên Server & Server (1 gói mỗi 1.2s: RankInfoCs 10903 -> RankPageCs 10905 trang 1..50 = tới 500 người/BXH!)
+                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && (Date.now() - (bot.state._lastRankCrawlTs || 0) >= 1200)) {
                     if (!bot.state._rankCrawlQueue) {
                         const rankIds = [];
                         const seenIds = {};
@@ -8778,47 +8839,74 @@
                             const enumObj = tRankMod && tRankMod.e_RankDataRank;
                             if (enumObj) {
                                 const prioNames = [
-                                    "CrossArenaS", "CrossArena", "MinePlayer", "SiegeCityPS", "SiegeCityP",
-                                    "LadderS", "SkvsArenaS", "Fc", "Tower", "Arena", "WbossP",
-                                    "DefJz1", "DefJz2", "JindiHelp1S", "JindiHelp2S",
-                                    "Hero1", "Hero2", "Hero3", "Hero4", "Hero5"
+                                    "CrossArenaS", "MinePlayer", "SiegeCityPS", "LadderS", "SkvsArenaS",
+                                    "JindiHelp1S", "JindiHelp2S", "JindiHelp3S", "YyzqFightS", "YyzqFight2S", "YyzqFight3S",
+                                    "CrossArena", "SiegeCityP", "Fc", "Tower", "Arena", "WbossP",
+                                    "DefJz1", "DefJz2", "Hero1", "Hero2", "Hero3", "Hero4", "Hero5"
                                 ];
                                 for (let k = 0; k < prioNames.length; k++) {
                                     if (enumObj[prioNames[k]]) pushId(enumObj[prioNames[k]]);
+                                }
+                                const allEnumKeys = Object.keys(enumObj);
+                                for (let ek = 0; ek < allEnumKeys.length; ek++) {
+                                    const val = enumObj[allEnumKeys[ek]];
+                                    if (typeof val === "number" && val > 0) pushId(val);
                                 }
                             }
                         } catch (eRkEnum) { }
                         [1001, 2001, 3001, 4001, 5001, 5002, 5003, 5004, 5005].forEach(pushId);
                         bot.state._rankCrawlQueue = rankIds;
-                        bot.state._rankCrawlState = { idx: 0, page: 0, crawledPages: 0, doneFullPass: false };
+                        bot.state._rankCrawlState = { idx: 0, page: 0, crawledPages: 0, doneFullPass: false, doneAt: 0 };
                     }
                     const q = bot.state._rankCrawlQueue;
                     const st = bot.state._rankCrawlState;
+                    if (st && st.doneFullPass && st.doneAt && (Date.now() - st.doneAt >= 2700000)) {
+                        st.idx = 0;
+                        st.page = 0;
+                        st.doneFullPass = false;
+                        st.doneAt = 0;
+                    }
                     if (Array.isArray(q) && q.length > 0 && st && !st.doneFullPass) {
-                        bot.markDone("crawl_cross_rank_step");
-                        const rType = q[st.idx % q.length];
                         const pInfoProto = (gm.RankInfoCs && gm.RankInfoCs.protocol) || 10903;
                         const pPageProto = (gm.RankPageCs && gm.RankPageCs.protocol) || 10905;
-                        if (st.page === 0) {
-                            gm.RPCReq.send(pInfoProto, { _type: rType });
-                            st.page = 1;
-                        } else {
-                            const rInfo = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || (rnm.rankInfo && rnm.rankInfo[rType]);
-                            const totPage = rInfo && Number(rInfo._tot_page) > 0 ? Math.min(8, Number(rInfo._tot_page)) : (st.page === 1 ? 1 : 0);
-                            if (st.page <= totPage) {
-                                const existingP = rnm.rankPage && rnm.rankPage[rType] && rnm.rankPage[rType][st.page];
-                                if (!existingP) {
-                                    gm.RPCReq.send(pPageProto, { _type: rType, _page: st.page });
-                                    st.crawledPages = (st.crawledPages || 0) + 1;
+                        let sentCrawlRpc = false;
+                        let guardSteps = 0;
+                        while (!sentCrawlRpc && !st.doneFullPass && guardSteps < 80) {
+                            guardSteps++;
+                            const rType = q[st.idx % q.length];
+                            if (st.page === 0) {
+                                const rInfoExisting = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || (rnm.rankInfo && rnm.rankInfo[rType]);
+                                if (rInfoExisting && Number(rInfoExisting._tot_page) > 0) {
+                                    st.page = 1;
+                                } else {
+                                    gm.RPCReq.send(pInfoProto, { _type: rType });
+                                    st.page = 1;
+                                    sentCrawlRpc = true;
                                 }
-                                st.page++;
                             } else {
-                                st.page = 0;
-                                st.idx++;
-                                if (st.idx >= q.length) {
-                                    st.doneFullPass = true;
+                                const rInfo = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || (rnm.rankInfo && rnm.rankInfo[rType]);
+                                const totPage = rInfo && Number(rInfo._tot_page) > 0 ? Math.min(50, Number(rInfo._tot_page)) : (st.page === 1 ? 1 : 0);
+                                if (st.page <= totPage) {
+                                    const existingP = rnm.rankPage && rnm.rankPage[rType] && rnm.rankPage[rType][st.page];
+                                    const curP = st.page;
+                                    st.page++;
+                                    if (!existingP) {
+                                        gm.RPCReq.send(pPageProto, { _type: rType, _page: curP });
+                                        st.crawledPages = (st.crawledPages || 0) + 1;
+                                        sentCrawlRpc = true;
+                                    }
+                                } else {
+                                    st.page = 0;
+                                    st.idx++;
+                                    if (st.idx >= q.length) {
+                                        st.doneFullPass = true;
+                                        st.doneAt = Date.now();
+                                    }
                                 }
                             }
+                        }
+                        if (sentCrawlRpc) {
+                            bot.state._lastRankCrawlTs = Date.now();
                         }
                     }
                 }
@@ -11384,7 +11472,7 @@
                     }
 
                     if (typeof bot.recordScoutOutcome === "function") {
-                        bot.recordScoutOutcome("occupied", targetRid, robRid, 0, victimName, robberName);
+                        bot.recordScoutOutcome("occupied", targetRid, robRid, 0, victimName, robberName, sourceLabel);
                     }
                     if (typeof bot.harvestCrossServerVictim === "function") {
                         bot.harvestCrossServerVictim(targetRid, victimName, victimPower, otherHome._host_lv || 10, 2);
@@ -11428,13 +11516,18 @@
                         } catch (eRival) { }
                     }
 
+                    // Counter-Patrol: Kẻ đi cướp tích cực luôn bị nạn nhân báo thù ngược lại qua Nhật Ký -> đưa gia viên của chính kẻ cướp vào Kho Liên SV!
+                    if (robRid > 0 && robRid !== myRid && robberPower > 0 && (myFullPower <= 0 || robberPower <= myFullPower * 1.90) && typeof bot.harvestCrossServerVictim === "function") {
+                        bot.harvestCrossServerVictim(robRid, robberName, robberPower, 10, 1);
+                    }
+
                     // 2. Lọc thắng chắc 100%: chỉ vào trận khi kẻ cướp vừa sức (<= 103% LC full 6 tướng của mình)
                     const winRatioLimit = Number((bot.settings && bot.settings.rescue_max_power_ratio) || 1.03);
                     const maxPowerThreshold = myFullPower > 0 ? (myFullPower * winRatioLimit) : 333000000;
                     if (robberPower > 0 && robberPower > maxPowerThreshold) {
                         bot.log(`🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [${robberName}] có LC ${bot.formatNumber(robberPower)} > ${Math.round(winRatioLimit * 100)}% LC mình (${bot.formatNumber(myFullPower)}) -> Bỏ qua ngay, không tốn trận!`);
                         if (typeof bot.recordScoutOutcome === "function") {
-                            bot.recordScoutOutcome("too_strong", targetRid, robRid, robberPower, victimName, robberName);
+                            bot.recordScoutOutcome("too_strong", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
                         }
                         bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1200000;
@@ -11445,7 +11538,7 @@
                     if (robberPower === 0 && victimPower > 0 && myFullPower > 0 && victimPower > myFullPower * 1.02) {
                         bot.log(`🛡️ [Farm KNB • Bỏ Qua] Chủ nhà [${victimName}] có LC ${bot.formatNumber(victimPower)} > LC mình (${bot.formatNumber(myFullPower)}) -> Bỏ qua an toàn!`);
                         if (typeof bot.recordScoutOutcome === "function") {
-                            bot.recordScoutOutcome("too_strong", targetRid, robRid, victimPower, victimName, robberName);
+                            bot.recordScoutOutcome("too_strong", targetRid, robRid, victimPower, victimName, robberName, sourceLabel);
                         }
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 900000;
                         bot.state.skipRescueReason[targetRid] = "victim_too_strong";
@@ -11456,7 +11549,7 @@
                     bot.state.rescueFightActive = true;
                     bot.state.lastBattleStartTime = Date.now();
                     if (typeof bot.recordScoutOutcome === "function") {
-                        bot.recordScoutOutcome("winnable", targetRid, robRid, typeof robberPower !== "undefined" ? robberPower : 0, victimName, robberName);
+                        bot.recordScoutOutcome("winnable", targetRid, robRid, typeof robberPower !== "undefined" ? robberPower : 0, victimName, robberName, sourceLabel);
                     }
                     if (typeof bot.markAutoBattle === "function") {
                         bot.markAutoBattle(revoltType, 20000);
@@ -11610,7 +11703,7 @@
                         // Nếu gặp mã 66 ("您操作太快啦！") hoặc mã 4 ("點太快啦"): ĐÂY LÀ GIÃN CÁCH TẠM THỜI, TUYỆT ĐỐI KHÔNG KHÓA BỎ NHÀ +50 KNB 3 PHÚT!
                         if (errCode === 66 || errCode === 4) {
                             if (typeof bot.recordScoutOutcome === "function") {
-                                bot.recordScoutOutcome("code66", targetRid, robRid, typeof robberPower !== "undefined" ? robberPower : 0, victimName, robberName);
+                                bot.recordScoutOutcome("code66", targetRid, robRid, typeof robberPower !== "undefined" ? robberPower : 0, victimName, robberName, sourceLabel);
                             }
                             if (typeof bot.rescueUnsettledBattle === "function") {
                                 bot.rescueUnsettledBattle("rescue_code_" + errCode);
@@ -11686,14 +11779,15 @@
                         delete bot.state.rescueAttempts[targetRid];
 
                         if (typeof bot.recordScoutOutcome === "function") {
-                            bot.recordScoutOutcome("win", targetRid, robRid, robberPower, victimName, robberName);
+                            bot.recordScoutOutcome("win", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
                         }
                         if (typeof bot.harvestCrossServerVictim === "function") {
                             bot.harvestCrossServerVictim(targetRid, victimName, victimPower, otherHome._host_lv || 10, 3);
                         }
 
                         bot.log(`💎 [Farm KNB] 🎉 GIẢI CỨU THÀNH CÔNG [${victimName}] (Đánh đuổi [${robberName}])! +50 KNB (Tổng: ${bot.state.rescuedKnbTotal.toLocaleString()} KNB • ${bot.state.rescuedCount} lượt)!`);
-                        if (bot.state.currentScoutComboKey) {
+                        const isK3Win = !sourceLabel || (String(sourceLabel).indexOf("Tuần Tra") < 0 && String(sourceLabel).indexOf("Mục Tiêu Nóng") < 0 && String(sourceLabel).indexOf("Cầu Cứu") < 0 && String(sourceLabel).indexOf("Tự Vệ") < 0);
+                        if (isK3Win && bot.state.currentScoutComboKey) {
                             if (!bot.state.scoutComboWins) bot.state.scoutComboWins = {};
                             bot.state.scoutComboWins[bot.state.currentScoutComboKey] = (bot.state.scoutComboWins[bot.state.currentScoutComboKey] || 0) + 1;
                         }
@@ -11701,7 +11795,7 @@
                         didSomething = true;
                     } else {
                         if (typeof bot.recordScoutOutcome === "function") {
-                            bot.recordScoutOutcome("loss", targetRid, robRid, robberPower, victimName, robberName);
+                            bot.recordScoutOutcome("loss", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
                         }
                         bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
                         if (!window.__ROBBER_POWER_CACHE__ || !window.__ROBBER_POWER_CACHE__[robRid] || !(window.__ROBBER_POWER_CACHE__[robRid].power > 0)) {
@@ -11755,16 +11849,34 @@
                 } catch (eSelf) { }
 
                 // ==========================================
-                // KÊNH 1: XỬ LÝ HÀNG ĐỢI CẦU CỨU TỪ CHAT (Ưu tiên số 1)
+                // KÊNH 1: XỬ LÝ HÀNG ĐỢI CẦU CỨU TỪ CHAT & RETRY GIÃN CÁCH (Ưu tiên số 1 - Giữ nguyên mục tiêu cooldown_retry tới khi đủ 2.2s!)
                 // ==========================================
                 if (bot.state.priorityRescueQueue.length > 0) {
-                    const topTarget = bot.state.priorityRescueQueue.shift();
-                    if (topTarget && topTarget.rid && Number(topTarget.rid) !== myRid) {
-                        const skipUntil = bot.state.skipRescueHouseUntil[topTarget.rid] || 0;
-                        if (Date.now() >= skipUntil) {
-                            const handled = await inspectAndRescueTarget(topTarget.rid, topTarget.name, topTarget.source || "Chat Radar");
-                            if (handled) return didSomething;
+                    const nowPrio = Date.now();
+                    for (let qi = bot.state.priorityRescueQueue.length - 1; qi >= 0; qi--) {
+                        const qItem = bot.state.priorityRescueQueue[qi];
+                        if (!qItem || !qItem.rid || Number(qItem.rid) === myRid) {
+                            bot.state.priorityRescueQueue.splice(qi, 1);
+                            continue;
                         }
+                        const qSkip = bot.state.skipRescueHouseUntil[qItem.rid] || 0;
+                        const qReason = bot.state.skipRescueReason[qItem.rid] || "";
+                        if (nowPrio < qSkip && qReason !== "cooldown_retry") {
+                            bot.state.priorityRescueQueue.splice(qi, 1);
+                        }
+                    }
+                    let readyIdx = -1;
+                    for (let qi = 0; qi < bot.state.priorityRescueQueue.length; qi++) {
+                        const qItem = bot.state.priorityRescueQueue[qi];
+                        if (nowPrio >= (bot.state.skipRescueHouseUntil[qItem.rid] || 0)) {
+                            readyIdx = qi;
+                            break;
+                        }
+                    }
+                    if (readyIdx >= 0) {
+                        const topTarget = bot.state.priorityRescueQueue.splice(readyIdx, 1)[0];
+                        const handled = await inspectAndRescueTarget(topTarget.rid, topTarget.name, topTarget.source || "Chat Radar");
+                        if (handled || bot.state.skipRescueReason[topTarget.rid] === "cooldown_retry") return didSomething;
                     }
                 }
 
@@ -11888,7 +12000,7 @@
                                         const rName = rs._name || rs.name || `ID ${rRid}`;
                                         const rPow = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : 0;
                                         const myFullPow = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats.fullPower) || Number(bot.stats.power) || 320000000);
-                                        if (rPow > 0 && myFullPow > 0 && rPow > myFullPow * 1.05) return; // Loại bỏ mọi nhà BXH có LC cao hơn 105% LC mình (kẻ cướp nhà họ luôn > LC mình)
+                                        if (rPow > 0 && myFullPow > 0 && rPow > myFullPow * 1.90) return; // Lọc cá voi > 1.90x, mở toàn bộ chủ nhà Liên SV 50M-615M!
                                         addTarget(rRid, rName, "Tuần Tra BXH");
                                     });
                                 }
@@ -11931,14 +12043,14 @@
                         }
                     }
 
-                    // 2B. Tuần Tra Trực Tiếp Liên Server s1..s12 (5 nhà/lô mỗi 2s = +150 nhà Liên SV/phút độc lập không tốn cooldown 10550!)
-                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0 && bot.canDo("patrol_general_batch", 2)) {
-                        bot.markDone("patrol_general_batch");
+                    // 2B. Tuần Tra Trực Tiếp Liên Server s1..s20+ Turbo (7 nhà/lô mỗi 1.5s = +280 nhà Liên SV/phút độc lập không tốn cooldown 10550!)
+                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0 && (Date.now() - (bot.state._lastPatrolBatchTs || 0) >= 1500)) {
+                        bot.state._lastPatrolBatchTs = Date.now();
                         if (bot.state.activePatrolIdx === undefined) bot.state.activePatrolIdx = 0;
                         const poolLen = bot.state.activePatrolPool.length;
                         const batchTargets = [];
                         const nowMs = Date.now();
-                        for (let pStep = 0; pStep < Math.min(poolLen, 160) && batchTargets.length < 5; pStep++) {
+                        for (let pStep = 0; pStep < Math.min(poolLen, 400) && batchTargets.length < 7; pStep++) {
                             const target = bot.state.activePatrolPool[bot.state.activePatrolIdx % poolLen];
                             bot.state.activePatrolIdx++;
                             if (!target || !target.rid || target.rid === myRid) continue;
@@ -11958,7 +12070,7 @@
                                 if (!fresh || (Date.now() - fresh.time >= 12000)) {
                                     requestViewHome(bt.rid);
                                     sentAny = true;
-                                    if (b < batchTargets.length - 1) await bot.sleep(35);
+                                    if (b < batchTargets.length - 1) await bot.sleep(28);
                                 }
                             }
                             if (sentAny) {
@@ -11996,7 +12108,7 @@
                                         bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 7200000;
                                         bot.state.skipRescueReason[bt.rid] = "daily_loot_maxed";
                                     } else {
-                                        bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 150000;
+                                        bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 180000;
                                         bot.state.skipRescueReason[bt.rid] = "peaceful";
                                     }
                                 }
@@ -12059,7 +12171,6 @@
                             const rsHouse = house._role_show;
                             const hPow = (rsHouse && typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rsHouse) : 0;
                             const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
-                            if (deRes === 1) waveActiveFire++;
                             if (typeof bot.harvestCrossServerVictim === "function") {
                                 bot.harvestCrossServerVictim(targetRid, getHouseName(house, targetRid), hPow, house._host_lv, deRes === 1 ? 2 : 0);
                             }
@@ -12072,6 +12183,7 @@
                                         continue;
                                     }
                                 }
+                                if (deRes === 1) waveActiveFire++;
                                 burningHouses.push(house);
                             }
                         }
