@@ -1097,14 +1097,15 @@ async function launchAndEnterGame(sessionState) {
         try {
             loginReady = await page.evaluate((sInfo, tick) => {
                 function safeReq(name) {
+                    if (window[name]) return window[name];
+                    if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
+                    if (name === "ModelManager" && (!window.Controller || !window.BaseModel)) return null;
                     if (typeof window.__require === "function") {
                         try {
                             const mod = window.__require(name);
                             if (mod) return mod[name] || mod.default || mod;
                         } catch (e) {}
                     }
-                    if (window[name]) return window[name];
-                    if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
                     return null;
                 }
 
@@ -1131,10 +1132,22 @@ async function launchAndEnterGame(sessionState) {
                 }
 
                 if (mm && mm.PlayerModel) {
-                    const rInfo = typeof mm.PlayerModel.getRoleInfo === "function"
-                        ? mm.PlayerModel.getRoleInfo()
-                        : mm.PlayerModel.roleInfo;
-                    if (rInfo && (rInfo.roleId || rInfo.rid || rInfo.name || rInfo.roleName || rInfo.level)) {
+                    const pm = mm.PlayerModel;
+                    const rInfo = typeof pm.getRoleInfo === "function" ? pm.getRoleInfo() : pm.roleInfo;
+                    const rid = Number(
+                        (typeof pm.getRid === "function" ? pm.getRid() : 0) ||
+                        pm.userid ||
+                        (rInfo && typeof rInfo.getRoleId === "function" ? rInfo.getRoleId() : 0) ||
+                        (rInfo && (rInfo._roleId || rInfo.roleId || rInfo.rid || rInfo._rid)) ||
+                        0
+                    );
+                    const rName = String(
+                        pm.username ||
+                        (rInfo && typeof rInfo.getName === "function" ? rInfo.getName(false) : "") ||
+                        (rInfo && (rInfo._name || rInfo.name || rInfo.roleName)) ||
+                        ""
+                    );
+                    if (rid > 0 || (rName && rName !== "txt_30")) {
                         return "IN_GAME";
                     }
                 }
@@ -1172,14 +1185,14 @@ async function launchAndEnterGame(sessionState) {
         writeLog(`[Server] Đang chọn máy chủ: [${CONFIG.server}] và kích hoạt Vào Game...`);
         const selectRes = await page.evaluate((targetSrv, sInfo) => {
             function safeReq(name) {
+                if (window[name]) return window[name];
+                if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
                 if (typeof window.__require === "function") {
                     try {
                         const mod = window.__require(name);
                         if (mod) return mod[name] || mod.default || mod;
                     } catch (e) {}
                 }
-                if (window[name]) return window[name];
-                if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
                 return null;
             }
 
@@ -1259,34 +1272,90 @@ async function launchAndEnterGame(sessionState) {
 
         writeLog("[Game] Đang đợi tải tài nguyên và chuyển tiếp vào sảnh...");
         let enteredLobby = false;
-        for (let i = 0; i < 20; i++) {
+        let authReadyTicks = 0;
+        let lastDiagState = null;
+        for (let i = 0; i < 30; i++) {
             if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog)) {
                 writeLog("[Login] 🛑 Nhận lệnh Dừng/Nhường máy trong lúc đợi vào sảnh -> Ngắt ngay lập tức!");
                 return { browser, page, inGame: false };
             }
             await new Promise(r => setTimeout(r, 2000));
             try {
-                const lobbyCheck = await page.evaluate((retryEnter) => {
+                const lobbyCheck = await page.evaluate((tickIdx, curAuthTicks) => {
                     function safeReq(name) {
+                        if (window[name]) return window[name];
+                        if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
+                        if (name === "ModelManager" && (!window.Controller || !window.BaseModel)) return null;
                         if (typeof window.__require === "function") {
                             try {
                                 const mod = window.__require(name);
                                 if (mod) return mod[name] || mod.default || mod;
                             } catch (e) {}
                         }
-                        if (window[name]) return window[name];
-                        if (window.G_Mapping && window.G_Mapping[name]) return window.G_Mapping[name];
                         return null;
                     }
+
                     const mm = safeReq("ModelManager");
-                    if (mm && mm.PlayerModel) {
-                        const rInfo = typeof mm.PlayerModel.getRoleInfo === "function" ? mm.PlayerModel.getRoleInfo() : mm.PlayerModel.roleInfo;
-                        if (rInfo && (rInfo.roleId || rInfo.rid || rInfo._rid || rInfo.name || rInfo._name || rInfo.roleName || rInfo.level || rInfo._level)) {
-                            return { hasPlayer: true };
+                    const vm = safeReq("ViewManager");
+                    const pm = mm && mm.PlayerModel ? mm.PlayerModel : null;
+                    const rInfo = pm ? (typeof pm.getRoleInfo === "function" ? pm.getRoleInfo() : pm.roleInfo) : null;
+
+                    const rid = Number(
+                        (pm && typeof pm.getRid === "function" ? pm.getRid() : 0) ||
+                        (pm && pm.userid) ||
+                        (rInfo && typeof rInfo.getRoleId === "function" ? rInfo.getRoleId() : 0) ||
+                        (rInfo && (rInfo._roleId || rInfo.roleId || rInfo.rid || rInfo._rid)) ||
+                        0
+                    );
+                    const rNameRaw = String(
+                        (pm && pm.username) ||
+                        (rInfo && typeof rInfo.getName === "function" ? rInfo.getName(false) : "") ||
+                        (rInfo && (rInfo._name || rInfo.name || rInfo.roleName)) ||
+                        ""
+                    );
+                    const rName = rNameRaw === "txt_30" ? "" : rNameRaw;
+                    const rLv = Number(
+                        (rInfo && typeof rInfo.getLv === "function" ? rInfo.getLv() : 0) ||
+                        (pm && pm.level) ||
+                        (rInfo && (rInfo.level || rInfo._level)) ||
+                        0
+                    );
+                    const hadEnter = !!(mm && mm.LoginModel && mm.LoginModel.hadEnterGame);
+                    const mainOpen = !!(
+                        window.__ENTER_GAME__ === true ||
+                        (vm && typeof vm.isOpenView === "function" && (vm.isOpenView("MainUIView") || vm.isOpenView("MainUI_2025View"))) ||
+                        (vm && typeof vm.getView === "function" && (vm.getView("MainUIView") || vm.getView("MainUI_2025View")))
+                    );
+                    const loadingOpen = !!(vm && typeof vm.isOpenView === "function" && vm.isOpenView("LoadingView"));
+                    const loginOpen = !!(vm && typeof vm.isOpenView === "function" && vm.isOpenView("LoginView"));
+                    const hasPlayer = !!(rid > 0 || rName || rLv > 0);
+
+                    // Nudge LoadingView transition on headless SwiftShader if authenticated for >= 6s
+                    if ((hasPlayer || hadEnter) && !mainOpen && curAuthTicks >= 2) {
+                        try {
+                            const fm = (window.G_Mapping && window.G_Mapping.FightManager) || window.FightManager;
+                            const mum = mm && mm.MainUIModel;
+                            const bm = mm && mm.BattleModel;
+                            if (bm && typeof bm.getHangupBattleInfo === "function" && !bm.getHangupBattleInfo() && fm && mum && typeof mum.getMainCopyProgress === "function") {
+                                const p = mum.getMainCopyProgress();
+                                if (p && p._id && typeof fm.requestCopyData === "function") {
+                                    fm.requestCopyData(p._id);
+                                }
+                            }
+                        } catch (eCopy) {}
+                        if (curAuthTicks >= 3) {
+                            try {
+                                const disp = (window.G_Mapping && window.G_Mapping.Dispatcher) || window.Dispatcher;
+                                if (disp && typeof disp.dispatchEvent === "function") {
+                                    disp.dispatchEvent("TransitionDegree_Update", { firstRes: 1 });
+                                    disp.dispatchEvent("TransitionDegree_Update", { batteLevelRes: 1 });
+                                }
+                            } catch (eDisp) {}
                         }
                     }
-                    if (retryEnter) {
-                        const vm = safeReq("ViewManager");
+
+                    // Retry loginHandler ONLY if not yet authenticated and still on LoginView
+                    if (!hasPlayer && !hadEnter && !mainOpen && (tickIdx === 5 || tickIdx === 12)) {
                         const loginView = vm && typeof vm.getView === "function" ? vm.getView("LoginView") : null;
                         if (loginView && typeof loginView.loginHandler === "function") {
                             const barDone = !loginView.barNode || loginView.barNode.visible === false;
@@ -1295,13 +1364,38 @@ async function launchAndEnterGame(sessionState) {
                             }
                         }
                     }
-                    return { hasPlayer: false };
-                }, i === 8);
-                if (lobbyCheck && lobbyCheck.hasPlayer) {
-                    enteredLobby = true;
-                    break;
+
+                    const openViews = (vm && vm._openingViews) ? Object.keys(vm._openingViews) : [];
+                    return {
+                        hasPlayer,
+                        hadEnter,
+                        mainOpen,
+                        loadingOpen,
+                        loginOpen,
+                        rid,
+                        rName,
+                        rLv,
+                        openViews
+                    };
+                }, i, authReadyTicks);
+
+                if (lobbyCheck) {
+                    lastDiagState = lobbyCheck;
+                    if (lobbyCheck.hasPlayer || lobbyCheck.hadEnter) {
+                        authReadyTicks++;
+                    }
+                    if ((lobbyCheck.hasPlayer && lobbyCheck.mainOpen) ||
+                        (lobbyCheck.hasPlayer && !lobbyCheck.loginOpen && authReadyTicks >= 3) ||
+                        (lobbyCheck.hadEnter && authReadyTicks >= 6)) {
+                        enteredLobby = true;
+                        writeLog(`[Lobby] ✅ Đã xác nhận vào game thành công: ${lobbyCheck.rName || 'Nhân vật'} (Lv.${lobbyCheck.rLv || '?'}, ID: ${lobbyCheck.rid || 'OK'}, MainUI=${lobbyCheck.mainOpen})`);
+                        break;
+                    }
+                    if ((i + 1) % 5 === 0) {
+                        writeLog(`[Game] Đang chuyển cảnh vào sảnh (${i + 1}/30): hadEnter=${lobbyCheck.hadEnter}, hasPlayer=${lobbyCheck.hasPlayer}, mainOpen=${lobbyCheck.mainOpen}, views=${JSON.stringify(lobbyCheck.openViews || [])}`);
+                    }
                 }
-                if (bundleBootError && i >= 5) {
+                if (bundleBootError && i >= 5 && authReadyTicks === 0) {
                     writeLog("[Login] ⚠️ Phát hiện lỗi khởi tạo bundle trên màn hình Login -> Ngắt sớm để thử lại phiên sạch!");
                     break;
                 }
@@ -1316,12 +1410,21 @@ async function launchAndEnterGame(sessionState) {
                         const mm = window.ModelManager || (window.G_Mapping && window.G_Mapping.ModelManager);
                         const pm = mm && mm.PlayerModel;
                         const rInfo = pm ? (typeof pm.getRoleInfo === "function" ? pm.getRoleInfo() : pm.roleInfo) : null;
-                        return !!(rInfo && (rInfo.roleId || rInfo.rid || rInfo._rid || rInfo.name || rInfo._name || rInfo.roleName));
+                        const rid = Number(
+                            (pm && typeof pm.getRid === "function" ? pm.getRid() : 0) ||
+                            (pm && pm.userid) ||
+                            (rInfo && typeof rInfo.getRoleId === "function" ? rInfo.getRoleId() : 0) ||
+                            (rInfo && (rInfo._roleId || rInfo.roleId || rInfo.rid || rInfo._rid)) ||
+                            0
+                        );
+                        const hadEnter = !!(mm && mm.LoginModel && mm.LoginModel.hadEnterGame);
+                        return !!(rid > 0 || hadEnter || window.__ENTER_GAME__ === true);
                     } catch (e) { return false; }
                 });
             } catch (e) {}
         }
         if (!enteredLobby && !(sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog))) {
+            writeLog(`[Login] ❌ Chi tiết trạng thái cuối trước khi đóng trình duyệt: ${JSON.stringify(lastDiagState || {})}`);
             try { await browser.close(); } catch (eClose) {}
             if (sessionState && sessionState.currentBrowser === browser) {
                 sessionState.currentBrowser = null;
@@ -2109,16 +2212,33 @@ async function run() {
                 rawStats.roleName &&
                 rawStats.roleName !== "Đang tải..." &&
                 rawStats.roleName !== "---" &&
-                Number(rawStats.basePower || rawStats.power || 0) > 0
+                rawStats.roleName !== "txt_30" &&
+                (Number(rawStats.basePower || rawStats.power || 0) > 0 || Number(rawStats.level || 0) > 0 || Number(rawStats.roleId || 0) > 0)
             );
 
             if (!isLobbyHealthy) {
                 sessionState.deadSessionStreak = (sessionState.deadSessionStreak || 0) + 1;
-                if (sessionState.deadSessionStreak >= 2) {
-                    writeLog(`[Watchdog] ⚠️ Phiên game chưa tải được nhân vật / rớt kết nối sảnh (${sessionState.deadSessionStreak}/5)...`);
+                if (sessionState.deadSessionStreak >= 3) {
+                    writeLog(`[Watchdog] ⚠️ Phiên game chưa tải đủ sảnh / đang đồng bộ mạng (${sessionState.deadSessionStreak}/9)...`);
                 }
-                if (sessionState.deadSessionStreak >= 5) {
-                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 50s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100%!`);
+                if (sessionState.deadSessionStreak === 4 && activePage && !activePage.isClosed()) {
+                    try {
+                        await activePage.evaluate(() => {
+                            try {
+                                const disp = (window.G_Mapping && window.G_Mapping.Dispatcher) || window.Dispatcher;
+                                if (disp && typeof disp.dispatchEvent === "function") {
+                                    disp.dispatchEvent("TransitionDegree_Update", { firstRes: 1 });
+                                    disp.dispatchEvent("TransitionDegree_Update", { batteLevelRes: 1 });
+                                }
+                                if (window.AutoBot && typeof window.AutoBot.updateStats === "function") {
+                                    window.AutoBot.updateStats();
+                                }
+                            } catch (e) {}
+                        });
+                    } catch (eSoft) {}
+                }
+                if (sessionState.deadSessionStreak >= 9) {
+                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 90s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100%!`);
                     sessionState.deadSessionStreak = 0;
                     if (sessionState.lastKnownStats) {
                         sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);

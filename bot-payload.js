@@ -8144,9 +8144,25 @@
                     if (pm.getRoleInfo) {
                         const ri = pm.getRoleInfo();
                         if (ri) {
-                            bot.stats.power = (ri.getPower ? ri.getPower() : ri.power) || bot.stats.power;
-                            bot.stats.roleName = (ri._name || (ri.getName ? ri.getName() : "")) || bot.stats.roleName;
-                            bot.stats.level = (ri._level || (ri.getLevel ? ri.getLevel() : 0)) || bot.stats.level;
+                            const curPow = Number((typeof ri.getPower === "function" ? ri.getPower() : ri.power) || 0);
+                            if (curPow > 0) {
+                                bot.stats.power = curPow;
+                                if (!bot.state.isScoutLowPowerActive && curPow > Number(bot.stats.basePower || 0)) {
+                                    bot.stats.basePower = curPow;
+                                }
+                            }
+                            const candName = pm.username || (typeof ri.getName === "function" ? ri.getName(false) : "") || ri._name || (typeof ri.getName === "function" ? ri.getName() : "");
+                            if (candName && candName !== "txt_30") {
+                                bot.stats.roleName = candName;
+                            }
+                            const curLv = Number((typeof ri.getLv === "function" ? ri.getLv() : 0) || pm.level || ri._level || (typeof ri.getLevel === "function" ? ri.getLevel() : 0) || 0);
+                            if (curLv > 0) {
+                                bot.stats.level = curLv;
+                            }
+                            const curRid = Number((typeof ri.getRoleId === "function" ? ri.getRoleId() : 0) || pm.userid || ri._roleId || 0);
+                            if (curRid > 0) {
+                                bot.stats.roleId = curRid;
+                            }
                             if (typeof bot.applyModCosmetics === "function") {
                                 bot.applyModCosmetics();
                             }
