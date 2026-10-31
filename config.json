@@ -17,7 +17,8 @@
     "skip_battle": true,
     "speed_hack": 2,
     "yield_on_kick": true,
-    "yield_wait_minutes": 10
+    "yield_wait_minutes": 10,
+    "bot_stopped": false
   },
   "telegram": {
     "bot_token": "8918744112:AAHy6EyEud73Ta3D42awSlJlDzRaFhCcjXk",
