@@ -8822,8 +8822,8 @@
                     }
                 }
 
-                // C2. Cào sâu BXH Liên Server & Server (1 gói mỗi 1.2s: RankInfoCs 10903 -> RankPageCs 10905 trang 1..50 = tới 500 người/BXH!)
-                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && (Date.now() - (bot.state._lastRankCrawlTs || 0) >= 1200)) {
+                // C2. Cào sâu BXH Liên Server & Server (1 gói mỗi 0.85s: RankInfoCs 10903 -> RankPageCs 10905 trang 1..50 = tới 500 người/BXH!)
+                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && (Date.now() - (bot.state._lastRankCrawlTs || 0) >= 850)) {
                     if (!bot.state._rankCrawlQueue) {
                         const rankIds = [];
                         const seenIds = {};
@@ -11777,6 +11777,10 @@
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 180000;
                         bot.state.skipRescueReason[targetRid] = "rescued";
                         delete bot.state.rescueAttempts[targetRid];
+                        if (!bot.state.beatenRobberRids) bot.state.beatenRobberRids = {};
+                        if (robRid > 0) bot.state.beatenRobberRids[robRid] = Date.now();
+                        if (bot.state.robberConsecLosses && robRid > 0) delete bot.state.robberConsecLosses[robRid];
+                        if (bot.state.rngLossRetries) delete bot.state.rngLossRetries[targetRid];
 
                         if (typeof bot.recordScoutOutcome === "function") {
                             bot.recordScoutOutcome("win", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
@@ -11797,14 +11801,36 @@
                         if (typeof bot.recordScoutOutcome === "function") {
                             bot.recordScoutOutcome("loss", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
                         }
-                        bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
-                        if (!window.__ROBBER_POWER_CACHE__ || !window.__ROBBER_POWER_CACHE__[robRid] || !(window.__ROBBER_POWER_CACHE__[robRid].power > 0)) {
-                            if (!window.__ROBBER_POWER_CACHE__) window.__ROBBER_POWER_CACHE__ = {};
-                            window.__ROBBER_POWER_CACHE__[robRid] = { power: Math.round((myFullPower || 320000000) * 1.15), time: Date.now(), role_show: null };
+                        if (!bot.state.robberConsecLosses) bot.state.robberConsecLosses = {};
+                        const consecLoss = (robRid > 0 ? (bot.state.robberConsecLosses[robRid] || 0) : 0) + 1;
+                        if (robRid > 0) bot.state.robberConsecLosses[robRid] = consecLoss;
+                        const wasBeatenBefore = !!(robRid > 0 && bot.state.beatenRobberRids && bot.state.beatenRobberRids[robRid]);
+                        const isClearlyWeaker = (robberPower > 0 && myFullPower > 0 && robberPower <= myFullPower * 0.99);
+                        if (!bot.state.rngLossRetries) bot.state.rngLossRetries = {};
+                        const houseRngRetry = (bot.state.rngLossRetries[targetRid] || 0) + 1;
+                        if (consecLoss < 2 && houseRngRetry <= 2 && (wasBeatenBefore || isClearlyWeaker)) {
+                            bot.state.rngLossRetries[targetRid] = houseRngRetry;
+                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 2200;
+                            bot.state.skipRescueReason[targetRid] = "cooldown_retry";
+                            if (!Array.isArray(bot.state.priorityRescueQueue)) bot.state.priorityRescueQueue = [];
+                            if (!bot.state.priorityRescueQueue.some(item => Number(item && item.rid) === Number(targetRid))) {
+                                bot.state.priorityRescueQueue.unshift({
+                                    rid: targetRid,
+                                    name: victimName,
+                                    source: sourceLabel || "Đánh lại bù RNG"
+                                });
+                            }
+                            bot.log(`🎲 [Farm KNB] Thua sát nút do RNG tại [${victimName}] trước [${robberName}] (LC ${bot.formatNumber(robberPower)}) -> Tự động đánh giải cứu lại sau 2.2s để lấy +50 KNB!`);
+                        } else {
+                            bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
+                            if (!window.__ROBBER_POWER_CACHE__ || !window.__ROBBER_POWER_CACHE__[robRid] || !(window.__ROBBER_POWER_CACHE__[robRid].power > 0)) {
+                                if (!window.__ROBBER_POWER_CACHE__) window.__ROBBER_POWER_CACHE__ = {};
+                                window.__ROBBER_POWER_CACHE__[robRid] = { power: Math.round((myFullPower || 320000000) * 1.15), time: Date.now(), role_show: null };
+                            }
+                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 2700000;
+                            bot.state.skipRescueReason[targetRid] = "strong_robber";
+                            bot.log(`⚠️ [Farm KNB] Thua trận giải cứu [${victimName}] trước [${robberName}]! Đã khóa bỏ qua kẻ địch này 45 phút (tự mở nếu tăng LC).`);
                         }
-                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 2700000;
-                        bot.state.skipRescueReason[targetRid] = "strong_robber";
-                        bot.log(`⚠️ [Farm KNB] Thua trận giải cứu [${victimName}] trước [${robberName}]! Đã khóa bỏ qua kẻ địch này 45 phút (tự mở nếu tăng LC).`);
                     }
 
                     bot.state.rescueFightActive = false;
@@ -11820,6 +11846,10 @@
                         if (bot.state.hotCrossServerVictims && bot.state.hotCrossServerVictims[targetRid]) {
                             bot.state.hotCrossServerVictims[targetRid].lastCheckedAt = Date.now() + 7200000;
                         }
+                    } else if (ohDeRes === 1) {
+                        // _de_res === 1 nhưng _rob_rid === 0 (lửa tồn dư chưa đồng bộ) -> Bỏ qua 20 phút ở KÊNH 3 để không làm lệch UCB1!
+                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1200000;
+                        bot.state.skipRescueReason[targetRid] = "stale_fire";
                     } else {
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 240000;
                         bot.state.skipRescueReason[targetRid] = "peaceful";
@@ -12043,14 +12073,14 @@
                         }
                     }
 
-                    // 2B. Tuần Tra Trực Tiếp Liên Server s1..s20+ Turbo (7 nhà/lô mỗi 1.5s = +280 nhà Liên SV/phút độc lập không tốn cooldown 10550!)
-                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0 && (Date.now() - (bot.state._lastPatrolBatchTs || 0) >= 1500)) {
+                    // 2B. Tuần Tra Trực Tiếp Liên Server s1..s20+ Turbo (8 nhà/lô mỗi 1.25s = +384 nhà Liên SV/phút độc lập không tốn cooldown 10550!)
+                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0 && (Date.now() - (bot.state._lastPatrolBatchTs || 0) >= 1250)) {
                         bot.state._lastPatrolBatchTs = Date.now();
                         if (bot.state.activePatrolIdx === undefined) bot.state.activePatrolIdx = 0;
                         const poolLen = bot.state.activePatrolPool.length;
                         const batchTargets = [];
                         const nowMs = Date.now();
-                        for (let pStep = 0; pStep < Math.min(poolLen, 400) && batchTargets.length < 7; pStep++) {
+                        for (let pStep = 0; pStep < Math.min(poolLen, 450) && batchTargets.length < 8; pStep++) {
                             const target = bot.state.activePatrolPool[bot.state.activePatrolIdx % poolLen];
                             bot.state.activePatrolIdx++;
                             if (!target || !target.rid || target.rid === myRid) continue;
@@ -12070,7 +12100,7 @@
                                 if (!fresh || (Date.now() - fresh.time >= 12000)) {
                                     requestViewHome(bt.rid);
                                     sentAny = true;
-                                    if (b < batchTargets.length - 1) await bot.sleep(28);
+                                    if (b < batchTargets.length - 1) await bot.sleep(26);
                                 }
                             }
                             if (sentAny) {
@@ -12093,7 +12123,9 @@
                                 const bt = batchTargets[b];
                                 const c = window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[bt.rid];
                                 if (!c || !c.data) {
-                                    bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 180000;
+                                    const nhCnt = ((bot.state.noHomeDataCount || (bot.state.noHomeDataCount = {}))[bt.rid] || 0) + 1;
+                                    bot.state.noHomeDataCount[bt.rid] = nhCnt;
+                                    bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + (nhCnt >= 2 ? 3600000 : 180000);
                                     bot.state.skipRescueReason[bt.rid] = "no_home_data";
                                     continue;
                                 }
@@ -12179,7 +12211,7 @@
                                 const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                                 const reason = bot.state.skipRescueReason[targetRid] || "";
                                 if (Date.now() < skipUntil) {
-                                    if (deRes === 2 || reason === "daily_loot_maxed" || reason === "rescued" || reason === "robber_too_strong" || reason === "strong_robber" || reason === "victim_too_strong" || reason === "no_home_data" || reason.startsWith("server_reject")) {
+                                    if (deRes === 2 || reason === "daily_loot_maxed" || reason === "expired_robber" || reason === "stale_fire" || reason === "self" || reason === "timeout_2x" || reason === "rescued" || reason === "robber_too_strong" || reason === "strong_robber" || reason === "victim_too_strong" || reason === "no_home_data" || reason.startsWith("server_reject")) {
                                         continue;
                                     }
                                 }
