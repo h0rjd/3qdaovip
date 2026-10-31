@@ -6150,9 +6150,9 @@
                                     window.__LAST_10332_REJECT_TS__ = Date.now();
                                     window.__LAST_10332_SENT_TS__ = Date.now();
                                     return;
-                                } else if (proto === 10550 || proto === 10552 || proto === 10305 || proto === 10334 || proto === 11801) {
-                                    // Gói dò danh sách Gia Viên / Đối thủ KHÔNG phải trận đánh -> chỉ giãn nhịp nhẹ 340ms cho 10550, KHÔNG khóa chiến đấu 3.5s!
-                                    window.__LAST_10550_SENT_TS__ = Date.now() + 340;
+                                } else if (proto === 10550 || proto === 10552 || proto === 10305 || proto === 10334 || proto === 11801 || proto === 10901 || proto === 10903 || proto === 10905 || proto === 12411 || proto === 10560 || proto === 10562) {
+                                    // Gói dò danh sách Gia Viên / BXH / Phúc lợi / Hoa KHÔNG phải trận đánh -> chỉ giãn nhịp nhẹ 340ms cho 10550, KHÔNG khóa chiến đấu 3.5s!
+                                    if (proto === 10550) window.__LAST_10550_SENT_TS__ = Date.now() + 340;
                                     return;
                                 } else {
                                     bot.state.lastBattleEndTime = Date.now() + 3500;
@@ -8688,7 +8688,7 @@
                 if (numRid <= 0) return;
                 const myFull = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : 320000000;
                 const vPow = Number(power || 0);
-                if (!boostHot && vPow > 0 && myFull > 0 && vPow > myFull * 0.98) return;
+                if (!boostHot && vPow > 0 && myFull > 0 && vPow > myFull * 1.03) return;
                 if (!boostHot && hostLv !== undefined && Number(hostLv) > 0 && Number(hostLv) < 5) return;
                 bot.ensureScoutTelemetryInit();
                 const map = bot.state.hotCrossServerVictims;
@@ -8700,9 +8700,8 @@
                     existing.seenAt = Date.now();
                 } else {
                     const keys = Object.keys(map);
-                    if (keys.length >= 600) {
-                        // Dọn bớt các nhà bình thường cũ nhất (giữ nguyên các nhà từng bị cướp hotScore >= 2)
-                        for (let i = 0; i < keys.length && Object.keys(map).length > 480; i++) {
+                    if (keys.length >= 2500) {
+                        for (let i = 0; i < keys.length && Object.keys(map).length > 2100; i++) {
                             const k = keys[i];
                             if (map[k] && (map[k].hotScore || 0) < 2) delete map[k];
                         }
@@ -8719,9 +8718,149 @@
             } catch (eH) { }
         },
 
+        populateCrossServerPatrolTargets: function (addTarget, myRid, rnm, mm, gm, cacheRolePowerFromShow) {
+            try {
+                const myFullPow = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats && bot.stats.fullPower) || Number(bot.stats && bot.stats.power) || 320000000);
+                const maxVictimPow = myFullPow > 0 ? (myFullPow * 1.03) : 0;
+
+                // A. Nạp toàn bộ Kho Gia Viên Liên Server s1..s12 đã cào từ KÊNH 3 vào hàng đợi Tuần Tra Trực Tiếp (HostViewCs 10552)!
+                if (bot.state.hotCrossServerVictims) {
+                    const hotVals = Object.values(bot.state.hotCrossServerVictims);
+                    for (let i = 0; i < hotVals.length; i++) {
+                        const hv = hotVals[i];
+                        if (!hv || !hv.rid || hv.rid === myRid) continue;
+                        if (maxVictimPow > 0 && hv.power > 0 && hv.power > maxVictimPow) continue;
+                        addTarget(hv.rid, hv.name || ("ID " + hv.rid), "Tuần Tra Liên SV");
+                    }
+                }
+
+                // B. Đọc chuẩn cấu trúc rnm.rankPage[rType][page]._ranks (cả BXH Server & BXH Liên Server s1..s12)!
+                if (rnm && rnm.rankPage && typeof rnm.rankPage === "object") {
+                    const rTypes = Object.keys(rnm.rankPage);
+                    for (let ti = 0; ti < rTypes.length; ti++) {
+                        const pagesObj = rnm.rankPage[rTypes[ti]];
+                        if (!pagesObj || typeof pagesObj !== "object") continue;
+                        const pKeys = Object.keys(pagesObj);
+                        for (let pi = 0; pi < pKeys.length; pi++) {
+                            const pageData = pagesObj[pKeys[pi]];
+                            const ranksArr = pageData && Array.isArray(pageData._ranks) ? pageData._ranks : null;
+                            if (!ranksArr) continue;
+                            for (let ri = 0; ri < ranksArr.length; ri++) {
+                                const it = ranksArr[ri];
+                                const rs = it && it._role_show;
+                                if (!rs) continue;
+                                if (typeof cacheRolePowerFromShow === "function") cacheRolePowerFromShow(rs);
+                                const rRid = Number(rs._rid || rs.rid || rs._role_id || (rs.getRoleId ? rs.getRoleId() : 0));
+                                if (!rRid || rRid === myRid) continue;
+                                const rPow = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : Number(rs._power || 0);
+                                if (maxVictimPow > 0 && rPow > 0 && rPow > maxVictimPow) continue;
+                                const rName = rs._name || rs.name || (rs.getName ? rs.getName() : ("ID " + rRid));
+                                addTarget(rRid, rName, "Tuần Tra BXH Liên SV");
+                            }
+                        }
+                    }
+                }
+
+                // C. Cào ngầm BXH Liên Server & Server (1 gói nhẹ mỗi 4s: RankInfoCs 10903 -> RankPageCs 10905 trang 1..8)
+                if (rnm && gm && gm.RPCReq && typeof gm.RPCReq.send === "function" && bot.canDo("crawl_cross_rank_step", 4)) {
+                    if (!bot.state._rankCrawlQueue) {
+                        const rankIds = [];
+                        const seenIds = {};
+                        const pushId = (id) => {
+                            const n = Number(id || 0);
+                            if (n > 0 && !seenIds[n]) {
+                                seenIds[n] = true;
+                                rankIds.push(n);
+                            }
+                        };
+                        try {
+                            const tRankMod = safeRequire("t_RankData");
+                            const enumObj = tRankMod && tRankMod.e_RankDataRank;
+                            if (enumObj) {
+                                const prioNames = [
+                                    "CrossArenaS", "CrossArena", "MinePlayer", "SiegeCityPS", "SiegeCityP",
+                                    "LadderS", "SkvsArenaS", "Fc", "Tower", "Arena", "WbossP",
+                                    "DefJz1", "DefJz2", "JindiHelp1S", "JindiHelp2S",
+                                    "Hero1", "Hero2", "Hero3", "Hero4", "Hero5"
+                                ];
+                                for (let k = 0; k < prioNames.length; k++) {
+                                    if (enumObj[prioNames[k]]) pushId(enumObj[prioNames[k]]);
+                                }
+                            }
+                        } catch (eRkEnum) { }
+                        [1001, 2001, 3001, 4001, 5001, 5002, 5003, 5004, 5005].forEach(pushId);
+                        bot.state._rankCrawlQueue = rankIds;
+                        bot.state._rankCrawlState = { idx: 0, page: 0, crawledPages: 0, doneFullPass: false };
+                    }
+                    const q = bot.state._rankCrawlQueue;
+                    const st = bot.state._rankCrawlState;
+                    if (Array.isArray(q) && q.length > 0 && st && !st.doneFullPass) {
+                        bot.markDone("crawl_cross_rank_step");
+                        const rType = q[st.idx % q.length];
+                        const pInfoProto = (gm.RankInfoCs && gm.RankInfoCs.protocol) || 10903;
+                        const pPageProto = (gm.RankPageCs && gm.RankPageCs.protocol) || 10905;
+                        if (st.page === 0) {
+                            gm.RPCReq.send(pInfoProto, { _type: rType });
+                            st.page = 1;
+                        } else {
+                            const rInfo = (rnm.getRankInfoByRankId ? rnm.getRankInfoByRankId(rType) : null) || (rnm.rankInfo && rnm.rankInfo[rType]);
+                            const totPage = rInfo && Number(rInfo._tot_page) > 0 ? Math.min(8, Number(rInfo._tot_page)) : (st.page === 1 ? 1 : 0);
+                            if (st.page <= totPage) {
+                                const existingP = rnm.rankPage && rnm.rankPage[rType] && rnm.rankPage[rType][st.page];
+                                if (!existingP) {
+                                    gm.RPCReq.send(pPageProto, { _type: rType, _page: st.page });
+                                    st.crawledPages = (st.crawledPages || 0) + 1;
+                                }
+                                st.page++;
+                            } else {
+                                st.page = 0;
+                                st.idx++;
+                                if (st.idx >= q.length) {
+                                    st.doneFullPass = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // D. Người chơi thực đang hoạt động trên Kênh Chat (Thế Giới / Liên Server / Bang)
+                const chatModel = mm && mm.ChatModel;
+                if (chatModel) {
+                    const dicts = [chatModel.ChatDic, chatModel.NewChatDic, chatModel._chatDic];
+                    for (let di = 0; di < dicts.length; di++) {
+                        const d = dicts[di];
+                        if (!d || typeof d !== "object") continue;
+                        const chKeys = Object.keys(d);
+                        for (let ci = 0; ci < chKeys.length; ci++) {
+                            const arr = d[chKeys[ci]];
+                            if (!Array.isArray(arr)) continue;
+                            for (let mi = Math.max(0, arr.length - 60); mi < arr.length; mi++) {
+                                const msg = arr[mi];
+                                const rs = msg && (msg._role_show || msg.roleInfo);
+                                if (!rs) continue;
+                                if (typeof cacheRolePowerFromShow === "function") cacheRolePowerFromShow(rs);
+                                const cRid = Number(rs._rid || rs.rid || (rs.getRoleId ? rs.getRoleId() : 0));
+                                if (!cRid || cRid === myRid) continue;
+                                const cPow = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rs) : Number(rs._power || 0);
+                                if (maxVictimPow > 0 && cPow > 0 && cPow > maxVictimPow) continue;
+                                const cName = rs._name || rs.name || (rs.getName ? rs.getName() : ("ID " + cRid));
+                                addTarget(cRid, cName, "Tuần Tra Chat Liên SV");
+                            }
+                        }
+                    }
+                }
+            } catch (ePop) { }
+        },
+
         getRescueTelemetry: function () {
             try {
                 bot.ensureScoutTelemetryInit();
+                let dailyMaxedCount = 0;
+                const reasons = bot.state.skipRescueReason || {};
+                const rKeys = Object.keys(reasons);
+                for (let i = 0; i < rKeys.length; i++) {
+                    if (reasons[rKeys[i]] === "daily_loot_maxed") dailyMaxedCount++;
+                }
                 return {
                     rescuedCount: Number(bot.state.rescuedCount || 0),
                     rescuedKnbTotal: Number(bot.state.rescuedKnbTotal || 0),
@@ -8739,6 +8878,9 @@
                     currentScoutPower: Number((bot.stats && bot.stats.power) || 0),
                     totalScoutCombos: Number(bot.state.totalScoutCombos || 0),
                     hotVictimCount: Object.keys(bot.state.hotCrossServerVictims || {}).length,
+                    patrolPoolSize: Array.isArray(bot.state.activePatrolPool) ? bot.state.activePatrolPool.length : 0,
+                    dailyMaxedCount: dailyMaxedCount,
+                    rankPagesCrawled: Number((bot.state._rankCrawlState && bot.state._rankCrawlState.crawledPages) || 0),
                     tierStats: bot.state.scoutTierStats,
                     recentRescueEvents: (bot.state.recentRescueEvents || []).slice(-15)
                 };
@@ -8781,7 +8923,7 @@
                 if (!snap || !Array.isArray(snap.heroes) || snap.heroes.length <= 1) return [];
 
                 const petCount = Array.isArray(snap.pets) ? snap.pets.length : 0;
-                const sig = "v381_" + snap.heroes.map(h => `${h._idx}:${h._id}`).join(",") + "_p" + petCount;
+                const sig = "v382_" + snap.heroes.map(h => `${h._idx}:${h._id}`).join(",") + "_p" + petCount;
                 if (Array.isArray(bot.state.cachedScoutCombos) && bot.state.cachedScoutCombosSig === sig && bot.state.cachedScoutCombos.length > 0) {
                     return bot.state.cachedScoutCombos;
                 }
@@ -8843,7 +8985,7 @@
                     return res;
                 };
 
-                // Bổ sung biến thể tháo Linh Thú (noPets = true) cho tầng 1, 4, 5 tướng để tăng gấp đôi số rổ ghép cặp LC độc lập!
+                // Mở khóa toàn bộ 62 tổ hợp con (2^6 - 2 = 62) khi petCount === 0 và 64 tổ hợp khi có Linh Thú!
                 const makeNoPetVariants = (arr, limit, countVal) => sampleEvenly(arr, limit).map(c => ({
                     heroes: c.heroes,
                     count: countVal,
@@ -8852,21 +8994,20 @@
                     key: c.key + "_nopet"
                 }));
 
-                const tier1NoPets = makeNoPetVariants(byCount[1], 4, 1);
-                const tier1WithPets = petCount > 0 ? sampleEvenly(byCount[1], 4) : [];
+                const tier1NoPets = makeNoPetVariants(byCount[1], 6, 1);
+                const tier1WithPets = petCount > 0 ? sampleEvenly(byCount[1], 6) : [];
                 const tier1All = tier1NoPets.concat(tier1WithPets);
                 if (tier1All.length === 0 && byCount[1].length > 0) tier1All.push(...byCount[1]);
 
-                const tier4NoPets = petCount > 0 ? makeNoPetVariants(byCount[4], 4, 4) : [];
-                const tier5NoPets = petCount > 0 ? makeNoPetVariants(byCount[5], 6, 5) : [];
+                const tier4NoPets = petCount > 0 ? makeNoPetVariants(byCount[4], 6, 4) : [];
+                const tier5NoPets = petCount > 0 ? makeNoPetVariants(byCount[5], 4, 5) : [];
 
-                // Bao phủ ĐẦY ĐỦ 100% từ 1 tướng (hạ 5 tướng) tới 5 tướng (hạ 1 tướng) — tổng 46 rổ LC phân mảnh mịn:
                 let selected = []
                     .concat(tier1All)
-                    .concat(sampleEvenly(byCount[2], 7))
-                    .concat(sampleEvenly(byCount[3], 8))
+                    .concat(sampleEvenly(byCount[2], petCount > 0 ? 12 : 15))
+                    .concat(sampleEvenly(byCount[3], petCount > 0 ? 14 : 20))
                     .concat(tier4NoPets)
-                    .concat(sampleEvenly(byCount[4], 7))
+                    .concat(sampleEvenly(byCount[4], petCount > 0 ? 10 : 15))
                     .concat(tier5NoPets)
                     .concat(sampleEvenly(byCount[5], 6));
 
@@ -8916,8 +9057,7 @@
                     }
                 }
             } else {
-                // Giai đoạn 2 (Tối ưu thích nghi Bayesian-UCB1 + Mật độ cháy thực tế st.burning):
-                // Tự động phát hiện các tầng sôi động nhất (như tầng 4 & 5 tướng có mật độ nhà bị cướp gấp 28 lần tầng 1) để dồn ~70-80% lưu lượng!
+                // Giai đoạn 2 (Tối ưu thích nghi Bayesian-UCB1 + Mật độ cháy THẬT st.burning [chỉ _de_res === 1]):
                 let bestScore = -1e9;
                 for (let ti = 0; ti < availableTiers.length; ti++) {
                     const t = availableTiers[ti];
@@ -8929,12 +9069,12 @@
                     }
                     const smoothDenom = wv + 12;
                     const avgUnique = Math.min(4.0, Number(st.unique || 0) / Math.max(1, wv));
-                    const raidDensitySignal = Math.min(0.50, (Number(st.burning || 0) / Math.max(1, wv)) * 2.0);
+                    const raidDensitySignal = Math.min(0.55, (Number(st.burning || 0) / Math.max(1, wv)) * 2.5);
                     const empReward = (
                         Number(st.wins || 0) * 7.0 +
                         Number(st.winnable || 0) * 2.5 +
-                        Number(st.occupied || 0) * 0.65
-                    ) / smoothDenom + raidDensitySignal + (avgUnique * 0.10);
+                        Number(st.occupied || 0) * 0.85
+                    ) / smoothDenom + raidDensitySignal + (avgUnique * 0.12);
                     const whalePenalty = (st.occupied >= 3 && st.wins === 0 && st.winnable === 0 && st.tooStrong >= st.occupied)
                         ? Math.min(0.45, 0.22 * (st.tooStrong / (wv + 3)))
                         : 0;
@@ -9026,7 +9166,6 @@
 
                 const gm = window.G_Mapping || {};
                 const mm = window.ModelManager || (gm && gm.ModelManager);
-                const hbm = mm && mm.HeroBagModel;
                 const pm = mm && mm.PlayerModel;
                 const prevPow = (pm && pm.getRoleInfo && pm.getRoleInfo() && pm.getRoleInfo().getPower) ? Number(pm.getRoleInfo().getPower() || 0) : 0;
 
@@ -9036,17 +9175,12 @@
                     await bot.sleep(85);
                     let syncedPow = 0;
                     const waitStart = Date.now();
-                    while (Date.now() - waitStart < 195) {
+                    while (Date.now() - waitStart < 230) {
                         if ((window.__LAST_10332_REJECT_TS__ || 0) >= sendTs) {
                             return false;
                         }
                         const curPow = (pm && pm.getRoleInfo && pm.getRoleInfo() && pm.getRoleInfo().getPower) ? Number(pm.getRoleInfo().getPower() || 0) : 0;
-                        const protoArr = hbm && hbm._heroProtoArray && hbm._heroProtoArray[1] && hbm._heroProtoArray[1][1] && hbm._heroProtoArray[1][1]._array;
                         if (curPow > 0 && curPow !== prevPow) {
-                            syncedPow = curPow;
-                            break;
-                        }
-                        if (Array.isArray(protoArr) && protoArr.length === scoutArray.length && (Date.now() - waitStart >= 145)) {
                             syncedPow = curPow;
                             break;
                         }
@@ -9054,6 +9188,9 @@
                     }
                     if ((window.__LAST_10332_REJECT_TS__ || 0) >= sendTs) {
                         return false;
+                    }
+                    if (!syncedPow) {
+                        syncedPow = (pm && pm.getRoleInfo && pm.getRoleInfo() && pm.getRoleInfo().getPower) ? Number(pm.getRoleInfo().getPower() || 0) : 0;
                     }
                     bot.state.isScoutLowPowerActive = true;
                     bot.state.currentScoutHeroCount = combo.count;
@@ -11769,6 +11906,11 @@
                                 addTarget(rRid, rName, "Tuần Tra Nhật Ký");
                             });
                         }
+
+                        // 5. Kho Gia Viên Liên Server s1..s12 + BXH Liên Server (rnm.rankPage) + Kênh Chat
+                        if (typeof bot.populateCrossServerPatrolTargets === "function") {
+                            bot.populateCrossServerPatrolTargets(addTarget, myRid, rnm, mm, gm, cacheRolePowerFromShow);
+                        }
                     };
 
                     updateActivePatrolPool();
@@ -11789,13 +11931,14 @@
                         }
                     }
 
-                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0 && bot.canDo("patrol_general_batch", 4)) {
+                    // 2B. Tuần Tra Trực Tiếp Liên Server s1..s12 (5 nhà/lô mỗi 2s = +150 nhà Liên SV/phút độc lập không tốn cooldown 10550!)
+                    if (Array.isArray(bot.state.activePatrolPool) && bot.state.activePatrolPool.length > 0 && bot.canDo("patrol_general_batch", 2)) {
                         bot.markDone("patrol_general_batch");
                         if (bot.state.activePatrolIdx === undefined) bot.state.activePatrolIdx = 0;
                         const poolLen = bot.state.activePatrolPool.length;
                         const batchTargets = [];
                         const nowMs = Date.now();
-                        for (let pStep = 0; pStep < Math.min(poolLen, 30) && batchTargets.length < 4; pStep++) {
+                        for (let pStep = 0; pStep < Math.min(poolLen, 160) && batchTargets.length < 5; pStep++) {
                             const target = bot.state.activePatrolPool[bot.state.activePatrolIdx % poolLen];
                             bot.state.activePatrolIdx++;
                             if (!target || !target.rid || target.rid === myRid) continue;
@@ -11815,12 +11958,12 @@
                                 if (!fresh || (Date.now() - fresh.time >= 12000)) {
                                     requestViewHome(bt.rid);
                                     sentAny = true;
-                                    if (b < batchTargets.length - 1) await bot.sleep(30);
+                                    if (b < batchTargets.length - 1) await bot.sleep(35);
                                 }
                             }
                             if (sentAny) {
                                 const wStart = Date.now();
-                                while (Date.now() - wStart < 240) {
+                                while (Date.now() - wStart < 250) {
                                     let allArrived = true;
                                     for (let b = 0; b < batchTargets.length; b++) {
                                         const c = window.__HOST_VIEW_DATA_MAP__ && window.__HOST_VIEW_DATA_MAP__[batchTargets[b].rid];
@@ -11845,11 +11988,17 @@
                                 const ohData = c.data;
                                 const robRidCheck = Number(ohData._rob_rid || 0);
                                 if (robRidCheck > 0 && robRidCheck !== myRid) {
-                                    const handled = await inspectAndRescueTarget(bt.rid, bt.name, bt.source || "Tuần Tra Tích Cực");
+                                    const handled = await inspectAndRescueTarget(bt.rid, bt.name, bt.source || "Tuần Tra Liên SV");
                                     if (handled) return didSomething;
                                 } else {
-                                    bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 90000;
-                                    bot.state.skipRescueReason[bt.rid] = "peaceful";
+                                    const ohDeRes = Number(ohData._de_Res !== undefined ? ohData._de_Res : (ohData._de_res || 0));
+                                    if (ohDeRes === 2) {
+                                        bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 7200000;
+                                        bot.state.skipRescueReason[bt.rid] = "daily_loot_maxed";
+                                    } else {
+                                        bot.state.skipRescueHouseUntil[bt.rid] = Date.now() + 150000;
+                                        bot.state.skipRescueReason[bt.rid] = "peaceful";
+                                    }
                                 }
                             }
                         }
@@ -11876,7 +12025,7 @@
                     bot.hookBattleController();
                 }
 
-                // KÊNH 3 v3.8.1: Quét chuẩn nhịp Server (4 đợt = 16 nhà/rổ LC, 310ms/10550), xoay vòng thích nghi UCB1 1..5 tướng mỗi 4 đợt (>=1.15s chuẩn cooldown 10332)!
+                // KÊNH 3 v3.8.2: Quét chuẩn nhịp Server (4 đợt/lượt, 310ms/10550), xoay vòng thích nghi True-Fire UCB1 1..5 tướng (62 rổ LC) mỗi 5 đợt (>=1.60s chuẩn RTT 10332)!
                 const maxWaves = 4;
                 for (let wave = 0; wave < maxWaves; wave++) {
                     if (bot.isBattling() || bot.state.priorityRescueQueue.length > 0) break;
@@ -11884,7 +12033,7 @@
                     if (!bot.isBattling() && !bot.isAutoStageOn() && !bot.state._towerActivelyFighting && !bot.state.ysTowerBgFighting && !bot.state.wbossBgFighting && !bot.state.kunlunBgFighting) {
                         if (bot.state.scoutStepCounter === undefined) bot.state.scoutStepCounter = 0;
                         bot.state.scoutStepCounter++;
-                        if ((!bot.state.isScoutLowPowerActive || (bot.state.scoutStepCounter % 4 === 0 && Date.now() - (window.__LAST_10332_SENT_TS__ || 0) >= 1150)) && typeof bot.applyLowPowerScoutArray === "function") {
+                        if ((!bot.state.isScoutLowPowerActive || (bot.state.scoutStepCounter % 5 === 0 && Date.now() - (window.__LAST_10332_SENT_TS__ || 0) >= 1600)) && typeof bot.applyLowPowerScoutArray === "function") {
                             const nextComboIdx = (typeof bot.chooseNextScoutCombo === "function")
                                 ? bot.chooseNextScoutCombo()
                                 : (typeof bot.pickNextScoutComboIdx === "function" ? bot.pickNextScoutComboIdx() : 0);
@@ -11898,6 +12047,7 @@
                     if (Array.isArray(hostList) && hostList.length > 0) {
                         const burningHouses = [];
                         let waveUnique = 0;
+                        let waveActiveFire = 0;
                         for (let hIdx = 0; hIdx < hostList.length; hIdx++) {
                             const house = hostList[hIdx];
                             if (!house) continue;
@@ -11909,10 +12059,11 @@
                             const rsHouse = house._role_show;
                             const hPow = (rsHouse && typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(rsHouse) : 0;
                             const deRes = Number(house._de_res !== undefined ? house._de_res : 0);
+                            if (deRes === 1) waveActiveFire++;
                             if (typeof bot.harvestCrossServerVictim === "function") {
                                 bot.harvestCrossServerVictim(targetRid, getHouseName(house, targetRid), hPow, house._host_lv, deRes === 1 ? 2 : 0);
                             }
-                            // CHỈ kiểm tra _de_res === 1 (đang bốc lửa 100%) hoặc _de_res === 2 (lượt cướp cuối ngày); tuyệt đối bỏ _de_luck (hái tim/hoa yên bình)!
+                            // CHỈ kiểm tra _de_res === 1 (đang bốc lửa 100%) hoặc _de_res === 2 (lần đầu để lọc khóa 2h); tuyệt đối bỏ _de_luck!
                             if (deRes === 1 || deRes === 2) {
                                 const skipUntil = bot.state.skipRescueHouseUntil[targetRid] || 0;
                                 const reason = bot.state.skipRescueReason[targetRid] || "";
@@ -11926,7 +12077,7 @@
                         }
 
                         if (typeof bot.recordScoutWaveStats === "function") {
-                            bot.recordScoutWaveStats(waveUnique, burningHouses.length);
+                            bot.recordScoutWaveStats(waveUnique, waveActiveFire);
                         }
 
                         if (burningHouses.length > 0) {
@@ -11953,7 +12104,8 @@
 
                 if (bot.canDo("rescue_scan_status_log", 25)) {
                     bot.markDone("rescue_scan_status_log");
-                    bot.log(`📊 [Farm KNB] Đã quét: ${bot.state.totalRescueScanned.toLocaleString()} nhà (Đội dò: ${bot.state.currentScoutHeroCount || 6} tướng) | Giải cứu: ${bot.state.rescuedCount || 0} lượt (+${(bot.state.rescuedKnbTotal || 0).toLocaleString()} KNB • Bỏ qua quá LC: ${bot.state.skippedStrongRobbers || 0}) | KNB: ${bot.formatNumber(bot.stats.jade || 0)}`);
+                    const poolCnt = Array.isArray(bot.state.activePatrolPool) ? bot.state.activePatrolPool.length : 0;
+                    bot.log(`📊 [Farm KNB] Đã quét: ${bot.state.totalRescueScanned.toLocaleString()} nhà (Đội dò: ${bot.state.currentScoutHeroCount || 6} tướng • Kho Liên SV: ${poolCnt}) | Giải cứu: ${bot.state.rescuedCount || 0} lượt (+${(bot.state.rescuedKnbTotal || 0).toLocaleString()} KNB • Bỏ qua quá LC: ${bot.state.skippedStrongRobbers || 0}) | KNB: ${bot.formatNumber(bot.stats.jade || 0)}`);
                 }
 
             } catch (e) {
