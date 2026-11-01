@@ -2810,10 +2810,12 @@
                         this.isReconnecting = false;
                         try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
                         try { if (this._wsClient && typeof this._wsClient.close === "function") this._wsClient.close(); } catch (e) { }
-                        if (resCode === 1) {
+                        const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
+                        if (resCode === 1 && !isSpamKick) {
                             bot.triggerEmergencyYield("Đăng nhập trùng thiết bị (onLoginKickSc _res=1)");
                         } else {
-                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode);
+                            bot.state._sessionCode66Count = 0;
+                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode + (isSpamKick ? " (server rate-limit sau err_code_66)" : ""));
                         }
                         return;
                     };
@@ -2838,6 +2840,7 @@
                             this._needFullRelogin = false;
                             this._reconnectFailStreak = 0;
                             bot.state._loginTipInterceptCount = 0;
+                            bot.state._sessionCode66Count = 0;
                             this.isReconnecting = false;
                             this.isEnterGame = true;
                             this._isCanReconnect = true;
@@ -2891,11 +2894,13 @@
                                 this.isManualClose = true;
                                 this.isReconnecting = false;
                                 try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
-                                if (kickRes === 1) {
+                                const isSpamKickClose = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
+                                if (kickRes === 1 && !isSpamKickClose) {
                                     bot.log("📱 [Nhường Máy] Đóng socket sau mã đăng nhập trùng (_res=1) -> Nhường máy ngay!");
                                     bot.triggerEmergencyYield("onClose with kickData _res=1 (Điện thoại đăng nhập)");
                                 } else {
-                                    bot.requestFreshRelogin("onClose kickData _res=" + kickRes);
+                                    bot.state._sessionCode66Count = 0;
+                                    bot.requestFreshRelogin("onClose kickData _res=" + kickRes + (isSpamKickClose ? " (server rate-limit sau err_code_66)" : ""));
                                 }
                                 return;
                             }
@@ -3333,7 +3338,7 @@
                                 bcProto.startWarBattleData = function (e) {
                                     if (e) {
                                         bot.cacheWarData(e);
-                                        if (Number(e._type) === 1) { e.__scoutLowPower = !!bot.state.isScoutLowPowerActive; }
+                                        if (Number(e._type) === 1) { e.__scoutLowPower = !!bot.state.isScoutLowPowerActive; bot.state._mainStageReqInFlightUntil = 0; bot.state._lastMainStageBattle = { warId: e._id, winner: Number(e._winner != null ? e._winner : 1), copyId: Number(e._copy_id || 0), time: Date.now() }; }
                                         if (Number(e._type) === 1 && bot.state.pendingManualStageInstant && !bot.isAutoStageOn()) {
                                             bot.state.pendingManualStageInstant = false;
                                             const res = origStartWarBattleData.apply(this, arguments);
@@ -3441,18 +3446,23 @@
                                                 fmInst.copyRequstStatus[bType] = 0;
                                             }
                                             if (bType === 1) {
-                                                const bfmDone = (gm && gm.BattleFastManager) || window.BattleFastManager;
-                                                if (bfmDone && bfmDone.batteStatus === 5) {
+                                                if (!bot.state._mainWarClosedAckMap) bot.state._mainWarClosedAckMap = {};
+                                                if (t._war_id) bot.state._mainWarClosedAckMap[t._war_id] = Date.now();
+                                                const bfmDone = (gm && (gm.BattleFastManager || gm.BatteFastManager)) || window.BattleFastManager || window.BatteFastManager;
+                                                if (bfmDone && (bfmDone.batteStatus === 3 || bfmDone.batteStatus === 5)) {
                                                     bfmDone.batteStatus = 6;
                                                 }
                                             }
-                                            // Pre-fetch đúng 1 đợt ải kế tiếp ngay sau WarCloseSc khi đang bật Auto Đi Ải hoặc vừa bấm tay Khiêu Chiến Ải (0ms vòng sau, 0 xung đột Farm KNB!)
+                                            // CHỈ pre-fetch lại từ evt_WarCloseSc khi trận ải vừa đóng bị THUA (_winner !== 1, server không bắn CopyListSc)!
+                                            // Khi THẮNG (_winner === 1), server luôn bắn CopyListSc -> evt_requetNextMainCopy tự kéo ải kế tiếp, tuyệt đối không bắn đúp WarStartCs cách 12ms gây lỗi 66!
+                                            const closedWarId = t._war_id;
+                                            const lastMain = bot.state._lastMainStageBattle;
+                                            const isMainDefeatRetry = !!(bType === 1 && lastMain && lastMain.warId === closedWarId && Number(lastMain.winner) !== 1);
                                             const hasManualQuota = !!(bot.state._manualStagePrefetchQuota > 0 && bot.state.manualStageFight && (Date.now() - (bot.state.manualStageFightTime || 0) < 15000));
-                                            const allowStagePrefetch = bType === 1 &&
+                                            const allowStagePrefetch = isMainDefeatRetry &&
                                                 (bot.isAutoStageOn() || bot.state.pendingManualStageInstant || hasManualQuota) &&
                                                 !(typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__));
                                             if (allowStagePrefetch) {
-                                                const closedWarId = t._war_id;
                                                 const consumeManualQuota = !bot.isAutoStageOn() && !bot.state.pendingManualStageInstant && hasManualQuota;
                                                 if (consumeManualQuota) {
                                                     bot.state._manualStagePrefetchQuota = Math.max(0, (bot.state._manualStagePrefetchQuota || 1) - 1);
@@ -3460,8 +3470,9 @@
                                                 setTimeout(function () {
                                                     try {
                                                         if (!consumeManualQuota && typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__)) return;
+                                                        if (bot.state._mainStageReqInFlightUntil && Date.now() < bot.state._mainStageReqInFlightUntil) return;
                                                         const mmNow = window.ModelManager || (gm && gm.ModelManager);
-                                                        const bfmNow = (gm && gm.BattleFastManager) || window.BattleFastManager;
+                                                        const bfmNow = (gm && (gm.BattleFastManager || gm.BatteFastManager)) || window.BattleFastManager || window.BatteFastManager;
                                                         const bmvNow = window.__BMV_INSTANCE__;
                                                         const hangNow = mmNow && mmNow.BattleModel && mmNow.BattleModel.getHangupBattleInfo ? mmNow.BattleModel.getHangupBattleInfo() : null;
                                                         const progNow = mmNow && mmNow.MainUIModel && mmNow.MainUIModel.getMainCopyProgress ? mmNow.MainUIModel.getMainCopyProgress() : null;
@@ -3477,7 +3488,7 @@
                                                             }
                                                         }
                                                     } catch (ePf) { }
-                                                }, 12);
+                                                }, 150);
                                             }
                                         }
                                     } catch (err) { }
@@ -3949,6 +3960,18 @@
                             return origReqWarLog.apply(this, arguments);
                         };
                     }
+                    if (typeof fmClass.requestMainCopyWarClose === "function" && !fmClass.__QA_MAINCLOSE_HOOKED__) {
+                        fmClass.__QA_MAINCLOSE_HOOKED__ = true;
+                        const origReqMainClose = fmClass.requestMainCopyWarClose;
+                        fmClass.requestMainCopyWarClose = function (warId) {
+                            if (warId && this.closeWarId && (Array.isArray(this.closeWarId) ? this.closeWarId.indexOf(warId) >= 0 : this.closeWarId[warId])) {
+                                return;
+                            }
+                            bot.state._lastMainWarCloseSentTs = Date.now();
+                            bot.state._lastMainWarCloseSentId = warId;
+                            return origReqMainClose.apply(this, arguments);
+                        };
+                    }
                     if (typeof fmClass.requestCopyData === "function" && !fmClass.__QA_REQCOPY_HOOKED__) {
                         fmClass.__QA_REQCOPY_HOOKED__ = true;
                         const origReqCopyData = fmClass.requestCopyData;
@@ -3957,7 +3980,67 @@
                                 if (bot.isAutoStageOn()) bot.state._deferredMainCopyPull = true;
                                 return;
                             }
+                            const nowReq = Date.now();
+                            if (bot.state._mainStageReqInFlightUntil && nowReq < bot.state._mainStageReqInFlightUntil) {
+                                return;
+                            }
+                            const selfFm = this;
+                            const scheduleRetryCopyPull = function (delayMs) {
+                                if (bot.state._pendingAutoStagePullTimer) {
+                                    clearTimeout(bot.state._pendingAutoStagePullTimer);
+                                }
+                                bot.state._pendingAutoStagePullTimer = setTimeout(function () {
+                                    bot.state._pendingAutoStagePullTimer = null;
+                                    try {
+                                        if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__)) {
+                                            if (bot.isAutoStageOn()) bot.state._deferredMainCopyPull = true;
+                                            return;
+                                        }
+                                        const mmLater = window.ModelManager || (gm && gm.ModelManager);
+                                        const progLater = mmLater && mmLater.MainUIModel && mmLater.MainUIModel.getMainCopyProgress ? mmLater.MainUIModel.getMainCopyProgress() : null;
+                                        const bmvLater = window.__BMV_INSTANCE__;
+                                        if (bmvLater && progLater && typeof bmvLater.pullBatteData === "function") {
+                                            bmvLater.pullBatteData(progLater);
+                                        } else {
+                                            selfFm.requestCopyData((progLater && progLater._id) || copyId);
+                                        }
+                                    } catch (eRcp) { }
+                                }, Math.max(40, delayMs));
+                            };
+                            const isManualDirectPull = !!(bot.state.pendingManualStageInstant || bot.state._allowImmediateManualPullOnce);
+                            if (!isManualDirectPull) {
+                                try {
+                                    const mmCur = window.ModelManager || (gm && gm.ModelManager);
+                                    const hangCur = mmCur && mmCur.BattleModel && typeof mmCur.BattleModel.getHangupBattleInfo === "function" ? mmCur.BattleModel.getHangupBattleInfo() : null;
+                                    const hangId = hangCur && hangCur._id;
+                                    const isHangClosed = !hangId ||
+                                        !!(bot.state._mainWarClosedAckMap && bot.state._mainWarClosedAckMap[hangId]) ||
+                                        !!(this.closeWarId && (Array.isArray(this.closeWarId) ? this.closeWarId.indexOf(hangId) >= 0 : this.closeWarId[hangId]));
+                                    if (!isHangClosed && typeof this.requestMainCopyWarClose === "function") {
+                                        this.requestMainCopyWarClose(hangId);
+                                        scheduleRetryCopyPull(520);
+                                        return;
+                                    }
+                                } catch (eHangChk) { }
+                            }
+                            if (bot.isAutoStageOn() && !isManualDirectPull) {
+                                const waitStart = 1150 - (nowReq - (bot.state._lastMainStageStartTs || 0));
+                                const waitClose = 420 - (nowReq - (bot.state._lastMainWarCloseSentTs || 0));
+                                const waitErr66 = 1800 - (nowReq - (bot.state.lastWarError66Time || 0));
+                                const waitMs = Math.max(0, waitStart, waitClose, waitErr66);
+                                if (waitMs > 0) {
+                                    scheduleRetryCopyPull(waitMs);
+                                    return;
+                                }
+                            }
+                            if (bot.state._pendingAutoStagePullTimer) {
+                                clearTimeout(bot.state._pendingAutoStagePullTimer);
+                                bot.state._pendingAutoStagePullTimer = null;
+                            }
                             bot.state._initialHangupPulled = true;
+                            bot.state._mainStageReqInFlightUntil = nowReq + 2500;
+                            bot.state._lastMainStageStartTs = nowReq;
+                            bot.state._lastMainStageReqCopyId = Number(copyId || 0);
                             return origReqCopyData.apply(this, arguments);
                         };
                     }
@@ -4044,6 +4127,8 @@
                                         }
                                         if (numCode === 66) {
                                             bot.state.lastWarError66Time = Date.now();
+                                            bot.state._mainStageReqInFlightUntil = 0;
+                                            bot.state._sessionCode66Count = (bot.state._sessionCode66Count || 0) + 1;
                                             try { bot.rescueUnsettledBattle("err_code_66"); } catch (e66) { }
                                         }
                                         const recentManual = !!((bot.state._lastManualUiActionTs && (Date.now() - bot.state._lastManualUiActionTs < 1500)) || (bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 3500)));
@@ -6309,11 +6394,15 @@
                                     const cool = now + 1800;
                                     bot.state.lastBattleEndTime = cool;
                                     bot.state.lastWarError66Time = now;
+                                    bot.state._mainStageReqInFlightUntil = 0;
                                     window.__LAST_WAR_FAIL_COOLDOWN__ = cool;
                                     window.__LAST_WAR_CLOSE_TIME__ = cool;
                                     if (window.__LAST_PROTO_TIMES__) window.__LAST_PROTO_TIMES__['10401_1'] = cool;
-                                    if (code === 66 && typeof bot.rescueUnsettledBattle === "function") {
-                                        try { bot.rescueUnsettledBattle("err_code_66"); } catch (e66h) { }
+                                    if (code === 66) {
+                                        bot.state._sessionCode66Count = (bot.state._sessionCode66Count || 0) + 1;
+                                        if (typeof bot.rescueUnsettledBattle === "function") {
+                                            try { bot.rescueUnsettledBattle("err_code_66"); } catch (e66h) { }
+                                        }
                                     }
                                     try {
                                         const fmInst = window.FightManager || (gm && gm.FightManager);
@@ -6476,7 +6565,7 @@
                                         return;
                                     }
                                     bot.state.pendingManualStageInstant = true;
-                                    const bfmCur = (gm && gm.BattleFastManager) || window.BattleFastManager;
+                                    const bfmCur = (gm && (gm.BattleFastManager || gm.BatteFastManager)) || window.BattleFastManager || window.BatteFastManager;
                                     const nowEnter = Date.now();
                                     const lastStart1 = (window.__LAST_PROTO_TIMES__ && window.__LAST_PROTO_TIMES__["10401_1"]) || 0;
                                     const lastCloseAny = window.__LAST_WAR_CLOSE_TIME__ || 0;
@@ -6484,13 +6573,13 @@
                                         // WarStartCs (4) vừa gửi < 0.9s -> startWarBattleData sẽ tự chốt 0ms ngay khi gói về!
                                         return;
                                     }
-                                    if (bfmCur && bfmCur.batteStatus === 5) {
+                                    if (bfmCur && (bfmCur.batteStatus === 3 || bfmCur.batteStatus === 5)) {
                                         if (nowEnter - lastCloseAny < 350) {
                                             const selfWaitClose = this;
                                             setTimeout(function () {
                                                 try {
                                                     if (!bot.state.pendingManualStageInstant) return;
-                                                    if (bfmCur.batteStatus === 5) bfmCur.batteStatus = 6;
+                                                    if (bfmCur.batteStatus === 3 || bfmCur.batteStatus === 5) bfmCur.batteStatus = 6;
                                                     const progAfter = mm && mm.MainUIModel && mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : (mm && mm.MainUIModel && mm.MainUIModel.mainCopyProgress);
                                                     if (progAfter && typeof selfWaitClose.pullBatteData === "function") {
                                                         selfWaitClose.pullBatteData(progAfter);
@@ -6530,7 +6619,13 @@
                         };
                     }
 
-                    // 2. Hook moveNext & evt_requetNextMainCopy: Gửi WarCloseCs (10413) & kéo trước đúng 1 ải kế tiếp tức thì 0ms khi đang Vượt Ải / Đánh Tay!
+                    // 2. Hook moveNext & evt_requetNextMainCopy: Hủy timer 0.5s/4s đóng nhầm newBattleData._id của game gốc, đóng chuẩn theo giá trị warId & kéo ải kế tiếp không bao giờ đụng lỗi 66!
+                    const getBfmLive = () => {
+                        const bfmMod = (typeof safeRequire === "function") ? (safeRequire("BatteFastManager") || safeRequire("BattleFastManager")) : null;
+                        return (bfmMod && (bfmMod.BattleFastManager || bfmMod.BatteFastManager || bfmMod.default)) ||
+                            (gm && (gm.BattleFastManager || gm.BatteFastManager)) ||
+                            window.BattleFastManager || window.BatteFastManager || null;
+                    };
                     const isActiveFastStage = () => !!(bot.isAutoStageOn() || bot.state.pendingManualStageInstant || (bot.state.manualStageFight && Date.now() - (bot.state.manualStageFightTime || 0) < 15000));
                     const origMoveNext = bmv.prototype.moveNext;
                     if (origMoveNext && !bmv.prototype.__QA_MOVENEXT_HOOKED__) {
@@ -6538,6 +6633,14 @@
                         bmv.prototype.moveNext = function () {
                             window.__BMV_INSTANCE__ = this;
                             try {
+                                if (this.playData && this.playData._id) {
+                                    bot.state._lastMainStageBattle = {
+                                        warId: this.playData._id,
+                                        winner: Number(this.playData._winner != null ? this.playData._winner : 1),
+                                        copyId: Number(this.playData._copy_id || 0),
+                                        time: Date.now()
+                                    };
+                                }
                                 if (this.playData && this.playData._winner !== 1) {
                                     bot.handleStageDefeat();
                                 } else if (this.playData && this.playData._winner === 1) {
@@ -6545,17 +6648,53 @@
                                     bot.state.stage10401ErrCount = 0;
                                 }
                             } catch (e) { }
+                            const bfm = getBfmLive();
+                            const fastStageNow = isActiveFastStage();
+                            const prevUnitIdx = (fastStageNow && !this.filmData && bfm && typeof bfm.unitIndex === "number") ? bfm.unitIndex : null;
                             const res = origMoveNext.apply(this, arguments);
-                            if (isActiveFastStage()) {
+                            if (fastStageNow) {
                                 try {
+                                    // Hủy ngay timer 0.5s/4s của origMoveNext (vốn đọc biến động e.newBattleData._id làm đóng nhầm đợt sau và đẩy CopyAnimState vào onRequestWait 8s -> lỗi 66!)
+                                    if (prevUnitIdx !== null && bfm && bfm.scheduleList && typeof bfm.unSchedule === "function" && bfm.unitIndex > prevUnitIdx) {
+                                        for (let sIdx = prevUnitIdx + 1; sIdx <= bfm.unitIndex; sIdx++) {
+                                            const hdl = bfm.scheduleList[sIdx];
+                                            if (hdl != null) {
+                                                try { bfm.unSchedule(hdl); } catch (eUn) { }
+                                                delete bfm.scheduleList[sIdx];
+                                            }
+                                        }
+                                    }
                                     const mmNow = window.ModelManager || (gm && gm.ModelManager);
                                     const hang = this.newBattleData || (mmNow && mmNow.BattleModel && mmNow.BattleModel.getHangupBattleInfo ? mmNow.BattleModel.getHangupBattleInfo() : null) || this.playData;
-                                    const warId = hang && hang._id;
-                                    if (warId && bot.state.lastImmediateClosedMainWarId !== warId) {
-                                        bot.state.lastImmediateClosedMainWarId = warId;
-                                        const fmInst = bot.getFightManager ? bot.getFightManager() : (window.FightManager || (gm && gm.FightManager));
-                                        if (fmInst && typeof fmInst.requestMainCopyWarClose === "function") {
-                                            fmInst.requestMainCopyWarClose(warId);
+                                    const closingWarId = hang && hang._id;
+                                    if (closingWarId && bot.state.lastImmediateClosedMainWarId !== closingWarId) {
+                                        bot.state.lastImmediateClosedMainWarId = closingWarId;
+                                        const doCloseMainWar = function () {
+                                            try {
+                                                const fmInst = bot.getFightManager ? bot.getFightManager() : (window.FightManager || (gm && gm.FightManager));
+                                                const alreadyClosed = !!(fmInst && fmInst.closeWarId && (Array.isArray(fmInst.closeWarId) ? fmInst.closeWarId.indexOf(closingWarId) >= 0 : fmInst.closeWarId[closingWarId]));
+                                                if (!alreadyClosed && fmInst && typeof fmInst.requestMainCopyWarClose === "function") {
+                                                    fmInst.requestMainCopyWarClose(closingWarId);
+                                                }
+                                            } catch (eCloseInner) { }
+                                        };
+                                        if (!bot.isAutoStageOn()) {
+                                            if (this.__pendingAutoStageCloseTimer) {
+                                                clearTimeout(this.__pendingAutoStageCloseTimer);
+                                                this.__pendingAutoStageCloseTimer = null;
+                                            }
+                                            doCloseMainWar();
+                                        } else {
+                                            const sinceStart = Date.now() - (bot.state._lastMainStageStartTs || 0);
+                                            const closeDelayMs = Math.max(80, 480 - sinceStart);
+                                            if (this.__pendingAutoStageCloseTimer) {
+                                                clearTimeout(this.__pendingAutoStageCloseTimer);
+                                            }
+                                            const selfBmvClose = this;
+                                            this.__pendingAutoStageCloseTimer = setTimeout(function () {
+                                                selfBmvClose.__pendingAutoStageCloseTimer = null;
+                                                doCloseMainWar();
+                                            }, closeDelayMs);
                                         }
                                     }
                                 } catch (eCloseNow) { }
@@ -6581,15 +6720,16 @@
                                     const progKey = `${t._id}_${t._nth}`;
                                     if (this.filmData || !curProg || t._id !== curProg._id || t._nth !== curProg._nth || this.__lastFastPulledProg !== progKey) {
                                         this.__lastFastPulledProg = progKey;
-                                        if (!bot.isAutoStageOn() && !bot.state.pendingManualStageInstant && bot.state._manualStagePrefetchQuota > 0) {
+                                        const isManualPull = !bot.isAutoStageOn();
+                                        if (isManualPull && !bot.state.pendingManualStageInstant && bot.state._manualStagePrefetchQuota > 0) {
                                             bot.state._manualStagePrefetchQuota = Math.max(0, bot.state._manualStagePrefetchQuota - 1);
                                         }
                                         const prevAllow = bot.state._allowImmediateManualPullOnce;
-                                        bot.state._allowImmediateManualPullOnce = true;
+                                        if (isManualPull) bot.state._allowImmediateManualPullOnce = true;
                                         try {
                                             this.pullBatteData(t);
                                         } finally {
-                                            bot.state._allowImmediateManualPullOnce = prevAllow || false;
+                                            if (isManualPull) bot.state._allowImmediateManualPullOnce = prevAllow || false;
                                         }
                                         const mu = (gm && gm.ModuleUtil) || window.ModuleUtil;
                                         if (mu && typeof mu.checkModuleOpen === "function") {
@@ -6625,11 +6765,41 @@
                     const origPullBattleData = bmv.prototype.pullBatteData;
                     if (origPullBattleData && !bmv.prototype.__QA_PULLBATTLE_HOOKED__) {
                         bmv.prototype.__QA_PULLBATTLE_HOOKED__ = true;
-                        bmv.prototype.pullBatteData = function () {
+                        bmv.prototype.pullBatteData = function (stageArg) {
                             window.__BMV_INSTANCE__ = this;
                             if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(this)) {
                                 if (bot.isAutoStageOn()) bot.state._deferredMainCopyPull = true;
                                 return;
+                            }
+                            const nowPull = Date.now();
+                            if (bot.state._mainStageReqInFlightUntil && nowPull < bot.state._mainStageReqInFlightUntil) {
+                                return;
+                            }
+                            if (bot.isAutoStageOn() && !bot.state._allowImmediateManualPullOnce && !bot.state.pendingManualStageInstant) {
+                                const waitStart = 1150 - (nowPull - (bot.state._lastMainStageStartTs || 0));
+                                const waitClose = 420 - (nowPull - (bot.state._lastMainWarCloseSentTs || 0));
+                                const waitErr66 = 1800 - (nowPull - (bot.state.lastWarError66Time || 0));
+                                const waitMs = Math.max(0, waitStart, waitClose, waitErr66);
+                                if (waitMs > 0) {
+                                    const selfPull = this;
+                                    const savedStageArg = stageArg;
+                                    if (bot.state._pendingAutoStagePullTimer) {
+                                        clearTimeout(bot.state._pendingAutoStagePullTimer);
+                                    }
+                                    bot.state._pendingAutoStagePullTimer = setTimeout(function () {
+                                        bot.state._pendingAutoStagePullTimer = null;
+                                        try {
+                                            if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(selfPull)) {
+                                                if (bot.isAutoStageOn()) bot.state._deferredMainCopyPull = true;
+                                                return;
+                                            }
+                                            const mmLater = window.ModelManager || (gm && gm.ModelManager);
+                                            const latestProg = (mmLater && mmLater.MainUIModel && mmLater.MainUIModel.getMainCopyProgress ? mmLater.MainUIModel.getMainCopyProgress() : null) || savedStageArg;
+                                            if (latestProg) selfPull.pullBatteData(latestProg);
+                                        } catch (ePbLater) { }
+                                    }, Math.max(40, waitMs));
+                                    return;
+                                }
                             }
                             bot.state._initialHangupPulled = true;
                             return origPullBattleData.apply(this, arguments);
@@ -6675,6 +6845,53 @@
                         cas.prototype.onEnterState = function () {
                             window.__CAS_INSTANCE__ = this;
                             return origOnEnterState.apply(this, arguments);
+                        };
+                    }
+
+                    const origOnReqWait = cas.prototype.onRequestWait;
+                    if (origOnReqWait && !cas.prototype.__QA_REQWAIT_HOOKED__) {
+                        cas.prototype.__QA_REQWAIT_HOOKED__ = true;
+                        cas.prototype.onRequestWait = function () {
+                            origOnReqWait.apply(this, arguments);
+                            const selfCas = this;
+                            this.stateUpdate = function (dt) {
+                                try {
+                                    const bmvRef = selfCas.bindViewClass;
+                                    if (!bmvRef) return;
+                                    if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(bmvRef)) {
+                                        bmvRef.longTimeNoBatte = 0;
+                                        return;
+                                    }
+                                    bmvRef.longTimeNoBatte = (bmvRef.longTimeNoBatte || 0) + dt;
+                                    if (bmvRef.longTimeNoBatte > 8) {
+                                        bmvRef.longTimeNoBatte = 0;
+                                        const mmW = window.ModelManager || (gm && gm.ModelManager);
+                                        const fmW = bot.getFightManager ? bot.getFightManager() : (window.FightManager || (gm && gm.FightManager));
+                                        const hangW = mmW && mmW.BattleModel && mmW.BattleModel.getHangupBattleInfo ? mmW.BattleModel.getHangupBattleInfo() : null;
+                                        bmvRef.newBattleData = hangW;
+                                        const hangId = hangW && hangW._id;
+                                        const alreadyClosed = !hangId || !!(fmW && fmW.closeWarId && (Array.isArray(fmW.closeWarId) ? fmW.closeWarId.indexOf(hangId) >= 0 : fmW.closeWarId[hangId]));
+                                        if (!alreadyClosed && fmW && typeof fmW.requestMainCopyWarClose === "function") {
+                                            fmW.requestMainCopyWarClose(hangId);
+                                            setTimeout(function () {
+                                                try {
+                                                    if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(bmvRef)) return;
+                                                    if (bot.state._mainStageReqInFlightUntil && Date.now() < bot.state._mainStageReqInFlightUntil) return;
+                                                    const progW = mmW && mmW.MainUIModel && mmW.MainUIModel.getMainCopyProgress ? mmW.MainUIModel.getMainCopyProgress() : null;
+                                                    if (progW && typeof bmvRef.pullBatteData === "function") {
+                                                        bmvRef.pullBatteData(progW);
+                                                    }
+                                                } catch (eRwPull) { }
+                                            }, 750);
+                                        } else {
+                                            const progW = mmW && mmW.MainUIModel && mmW.MainUIModel.getMainCopyProgress ? mmW.MainUIModel.getMainCopyProgress() : null;
+                                            if (progW && typeof bmvRef.pullBatteData === "function") {
+                                                bmvRef.pullBatteData(progW);
+                                            }
+                                        }
+                                    }
+                                } catch (eRw) { }
+                            };
                         };
                     }
 
@@ -8105,11 +8322,13 @@
                                 if (evt === "evt_LoginKickSc") {
                                     const kData = args[0] || {};
                                     const kRes = Number(kData._res != null ? kData._res : (kData._code != null ? kData._code : 0));
-                                    if (kRes === 1) {
+                                    const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
+                                    if (kRes === 1 && !isSpamKick) {
                                         bot.log("📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=1) -> Nhường máy ngay!");
                                         bot.triggerEmergencyYield("Dispatcher evt_LoginKickSc (_res=1)");
                                     } else if (typeof bot.requestFreshRelogin === "function") {
-                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes);
+                                        bot.state._sessionCode66Count = 0;
+                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes + (isSpamKick ? " (server rate-limit sau err_code_66)" : ""));
                                     }
                                 }
                                 const evType = (gm && gm.EventType) || window.EventType || {};
@@ -11361,8 +11580,71 @@
                                             }
 
                                             if (emptyPlot != null) {
-                                                let buildCost = 0;
                                                 const bCfg = gm.MaincityConfiger ? gm.MaincityConfiger.getBuildingDataById(task.buildId) : null;
+                                                let canBuildNow = true;
+                                                let reqMainCityLv = 0;
+                                                try {
+                                                    const hlmChk = mm && mm.HomeLandModel;
+                                                    const curMainCityLv = (hlmChk && typeof hlmChk.getMainCityLv === "function") ? Number(hlmChk.getMainCityLv() || 1) : 999;
+                                                    if (bCfg && Array.isArray(bCfg.num_limit)) {
+                                                        const existingList = (hlmChk && typeof hlmChk.getBuildingInfoListByBuildingId === "function") ? hlmChk.getBuildingInfoListByBuildingId(Number(task.buildId)) : null;
+                                                        const curCnt = Array.isArray(existingList) ? existingList.length : entries.filter(([ep, eb]) => eb && Number(eb.id) === Number(task.buildId)).length;
+                                                        let unlockedSlotFound = false;
+                                                        for (let limRow of bCfg.num_limit) {
+                                                            if (!Array.isArray(limRow)) continue;
+                                                            const needLv = Number(limRow[0] || 0);
+                                                            const maxCnt = Number(limRow[1] || 0);
+                                                            if (curCnt < maxCnt) {
+                                                                let unlocked = curMainCityLv >= needLv;
+                                                                if (limRow.length > 2) {
+                                                                    const muChk = gm.ModuleUtil || window.ModuleUtil;
+                                                                    const modOpen = (muChk && typeof muChk.hasModuleOpen === "function") ? !!muChk.hasModuleOpen(limRow[3]) : true;
+                                                                    unlocked = Number(limRow[2]) === 1 ? (unlocked && modOpen) : (unlocked || modOpen);
+                                                                }
+                                                                if (unlocked) {
+                                                                    unlockedSlotFound = true;
+                                                                } else if (!reqMainCityLv && curMainCityLv < needLv) {
+                                                                    reqMainCityLv = needLv;
+                                                                }
+                                                                break;
+                                                            }
+                                                        }
+                                                        if (bCfg.num_limit.length > 0 && !unlockedSlotFound) {
+                                                            canBuildNow = false;
+                                                        }
+                                                    }
+                                                    if (canBuildNow && bu && typeof bu.getCanBuildListDataByInfo === "function") {
+                                                        const canList = bu.getCanBuildListDataByInfo({ plot: Number(emptyPlot) });
+                                                        if (Array.isArray(canList)) {
+                                                            const canEntry = canList.find(it => it && Number(it.id) === Number(task.buildId));
+                                                            if (!canEntry || Number(canEntry.limit) > 0) {
+                                                                canBuildNow = false;
+                                                                if (!reqMainCityLv && canEntry && Number(canEntry.limit) > 0 && Number(canEntry.limit) < 999) {
+                                                                    reqMainCityLv = Number(canEntry.limit);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } catch (eCanBuild) { }
+
+                                                if (!canBuildNow) {
+                                                    if (reqMainCityLv > 0) {
+                                                        const mainCityId = Number((hlClass && hlClass.mainCityBuildId) || 1001);
+                                                        const mcEntry = entries.find(([p, pb]) => pb && Number(pb.id) === mainCityId);
+                                                        if (mcEntry && mcEntry[1] && !mcEntry[1].Upgrading && checkCanUpgrade(mcEntry[1]) && bot.canDo("host_up_" + mcEntry[0], 10)) {
+                                                            candidateToUpgrade = mcEntry;
+                                                            candidateReason = `Nâng Chủ Thành mở khóa xây mới [${task.name}] (Cần Chủ Thành Cấp ${reqMainCityLv})`;
+                                                            break;
+                                                        }
+                                                    }
+                                                    continue;
+                                                }
+
+                                                if (!bot.canDo("host_build_" + emptyPlot + "_" + task.buildId, 90)) {
+                                                    continue;
+                                                }
+
+                                                let buildCost = 0;
                                                 if (bCfg && bCfg.expend && bCfg.expend[0]) {
                                                     buildCost = bCfg.expend[0][1] || 0;
                                                 }
@@ -11399,8 +11681,16 @@
                                 const { plot, bId } = candidateToBuild;
                                 const bc = window.BuildingConfiger || (gm && gm.BuildingConfiger);
                                 const bCfg = (bc && typeof bc.getBuildingCfgById === "function") ? bc.getBuildingCfgById(Number(bId)) : (gm.MaincityConfiger ? gm.MaincityConfiger.getBuildingDataById(Number(bId)) : null);
-                                const bName = (bCfg && (bCfg.name || bCfg.building_name)) || `Công trình ${bId}`;
+                                let bName = (bCfg && (bCfg.name || bCfg.building_name)) || `Công trình ${bId}`;
+                                try {
+                                    const lcBuild = gm.LanguageConfiger || window.LanguageConfiger;
+                                    if (lcBuild && typeof lcBuild.getItemDataLanch === "function" && typeof bName === "string" && bName.indexOf("i_") === 0) {
+                                        const trName = lcBuild.getItemDataLanch(bName);
+                                        if (trName) bName = trName;
+                                    }
+                                } catch (eTrB) { }
                                 bot.markDone("host_build_" + plot);
+                                bot.markDone("host_build_" + plot + "_" + bId);
                                 bot.log(`🏗️ Gia Viên: Thợ rảnh (${freeWorkers}) -> Tiến hành XÂY MỚI [${bName}] tại ô [${plot}] [${candidateReason}]...`);
                                 if (hlClass && typeof hlClass.reqToBuild === "function") {
                                     hlClass.reqToBuild(Number(plot), Number(bId), null);
@@ -12037,12 +12327,12 @@
                     try {
                         const mmLocal = window.ModelManager || gm.ModelManager;
                         const bmLocal = mmLocal && mmLocal.BattleModel;
-                        const bfmLocal = window.BattleFightManager || gm.BattleFightManager;
+                        const bfmLocal = (gm && (gm.BattleFastManager || gm.BatteFastManager)) || window.BattleFastManager || window.BatteFastManager;
                         const hangInfo = bmLocal && typeof bmLocal.getHangupBattleInfo === "function" ? bmLocal.getHangupBattleInfo() : null;
                         if (hangInfo && hangInfo._id && fmInst && typeof fmInst.requestMainCopyWarClose === "function") {
-                            const closedArr = Array.isArray(fmInst.closeWarId) ? fmInst.closeWarId : [];
-                            const hangEnded = bfmLocal && (bfmLocal.batteStatus === 3 || bfmLocal.batteStatus === 4);
-                            if (closedArr.indexOf(hangInfo._id) < 0 && (!bot.isAutoStageOn() || hangEnded)) {
+                            const isHangClosedNow = !!(fmInst.closeWarId && (Array.isArray(fmInst.closeWarId) ? fmInst.closeWarId.indexOf(hangInfo._id) >= 0 : fmInst.closeWarId[hangInfo._id]));
+                            const hangEnded = bfmLocal && (bfmLocal.batteStatus === 1 || bfmLocal.batteStatus === 3 || bfmLocal.batteStatus === 6);
+                            if (!isHangClosedNow && (!bot.isAutoStageOn() || hangEnded)) {
                                 fmInst.requestMainCopyWarClose(hangInfo._id);
                             }
                         }
@@ -12723,14 +13013,21 @@
                 bot.state.battleInProgress = false;
                 if (bot.state._deferredMainCopyPull && bot.isAutoStageOn()) {
                     bot.state._deferredMainCopyPull = false;
-                    try {
-                        const bmvNow = window.__BMV_INSTANCE__;
-                        const mmNow = window.ModelManager || (window.G_Mapping && window.G_Mapping.ModelManager);
-                        const progNow = mmNow && mmNow.MainUIModel && mmNow.MainUIModel.getMainCopyProgress ? mmNow.MainUIModel.getMainCopyProgress() : null;
-                        if (bmvNow && progNow && typeof bmvNow.pullBatteData === "function") {
-                            bmvNow.pullBatteData(progNow);
-                        }
-                    } catch (eResPull) { }
+                    setTimeout(function () {
+                        try {
+                            if (!bot.isAutoStageOn()) return;
+                            if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__)) {
+                                bot.state._deferredMainCopyPull = true;
+                                return;
+                            }
+                            const bmvNow = window.__BMV_INSTANCE__;
+                            const mmNow = window.ModelManager || (window.G_Mapping && window.G_Mapping.ModelManager);
+                            const progNow = mmNow && mmNow.MainUIModel && mmNow.MainUIModel.getMainCopyProgress ? mmNow.MainUIModel.getMainCopyProgress() : null;
+                            if (bmvNow && progNow && typeof bmvNow.pullBatteData === "function") {
+                                bmvNow.pullBatteData(progNow);
+                            }
+                        } catch (eResPull) { }
+                    }, 850);
                 }
             }
             return didSomething;
@@ -16222,6 +16519,12 @@
             if (pausedDepth) bot.state._bgSilentDepth = (bot.state._bgSilentDepth || 0) + 1;
             throw err;
         });
+    };
+
+    bot.isRateLimitKickAfterCode66 = function () {
+        const now = Date.now();
+        const recent66 = (now - (bot.state.lastWarError66Time || 0)) < 25000;
+        return !!(recent66 && (bot.state._sessionCode66Count || 0) >= 3);
     };
 
     bot.markAutoBattle = function (bType, ttlMs) {
