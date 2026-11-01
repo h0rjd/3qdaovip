@@ -51,7 +51,7 @@ const CONFIG = {
         skip_battle: cfgSettings.skip_battle !== undefined ? !!cfgSettings.skip_battle : true,
         speed_hack: Number(cfgSettings.speed_hack) || 2,
         yield_on_kick: cfgSettings.yield_on_kick !== undefined ? !!cfgSettings.yield_on_kick : true,
-        yield_wait_minutes: Number(cfgSettings.yield_wait_minutes) || 15
+        yield_wait_minutes: Number(cfgSettings.yield_wait_minutes) || 5
     },
     telegram: {
         bot_token: process.env.TELEGRAM_BOT_TOKEN || cfgTelegram.bot_token || '',
@@ -306,20 +306,23 @@ function buildTelegramKeyboard(sessionState) {
     return {
         inline_keyboard: [
             [
-                { text: '⚡ Dọn Sạch NV Ngày + Mua Vàng KNB + Nhận Full Quà', callback_data: 'action:one_click_daily' }
+                { text: '⚡ Dọn Sạch NV Ngày (100/100) + Mua Hết Vàng KNB + Nhận Quà', callback_data: 'action:one_click_daily' }
             ],
             [btn('auto_daily_rewards'), btn('auto_buy_gold')],
             [btn('auto_rescue_knb'), btn('auto_stage')],
             [btn('auto_longmach'), btn('auto_tower')],
             [btn('auto_host'), btn('auto_defjz')],
             [btn('auto_guild_mine'), btn('auto_touhu')],
+            [btn('auto_arena'), btn('auto_rank')],
+            [btn('auto_skvs'), btn('auto_free_lottery')],
             [btn('auto_feidao'), btn('auto_hongbao')],
             [btn('auto_treasure'), btn('auto_dispatch')],
+            [btn('auto_split_purple_shard')],
             [
                 { text: '📸 Xem Ảnh & Báo Cáo Ngay', callback_data: 'action:report_now' },
                 (isYielding || isHardStopped)
                     ? { text: '▶️ Chạy Lại Ngay (Bỏ Chờ)', callback_data: 'action:resume_now' }
-                    : { text: `⏸️ Nghỉ ${CONFIG.settings.yield_wait_minutes || 15}p Nhường Máy`, callback_data: 'action:pause_15m' }
+                    : { text: `⏸️ Nghỉ ${CONFIG.settings.yield_wait_minutes || 5}p Nhường Máy`, callback_data: 'action:pause_5m' }
             ],
             [
                 isHardStopped
@@ -341,11 +344,18 @@ async function sendTelegramMessage(htmlText, photoPath = null, sessionState = nu
         if (photoPath && fs.existsSync(photoPath) && typeof FormData !== 'undefined' && typeof Blob !== 'undefined') {
             try {
                 const fileBuf = fs.readFileSync(photoPath);
+                const isCaptionShort = String(htmlText || '').length <= 980;
                 const form = new FormData();
                 form.append('chat_id', String(chatId));
-                form.append('caption', htmlText);
-                form.append('parse_mode', 'HTML');
-                form.append('reply_markup', JSON.stringify(replyMarkup));
+                if (isCaptionShort) {
+                    form.append('caption', htmlText);
+                    form.append('parse_mode', 'HTML');
+                    form.append('reply_markup', JSON.stringify(replyMarkup));
+                } else {
+                    const vnShort = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+                    form.append('caption', `📸 <b>Ảnh chụp màn hình thực tế</b> (${vnShort} GMT+7)`);
+                    form.append('parse_mode', 'HTML');
+                }
                 form.append('photo', new Blob([fileBuf], { type: 'image/png' }), path.basename(photoPath));
 
                 const photoResp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
@@ -353,7 +363,7 @@ async function sendTelegramMessage(htmlText, photoPath = null, sessionState = nu
                     body: form
                 });
                 const photoRes = await photoResp.json();
-                if (photoRes && photoRes.ok) {
+                if (photoRes && photoRes.ok && isCaptionShort) {
                     writeLog(`[Telegram] ✅ Đã gửi báo cáo kèm ảnh & bảng điều khiển về Telegram!`);
                     return true;
                 }
@@ -476,24 +486,52 @@ async function applyTogglesToLivePage(page, changedKey = null) {
                 window.AutoBot.setSpeed(t.speed_hack);
             }
             if (key && t[key]) {
+                const runBg = (fn) => {
+                    if (typeof window.AutoBot.runInBgAutoContext === 'function') {
+                        window.AutoBot.runInBgAutoContext(fn);
+                    } else {
+                        fn();
+                    }
+                };
                 if (key === 'auto_stage' && typeof window.AutoBot.runAutoStageSmart === 'function') {
-                    window.AutoBot.runAutoStageSmart();
+                    runBg(() => window.AutoBot.runAutoStageSmart());
                 } else if (key === 'auto_longmach' && typeof window.AutoBot.runAutoLongMachSmart === 'function') {
-                    window.AutoBot.runAutoLongMachSmart();
+                    runBg(() => window.AutoBot.runAutoLongMachSmart());
                 } else if (key === 'auto_rescue_knb' && typeof window.AutoBot.runAutoRescueKnbSmart === 'function') {
-                    window.AutoBot.runAutoRescueKnbSmart();
+                    runBg(() => window.AutoBot.runAutoRescueKnbSmart());
                 } else if (key === 'auto_tower' && typeof window.AutoBot.runAutoTowerSmart === 'function') {
-                    window.AutoBot.runAutoTowerSmart();
+                    runBg(() => window.AutoBot.runAutoTowerSmart());
                 } else if (key === 'auto_host' && typeof window.AutoBot.runAutoHostSmart === 'function') {
-                    window.AutoBot.runAutoHostSmart();
+                    runBg(() => window.AutoBot.runAutoHostSmart());
                 } else if (key === 'auto_defjz' && typeof window.AutoBot.runAutoDefJzSmart === 'function') {
-                    window.AutoBot.runAutoDefJzSmart();
+                    runBg(() => window.AutoBot.runAutoDefJzSmart(true));
                 } else if (key === 'auto_feidao' && typeof window.AutoBot.runAutoFeiDaoSmart === 'function') {
-                    window.AutoBot.runAutoFeiDaoSmart();
+                    runBg(() => window.AutoBot.runAutoFeiDaoSmart());
                 } else if (key === 'auto_buy_gold' && typeof window.AutoBot.runBuyAllGoldSmart === 'function') {
-                    window.AutoBot.runBuyAllGoldSmart(true);
-                } else if (key === 'auto_daily_rewards' && typeof window.AutoBot.runAutoDailyRewardsSmart === 'function') {
-                    window.AutoBot.runAutoDailyRewardsSmart(true);
+                    runBg(() => window.AutoBot.runBuyAllGoldSmart(true));
+                } else if (key === 'auto_daily_rewards') {
+                    runBg(async () => {
+                        if (typeof window.AutoBot.runAutoQuestsMasterSmart === 'function') await window.AutoBot.runAutoQuestsMasterSmart();
+                        if (typeof window.AutoBot.runAutoDailyRewardsSmart === 'function') await window.AutoBot.runAutoDailyRewardsSmart(true);
+                    });
+                } else if (key === 'auto_guild_mine' && typeof window.AutoBot.runAutoGuildMineSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoGuildMineSmart());
+                } else if (key === 'auto_touhu' && typeof window.AutoBot.runAutoTouhuSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoTouhuSmart(true));
+                } else if (key === 'auto_treasure' && typeof window.AutoBot.runAutoTreasureSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoTreasureSmart());
+                } else if (key === 'auto_dispatch' && typeof window.AutoBot.runAutoDispatchSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoDispatchSmart(true));
+                } else if (key === 'auto_arena' && typeof window.AutoBot.runAutoArenaSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoArenaSmart(true));
+                } else if (key === 'auto_rank' && typeof window.AutoBot.runAutoRankSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoRankSmart(true));
+                } else if (key === 'auto_skvs' && typeof window.AutoBot.runAutoSkVsSmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoSkVsSmart());
+                } else if (key === 'auto_free_lottery' && typeof window.AutoBot.runAutoFreeLotterySmart === 'function') {
+                    runBg(() => window.AutoBot.runAutoFreeLotterySmart(true));
+                } else if (key === 'auto_split_purple_shard' && typeof window.AutoBot.runAutoHeroFragmentDecompose === 'function') {
+                    runBg(() => window.AutoBot.runAutoHeroFragmentDecompose());
                 }
             }
         }, merged, changedKey);
@@ -515,6 +553,112 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
     let stopped = false;
     let lastUpdateId = 0;
 
+    const answerCallbackFast = async (cqId, text, showAlert = false) => {
+        try {
+            await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    callback_query_id: cqId,
+                    text,
+                    show_alert: !!showAlert
+                })
+            });
+        } catch (e) {}
+    };
+
+    const runOneClickDailyTaskAsync = async (sourceTag) => {
+        if (sessionState.oneClickDailyRunning) return;
+        sessionState.oneClickDailyRunning = true;
+        try {
+            writeLog(`⚡ [${sourceTag}] Kích hoạt 1-Click: Làm Hết NV Ngày (100/100) + Mua Sạch Lượt Vàng KNB + Nhận Full Quà...`);
+            const page = getActivePage();
+            const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
+            if (!page || page.isClosed()) {
+                const offlineHtml = buildTelegramReportHtml(
+                    '⚠️ CHƯA THỂ CHẠY 1-CLICK (PHIÊN ĐANG NGHỈ NHƯỜNG MÁY / ĐANG TẢI)',
+                    sessionState.lastKnownStats,
+                    sessionState,
+                    '⏳ <i>Hiện Bot đang tạm nghỉ nhường Điện thoại hoặc đang mở lại sảnh. Hãy bấm <b>"▶️ Chạy Lại Ngay"</b> để vào sảnh rồi bấm lại nhé!</i>'
+                );
+                await sendTelegramMessage(offlineHtml, null, sessionState);
+                return;
+            }
+
+            let resData = null;
+            try {
+                resData = await page.evaluate(async () => {
+                    if (window.AutoBot && typeof window.AutoBot.runOneClickAllDailyAndGifts === 'function') {
+                        return await window.AutoBot.runOneClickAllDailyAndGifts();
+                    }
+                    return null;
+                });
+                const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
+                if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
+                await page.screenshot({ path: snapPath });
+            } catch (eExec) {
+                writeLog(`⚠️ [${sourceTag}] Lỗi trong lúc thực thi 1-Click: ${eExec.message}`);
+            }
+
+            const noteLines = [
+                '✅ <b>Đã hoàn tất chuỗi 1-Click Toàn Diện:</b>'
+            ];
+            if (resData && resData.ok) {
+                const gDiff = Number(resData.goldDelta || 0);
+                const kDiff = Number(resData.knbDelta || 0);
+                const dScore = Number(resData.dailyScore || 0);
+                const dBoxes = Number(resData.dailyBoxesOpened || 0);
+                const wBoxes = Number(resData.weeklyBoxesOpened || 0);
+                const totTurns = Number(resData.totalGoldTurns || 0);
+                const freeTurns = Number(resData.freeGoldTurns || 0);
+                const knbTurns = Number(resData.knbGoldTurns || 0);
+                noteLines.push(`• 🎯 <b>Năng động ngày:</b> <b>${dScore}/100</b> (Đã nhận <b>${resData.dailyTasksClaimed || 0}</b> NV, mở <b>${dBoxes}</b> rương ngày${wBoxes > 0 ? `, <b>${wBoxes}</b> rương tuần` : ''})`);
+                noteLines.push(`• 💰 <b>Cây Tài Lộc:</b> Đã mua sạch <b>${totTurns} lượt</b> (Miễn phí: <b>${freeTurns}</b> • KNB: <b>${knbTurns}</b>)`);
+                noteLines.push(`• 📈 <b>Biến động ròng:</b> Vàng <b>${gDiff >= 0 ? '+' : ''}${formatNum(gDiff)}</b> | KNB <b>${kDiff >= 0 ? '+' : ''}${formatNum(kDiff)}</b>`);
+            } else {
+                noteLines.push('• Đã quét toàn bộ Nhiệm Vụ Ngày, Cây Tài Lộc (Free + KNB), Phó Bản Ngày, Cửa Hàng, Hòm Thư & Quà Phúc Lợi!');
+            }
+
+            const html = buildTelegramReportHtml(
+                '⚡ KẾT QUẢ 1-CLICK: NV NGÀY 100/100 + MUA HẾT VÀNG KNB + FULL QUÀ',
+                sessionState.lastKnownStats,
+                sessionState,
+                noteLines.join('\n')
+            );
+            await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
+        } finally {
+            sessionState.oneClickDailyRunning = false;
+        }
+    };
+
+    const runInstantReportAsync = async (titleStr) => {
+        try {
+            const page = getActivePage();
+            const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
+            if (page && !page.isClosed()) {
+                try {
+                    const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
+                    if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
+                    await page.screenshot({ path: snapPath });
+                } catch (e) {}
+            }
+            const waitMinNow = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 5);
+            const html = buildTelegramReportHtml(
+                titleStr,
+                sessionState.lastKnownStats,
+                sessionState,
+                sessionState.isHardStopped
+                    ? '🛑 <i>Bot hiện đã DỪNG HẲN toàn bộ kết nối theo lệnh điều khiển.</i>'
+                    : sessionState.isMaintenance
+                        ? '🛠️ <i>Máy chủ đang bảo trì — Bot đã ngắt toàn bộ lệnh login tránh lag.</i>'
+                        : sessionState.isYielding
+                            ? `⏸️ <i>Bot hiện đang tạm nghỉ nhường máy (${waitMinNow} phút).</i>`
+                            : '🟢 <i>Bot đang hoạt động trực tuyến bình thường.</i>'
+            );
+            await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
+        } catch (eRep) {}
+    };
+
     // Khởi tạo offset ban đầu để bỏ qua các tin nhắn cũ trước khi phiên chạy bắt đầu
     (async () => {
         try {
@@ -526,14 +670,15 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
         } catch (e) {}
 
         while (!stopped) {
+            let pollHadError = false;
             try {
-                const resp = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateId + 1}&timeout=2`);
+                const resp = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateId + 1}&timeout=8`);
                 const data = await resp.json();
                 if (data && data.ok && Array.isArray(data.result)) {
                     for (const upd of data.result) {
                         lastUpdateId = Math.max(lastUpdateId, upd.update_id);
 
-                        // 1. Xử lý khi người dùng bấm nút trên bảng điều khiển Inline Keyboard
+                        // 1. Xử lý khi người dùng bấm nút trên bảng điều khiển Inline Keyboard (Phản hồi tức thì <0.2s, không nghẽn luồng!)
                         if (upd.callback_query) {
                             const cq = upd.callback_query;
                             const fromChatId = String((cq.message && cq.message.chat && cq.message.chat.id) || '');
@@ -547,149 +692,48 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                     const newVal = CONFIG.toggles[key];
                                     const label = TOGGLE_LABELS[key] || key;
                                     saveConfigToDisk();
-
-                                    const page = getActivePage();
-                                    await applyTogglesToLivePage(page, key);
-
                                     writeLog(`🎛️ [Telegram Remote] Đã chuyển đổi [${label}] -> ${newVal ? 'BẬT' : 'TẮT'}`);
 
-                                    // Phản hồi popup trên màn hình Telegram của điện thoại
-                                    try {
-                                        await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+                                    await answerCallbackFast(cq.id, `⚡ Đã ${newVal ? 'BẬT ✅' : 'TẮT ❌'} ${label}!`);
+
+                                    if (cq.message && cq.message.message_id) {
+                                        fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
                                             method: 'POST',
                                             headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({
-                                                callback_query_id: cq.id,
-                                                text: `⚡ Đã ${newVal ? 'BẬT ✅' : 'TẮT ❌'} ${label}!`,
-                                                show_alert: false
+                                                chat_id: fromChatId,
+                                                message_id: cq.message.message_id,
+                                                reply_markup: buildTelegramKeyboard(sessionState)
                                             })
-                                        });
-                                    } catch (e) {}
-
-                                    // Cập nhật trạng thái nút bấm ngay trên tin nhắn Telegram
-                                    if (cq.message && cq.message.message_id) {
-                                        try {
-                                            await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({
-                                                    chat_id: fromChatId,
-                                                    message_id: cq.message.message_id,
-                                                    reply_markup: buildTelegramKeyboard(sessionState)
-                                                })
-                                            });
-                                        } catch (e) {}
+                                        }).catch(() => {});
                                     }
+
+                                    const page = getActivePage();
+                                    applyTogglesToLivePage(page, key).catch(() => {});
+                                } else {
+                                    await answerCallbackFast(cq.id, '⚠️ Tính năng không hợp lệ!');
                                 }
                             } else if (actionData === 'action:one_click_daily') {
-                                try {
-                                    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            callback_query_id: cq.id,
-                                            text: '⚡ Đang làm hết NV Ngày + Mua hết lượt Vàng KNB + Nhận sạch Ưu Đãi & Quà...'
-                                        })
-                                    });
-                                } catch (e) {}
-
-                                writeLog('⚡ [Telegram Remote] Kích hoạt 1-Click: Làm Hết NV Ngày + Mua Hết Vàng KNB + Nhận Full Ưu Đãi/Quà...');
-                                const page = getActivePage();
-                                const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
-                                let resData = null;
-                                if (page && !page.isClosed()) {
-                                    try {
-                                        resData = await page.evaluate(async () => {
-                                            if (window.AutoBot && typeof window.AutoBot.runOneClickAllDailyAndGifts === 'function') {
-                                                return await window.AutoBot.runOneClickAllDailyAndGifts();
-                                            }
-                                            return null;
-                                        });
-                                        const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
-                                        await page.screenshot({ path: snapPath });
-                                    } catch (e) {}
+                                if (sessionState.oneClickDailyRunning) {
+                                    await answerCallbackFast(cq.id, '⏳ Đang chạy chuỗi NV Ngày 100/100 + Mua Hết Vàng KNB, vui lòng chờ vài giây...');
+                                } else {
+                                    await answerCallbackFast(cq.id, '⚡ Đang làm hết NV Ngày (100/100) + Mua sạch Vàng KNB + Nhận Full Quà...');
+                                    void runOneClickDailyTaskAsync('Telegram Remote');
                                 }
-                                const noteLines = [
-                                    '✅ <b>Đã chạy xong 1-Click All-in-One:</b>',
-                                    '• Hoàn thành Trợ Lý Nhanh, Tặng/Nhận Tim Bạn Bè, Bái 7 BXH, Đấu Trường, Thám Hiểm, Gia Viên, Mỏ Bang, Lõi Tần Lĩnh, Tách Mảnh Tím.',
-                                    '• Mua sạch 100% lượt <b>Điểm Kim Vàng (Free + KNB)</b> & Càn quét <b>Phó Bản Ngày</b>.',
-                                    '• Nhận sạch <b>Nhiệm Vụ Ngày/Tuần/Bang/Đặc Quyền</b>, 5 Rương Sôi Nổi (20~100), Thẻ Tháng, Quỹ Trưởng Thành, Gói Ưu Đãi 0Đ, Chiến Lệnh & Thư!'
-                                ];
-                                if (resData && resData.ok) {
-                                    const gDiff = Number(resData.goldDelta || 0);
-                                    const kDiff = Number(resData.knbDelta || 0);
-                                    noteLines.push(`📈 <b>Biến động tức thì:</b> Vàng <b>${gDiff >= 0 ? '+' : ''}${formatNum(gDiff)}</b> | KNB <b>${kDiff >= 0 ? '+' : ''}${formatNum(kDiff)}</b>`);
-                                }
-                                const html = buildTelegramReportHtml(
-                                    '⚡ KẾT QUẢ 1-CLICK: NV NGÀY + MUA VÀNG KNB + FULL QUÀ',
-                                    sessionState.lastKnownStats,
-                                    sessionState,
-                                    noteLines.join('\n')
-                                );
-                                await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
                             } else if (actionData === 'action:report_now') {
-                                try {
-                                    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            callback_query_id: cq.id,
-                                            text: '📸 Đang chụp màn hình và gửi báo cáo mới nhất...'
-                                        })
-                                    });
-                                } catch (e) {}
-
-                                const page = getActivePage();
-                                const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
-                                if (page && !page.isClosed()) {
-                                    try {
-                                        const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
-                                        await page.screenshot({ path: snapPath });
-                                    } catch (e) {}
-                                }
-                                const html = buildTelegramReportHtml(
-                                    '📸 BÁO CÁO TRẠNG THÁI TỨC THÌ (THEO YÊU CẦU)',
-                                    sessionState.lastKnownStats,
-                                    sessionState,
-                                    sessionState.isHardStopped
-                                        ? '🛑 <i>Bot hiện đã DỪNG HẲN toàn bộ kết nối theo lệnh điều khiển.</i>'
-                                        : sessionState.isMaintenance
-                                            ? '🛠️ <i>Máy chủ đang bảo trì — Bot đã ngắt toàn bộ lệnh login tránh lag.</i>'
-                                            : sessionState.isYielding
-                                                ? '⏸️ <i>Bot hiện đang trong thời gian tạm dừng nhường máy.</i>'
-                                                : '🟢 <i>Bot đang hoạt động trực tuyến bình thường.</i>'
-                                );
-                                await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
-                            } else if (actionData === 'action:pause_15m') {
+                                await answerCallbackFast(cq.id, '📸 Đang chụp màn hình và gửi báo cáo mới nhất...');
+                                void runInstantReportAsync('📸 BÁO CÁO TRẠNG THÁI TỨC THÌ (THEO YÊU CẦU)');
+                            } else if (actionData === 'action:pause_5m' || actionData === 'action:pause_15m') {
+                                const waitM = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 5);
                                 sessionState.manualYieldRequested = true;
-                                try {
-                                    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            callback_query_id: cq.id,
-                                            text: `⏸️ Đang tạm dừng Bot ${CONFIG.settings.yield_wait_minutes || 15} phút để nhường máy...`
-                                        })
-                                    });
-                                } catch (e) {}
+                                await answerCallbackFast(cq.id, `⏸️ Đang tạm dừng Bot ${waitM} phút để nhường máy...`);
                             } else if (actionData === 'action:stop_bot') {
                                 sessionState.stopRequested = true;
                                 sessionState.isHardStopped = true;
                                 CONFIG.settings.bot_stopped = true;
                                 saveConfigToDisk();
                                 try { fs.writeFileSync(path.join(__dirname, '.bot_stopped'), '1', 'utf8'); } catch (e) {}
-                                try {
-                                    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            callback_query_id: cq.id,
-                                            text: '🛑 Đã dừng hẳn Bot & ngắt toàn bộ lệnh đăng nhập/kết nối!'
-                                        })
-                                    });
-                                } catch (e) {}
+                                await answerCallbackFast(cq.id, '🛑 Đã dừng hẳn Bot & ngắt toàn bộ lệnh đăng nhập/kết nối!');
                             } else if (actionData === 'action:resume_now') {
                                 sessionState.stopRequested = false;
                                 sessionState.isHardStopped = false;
@@ -699,16 +743,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                 CONFIG.settings.bot_stopped = false;
                                 saveConfigToDisk();
                                 try { fs.unlinkSync(path.join(__dirname, '.bot_stopped')); } catch (e) {}
-                                try {
-                                    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            callback_query_id: cq.id,
-                                            text: '▶️ Đang kết nối vào lại game ngay lập tức!'
-                                        })
-                                    });
-                                } catch (e) {}
+                                await answerCallbackFast(cq.id, '▶️ Đang kết nối vào lại game ngay lập tức!');
                             }
                         }
 
@@ -719,47 +754,9 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                             const txt = upd.message.text.trim().toLowerCase();
 
                             if (txt === '/menu' || txt === '/settings' || txt === '/start' || txt === '/status' || txt === '/report') {
-                                const page = getActivePage();
-                                const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
-                                if (page && !page.isClosed()) {
-                                    try {
-                                        const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
-                                        await page.screenshot({ path: snapPath });
-                                    } catch (e) {}
-                                }
-                                const html = buildTelegramReportHtml(
-                                    '🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v3.0 Final',
-                                    sessionState.lastKnownStats,
-                                    sessionState
-                                );
-                                await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
+                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v3.8');
                             } else if (txt === '/daily' || txt === '/nhanh' || txt === '/nvngay' || txt === '/muavang') {
-                                const page = getActivePage();
-                                const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
-                                let resData = null;
-                                if (page && !page.isClosed()) {
-                                    try {
-                                        resData = await page.evaluate(async () => {
-                                            if (window.AutoBot && typeof window.AutoBot.runOneClickAllDailyAndGifts === 'function') {
-                                                return await window.AutoBot.runOneClickAllDailyAndGifts();
-                                            }
-                                            return null;
-                                        });
-                                        const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                                        if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
-                                        await page.screenshot({ path: snapPath });
-                                    } catch (e) {}
-                                }
-                                const html = buildTelegramReportHtml(
-                                    '⚡ ĐÃ DỌN SẠCH NV NGÀY + MUA VÀNG KNB + NHẬN FULL QUÀ',
-                                    sessionState.lastKnownStats,
-                                    sessionState,
-                                    resData && resData.ok
-                                        ? `📈 Biến động: Vàng <b>+${formatNum(resData.goldDelta || 0)}</b> | KNB <b>${(resData.knbDelta || 0) >= 0 ? '+' : ''}${formatNum(resData.knbDelta || 0)}</b>`
-                                        : '✅ Đã kích hoạt toàn bộ chuỗi Nhiệm Vụ Ngày, Điểm Kim KNB & Nhận Quà Ưu Đãi!'
-                                );
-                                await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
+                                void runOneClickDailyTaskAsync('Telegram /daily');
                             } else if (txt === '/pause' || txt === '/nghi') {
                                 sessionState.manualYieldRequested = true;
                             } else if (txt === '/stop' || txt === '/dung' || txt === '/tat' || txt === '/baotri') {
@@ -781,16 +778,19 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                         }
                     }
                 }
-            } catch (ePoll) {}
-            await new Promise(r => setTimeout(r, 2500));
+            } catch (ePoll) {
+                pollHadError = true;
+            }
+            await new Promise(r => setTimeout(r, pollHadError ? 1500 : 250));
         }
     })();
 
     return () => { stopped = true; };
 }
 
-// Kiểm tra nếu người dùng sửa file config.json trực tiếp trên web GitHub và bấm Commit
+// Kiểm tra nếu người dùng sửa file config.json trực tiếp trên web GitHub và bấm Commit (KHÔNG ghi đè nút vừa bật/tắt qua Telegram!)
 let lastGitConfigHash = '';
+let lastGitRemoteParsed = null;
 async function checkGitConfigHotReload(page, sessionState) {
     try {
         if (isGitHubActions) {
@@ -806,25 +806,37 @@ async function checkGitConfigHotReload(page, sessionState) {
                 const hash = crypto.createHash('md5').update(remoteCfgRaw).digest('hex');
                 if (!lastGitConfigHash) {
                     lastGitConfigHash = hash;
+                    try { lastGitRemoteParsed = JSON.parse(remoteCfgRaw); } catch (eInitP) {}
                     return;
                 }
                 if (hash !== lastGitConfigHash) {
                     lastGitConfigHash = hash;
                     const parsed = JSON.parse(remoteCfgRaw);
+                    const prevToggles = (lastGitRemoteParsed && lastGitRemoteParsed.toggles) || {};
+                    const prevSettings = (lastGitRemoteParsed && lastGitRemoteParsed.settings) || {};
+                    lastGitRemoteParsed = parsed;
+
                     const changes = [];
                     if (parsed.toggles) {
                         for (const [k, v] of Object.entries(parsed.toggles)) {
                             const boolV = !!v;
-                            if (CONFIG.toggles[k] !== undefined && CONFIG.toggles[k] !== boolV) {
+                            const prevRemoteBool = prevToggles[k] !== undefined ? !!prevToggles[k] : CONFIG.toggles[k];
+                            if (CONFIG.toggles[k] !== undefined && prevRemoteBool !== boolV && CONFIG.toggles[k] !== boolV) {
                                 CONFIG.toggles[k] = boolV;
                                 changes.push(`${TOGGLE_LABELS[k] || k}: <b>${boolV ? 'BẬT ✅' : 'TẮT ❌'}</b>`);
                             }
                         }
                     }
                     if (parsed.settings) {
-                        if (parsed.settings.speed_hack !== undefined) CONFIG.settings.speed_hack = Number(parsed.settings.speed_hack) || 2;
-                        if (parsed.settings.yield_on_kick !== undefined) CONFIG.settings.yield_on_kick = !!parsed.settings.yield_on_kick;
-                        if (parsed.settings.yield_wait_minutes !== undefined) CONFIG.settings.yield_wait_minutes = Number(parsed.settings.yield_wait_minutes) || 15;
+                        if (parsed.settings.speed_hack !== undefined && parsed.settings.speed_hack !== prevSettings.speed_hack) {
+                            CONFIG.settings.speed_hack = Number(parsed.settings.speed_hack) || 2;
+                        }
+                        if (parsed.settings.yield_on_kick !== undefined && parsed.settings.yield_on_kick !== prevSettings.yield_on_kick) {
+                            CONFIG.settings.yield_on_kick = !!parsed.settings.yield_on_kick;
+                        }
+                        if (parsed.settings.yield_wait_minutes !== undefined && parsed.settings.yield_wait_minutes !== prevSettings.yield_wait_minutes) {
+                            CONFIG.settings.yield_wait_minutes = Number(parsed.settings.yield_wait_minutes) || 5;
+                        }
                     }
                     if (changes.length > 0) {
                         saveConfigToDisk();
@@ -1151,10 +1163,10 @@ async function launchAndEnterGame(sessionState) {
             return;
         }
 
+        const isHotfixKickLog = m.includes('_res=3');
         const isTrueDeviceKick = entry.kickNow === true ||
             m.includes('[Nhường Máy] Khẩn cấp') ||
-            m.includes('onLoginKickSc _res=1') ||
-            m.includes('evt_LoginKickSc (_res=1)') ||
+            (!isHotfixKickLog && (m.includes('onLoginKickSc _res=') || m.includes('evt_LoginKickSc (_res='))) ||
             mLower.includes('thiết bị khác') ||
             mLower.includes('nơi khác') ||
             mLower.includes('trùng lặp đăng nhập') ||
@@ -1848,8 +1860,8 @@ function startLocalGuiServer(sessionState, getActivePage) {
 
                 if (act === 'pause') {
                     sessionState.manualYieldRequested = true;
-                    writeLog(`⏸️ [GUI Control] Đã yêu cầu tạm dừng ${CONFIG.settings.yield_wait_minutes || 15} phút để nhường máy!`);
-                    return sendJson(res, { ok: true, message: `Đã kích hoạt chế độ nghỉ ${CONFIG.settings.yield_wait_minutes || 15} phút nhường máy!` });
+                    writeLog(`⏸️ [GUI Control] Đã yêu cầu tạm dừng ${CONFIG.settings.yield_wait_minutes || 5} phút để nhường máy!`);
+                    return sendJson(res, { ok: true, message: `Đã kích hoạt chế độ nghỉ ${CONFIG.settings.yield_wait_minutes || 5} phút nhường máy!` });
                 }
 
                 if (act === 'resume') {
@@ -1953,7 +1965,7 @@ function startLocalGuiServer(sessionState, getActivePage) {
                 const prevAccount = `${CONFIG.email}|${CONFIG.server}`;
                 if (body.email) CONFIG.email = String(body.email).trim();
                 if (body.server) CONFIG.server = String(body.server).trim();
-                if (body.yield_wait_minutes) CONFIG.settings.yield_wait_minutes = Math.max(1, Number(body.yield_wait_minutes) || 15);
+                if (body.yield_wait_minutes) CONFIG.settings.yield_wait_minutes = Math.max(1, Number(body.yield_wait_minutes) || 5);
                 if (body.report_interval_min) CONFIG.telegram.report_interval_min = Math.max(1, Number(body.report_interval_min) || 30);
                 saveConfigToDisk();
                 writeLog(`💾 [GUI Control] Đã lưu cài đặt hệ thống (Server: ${CONFIG.server}, Nghỉ ĐT: ${CONFIG.settings.yield_wait_minutes}p, Báo cáo Tele: ${CONFIG.telegram.report_interval_min}p)`);
@@ -2179,16 +2191,31 @@ async function run() {
                 continue;
             }
 
-            // Xử lý yêu cầu khởi động lại cửa sổ trình duyệt từ GUI hoặc làm mới Token tức thì khi rớt mạng 4 lần / hết hạn phiên (KHÔNG nhường máy 10 phút)
-            const hasImmediateKick = !!(sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick) || !!sessionState.manualYieldRequested;
+            // Xử lý yêu cầu khởi động lại cửa sổ trình duyệt từ GUI hoặc làm mới Token tức thì khi rớt mạng 4 lần / hết hạn phiên.
+            // ĐẶC BIỆT: Nếu vừa mới tự động làm mới phiên trong vòng 180s mà lại tiếp tục bị văng (dấu hiệu Điện thoại đang giữ phiên ngầm không gửi LoginKickSc) -> Tự chuyển sang Nhường Máy 5 phút, tuyệt đối không đá lại Điện thoại sau 1-2p!
+            let hasImmediateKick = !!(sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick) || !!sessionState.manualYieldRequested;
+            if (!hasImmediateKick && sessionState.freshReloginRequested && !sessionState.restartBrowserRequested && CONFIG.settings.yield_on_kick) {
+                const reasonNow = String(sessionState.freshReloginReason || '');
+                const isNotHotfixOrSpam = !reasonNow.includes('_res=3') && !reasonNow.includes('err_code_66');
+                const sinceLastAutoRelogin = Date.now() - Number(sessionState.lastAutoReloginAt || 0);
+                if (isNotHotfixOrSpam && sessionState.lastAutoReloginAt && sinceLastAutoRelogin < 180000) {
+                    writeLog(`📱 [Nhường Máy] Phát hiện mất phiên lần thứ 2 liên tiếp sau ${Math.round(sinceLastAutoRelogin / 1000)}s (${reasonNow}) -> Có thiết bị đang online, kích hoạt Nhường Máy ${CONFIG.settings.yield_wait_minutes || 5} phút!`);
+                    sessionState.freshReloginRequested = false;
+                    sessionState.freshReloginReason = '';
+                    sessionState.kickDetectedFromLog = true;
+                    sessionState.isYielding = true;
+                    hasImmediateKick = true;
+                }
+            }
             if (!hasImmediateKick && (sessionState.restartBrowserRequested || sessionState.freshReloginRequested)) {
                 const isFreshToken = !!sessionState.freshReloginRequested && !sessionState.restartBrowserRequested;
                 const freshReason = sessionState.freshReloginReason || 'hết hạn phiên / rớt mạng';
                 sessionState.restartBrowserRequested = false;
                 sessionState.freshReloginRequested = false;
                 sessionState.freshReloginReason = '';
+                if (isFreshToken) sessionState.lastAutoReloginAt = Date.now();
                 writeLog(isFreshToken
-                    ? `🔄 [Watchdog] Làm mới phiên đăng nhập tức thì (${freshReason}) -> Kết nối lại ngay không chờ 10 phút...`
+                    ? `🔄 [Watchdog] Làm mới phiên đăng nhập tức thì (${freshReason}) -> Kết nối lại ngay...`
                     : "[GUI] Đang khởi tạo lại cửa sổ trình duyệt theo yêu cầu...");
                 if (sessionState.lastKnownStats) {
                     sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
@@ -2235,7 +2262,7 @@ async function run() {
                 sessionState.forceResumeFromYield = false;
                 sessionState.deadSessionStreak = 0;
 
-                const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 10);
+                const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 5);
                 writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động kết nối lại...`);
 
                 // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
@@ -2465,8 +2492,16 @@ async function run() {
                     } catch (eSoft) {}
                 }
                 if (sessionState.deadSessionStreak >= 9) {
-                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 90s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100%!`);
                     sessionState.deadSessionStreak = 0;
+                    const sinceLastAuto = Date.now() - Number(sessionState.lastAutoReloginAt || 0);
+                    if (CONFIG.settings.yield_on_kick && sessionState.lastAutoReloginAt && sinceLastAuto < 180000) {
+                        writeLog(`📱 [Nhường Máy] Phiên lại tiếp tục mất kết nối chỉ sau ${Math.round(sinceLastAuto / 1000)}s kể từ lần tự đăng nhập lại -> Có thiết bị đang chơi, tạm nghỉ ${CONFIG.settings.yield_wait_minutes || 5} phút!`);
+                        sessionState.kickDetectedFromLog = true;
+                        sessionState.isYielding = true;
+                        continue;
+                    }
+                    sessionState.lastAutoReloginAt = Date.now();
+                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 90s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100%!`);
                     if (sessionState.lastKnownStats) {
                         sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
                         sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);

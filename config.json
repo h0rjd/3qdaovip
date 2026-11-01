@@ -17,7 +17,7 @@
     "skip_battle": true,
     "speed_hack": 2,
     "yield_on_kick": true,
-    "yield_wait_minutes": 10,
+    "yield_wait_minutes": 5,
     "bot_stopped": false
   },
   "telegram": {
