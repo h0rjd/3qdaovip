@@ -29,7 +29,7 @@
     "auto_stage": false,
     "auto_tower": false,
     "auto_hero_up": false,
-    "auto_dispatch": false,
+    "auto_dispatch": true,
     "auto_host": true,
     "auto_rescue_knb": true,
     "auto_star_up": false,
