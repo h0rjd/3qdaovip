@@ -1070,6 +1070,8 @@ async function launchAndEnterGame(sessionState) {
     }
 
     sessionState.kickDetectedFromLog = false;
+    sessionState.freshReloginRequested = false;
+    sessionState.freshReloginReason = '';
     sessionState.disconnectStreak = 0;
 
     const accessToken = await authenticateJoyPlay(CONFIG.email, CONFIG.password);
@@ -1138,22 +1140,34 @@ async function launchAndEnterGame(sessionState) {
     await page.exposeFunction('pyOnBotLog', (entry) => {
         if (!entry) return;
         const m = String(entry.msg || '');
+        const mLower = m.toLowerCase();
         if (m) writeLog(`[AutoBot] ${entry.time || ''} ${m}`);
-        const isKick = entry.kickNow === true ||
-            m.includes('[Nhường Máy]') ||
-            m.includes('close_after_kick') ||
-            m.includes('Nhận thông điệp kick từ máy chủ') ||
-            m.includes('vui lòng đăng nhập lại') ||
-            m.includes('thiết bị khác') ||
-            m.includes('trùng lặp') ||
-            m.includes('phiên khác');
-        if (isKick) {
+
+        if (entry.freshReloginNow === true) {
+            if (!sessionState.isYielding && !sessionState.kickDetectedFromLog) {
+                sessionState.freshReloginRequested = true;
+                sessionState.freshReloginReason = m || 'session_expired';
+            }
+            return;
+        }
+
+        const isTrueDeviceKick = entry.kickNow === true ||
+            m.includes('[Nhường Máy] Khẩn cấp') ||
+            m.includes('onLoginKickSc _res=1') ||
+            m.includes('evt_LoginKickSc (_res=1)') ||
+            mLower.includes('thiết bị khác') ||
+            mLower.includes('nơi khác') ||
+            mLower.includes('trùng lặp đăng nhập') ||
+            mLower.includes('đăng nhập trùng') ||
+            mLower.includes('phiên khác');
+
+        if (isTrueDeviceKick && !sessionState.isYielding && !sessionState.closingBrowserForYield) {
             sessionState.kickDetectedFromLog = true;
             sessionState.isYielding = true;
             const br = sessionState.activeBrowser || sessionState.currentBrowser;
             if (br && !sessionState.closingBrowserForYield) {
                 sessionState.closingBrowserForYield = true;
-                writeLog(`📱 [Nhường Máy] Nhận tín hiệu KICK khẩn cấp từ game -> Đóng Chromium ngay lập tức để giải phóng kết nối cho Điện thoại!`);
+                writeLog(`📱 [Nhường Máy] Nhận tín hiệu KICK thiết bị khác từ game -> Đóng Chromium ngay lập tức để giải phóng kết nối cho Điện thoại!`);
                 (async () => {
                     try {
                         if (br) await br.close();
@@ -1213,9 +1227,12 @@ async function launchAndEnterGame(sessionState) {
     let attempts = 0;
     let loginReady = false;
     while (attempts < 90) {
-        if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
-            writeLog("[Login] 🛑 Nhận lệnh Dừng trong lúc tải màn hình đăng nhập -> Ngắt ngay lập tức!");
-            return { browser, page };
+        if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog)) {
+            writeLog("[Login] 🛑 Nhận lệnh Dừng/Nhường máy trong lúc tải màn hình đăng nhập -> Ngắt ngay lập tức!");
+            try { if (browser) await browser.close(); } catch (eClose) {}
+            sessionState.currentBrowser = null;
+            sessionState.currentPage = null;
+            return { browser: null, page: null, inGame: false };
         }
         attempts++;
         await new Promise(r => setTimeout(r, 2000));
@@ -1301,9 +1318,12 @@ async function launchAndEnterGame(sessionState) {
     writeLog(`[Game] Trạng thái màn hình đăng nhập: ${loginReady}`);
     await page.screenshot({ path: path.join(CONFIG.screenshotDir, '02_login_ready.png') });
 
-    if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
-        writeLog("[Login] 🛑 Đã nhận lệnh Dừng -> Không bấm Vào Game nữa!");
-        return { browser, page, inGame: false };
+    if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog)) {
+        writeLog("[Login] 🛑 Đã nhận lệnh Dừng/Nhường máy -> Không bấm Vào Game nữa!");
+        try { if (browser) await browser.close(); } catch (eClose) {}
+        sessionState.currentBrowser = null;
+        sessionState.currentPage = null;
+        return { browser: null, page: null, inGame: false };
     }
 
     let inGame = (loginReady === "IN_GAME");
@@ -1403,7 +1423,10 @@ async function launchAndEnterGame(sessionState) {
         for (let i = 0; i < 30; i++) {
             if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog)) {
                 writeLog("[Login] 🛑 Nhận lệnh Dừng/Nhường máy trong lúc đợi vào sảnh -> Ngắt ngay lập tức!");
-                return { browser, page, inGame: false };
+                try { if (browser) await browser.close(); } catch (eClose) {}
+                sessionState.currentBrowser = null;
+                sessionState.currentPage = null;
+                return { browser: null, page: null, inGame: false };
             }
             await new Promise(r => setTimeout(r, 2000));
             try {
@@ -1560,8 +1583,11 @@ async function launchAndEnterGame(sessionState) {
         }
     }
 
-    if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested)) {
-        return { browser, page, inGame: false };
+    if (sessionState && (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog)) {
+        try { if (browser) await browser.close(); } catch (eClose) {}
+        sessionState.currentBrowser = null;
+        sessionState.currentPage = null;
+        return { browser: null, page: null, inGame: false };
     }
 
     const payloadFile = fs.existsSync(path.join(__dirname, 'injected_agent.js'))
@@ -1610,19 +1636,34 @@ async function launchAndEnterGame(sessionState) {
 // Khởi chạy an toàn với cơ chế thử lại và tự động phát hiện Điện thoại / Bảo trì
 async function safeLaunchAndEnterGame(sessionState, maxAttempts = 3) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if (sessionState.stopRequested) return { browser: null, page: null, inGame: false };
+        if (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog) {
+            return { browser: null, page: null, inGame: false };
+        }
         try {
             writeLog(`[Session] Đang khởi tạo phiên đăng nhập (Lần thử ${attempt}/${maxAttempts})...`);
             const session = await launchAndEnterGame(sessionState);
-            if (session && session.browser) {
+            if (session && session.browser && session.inGame === true) {
                 return session;
             }
+            if (session && session.browser) {
+                try { await session.browser.close(); } catch (eClose) {}
+            }
+            if (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog) {
+                return { browser: null, page: null, inGame: false };
+            }
+            writeLog(`⚠️ [Session] Phiên lần ${attempt}/${maxAttempts} chưa vào được sảnh chính -> Đang chuẩn bị thử lại...`);
+            if (attempt < maxAttempts) {
+                await new Promise(r => setTimeout(r, 5000));
+            }
         } catch (err) {
-            writeLog(`⚠️ [Session] Lỗi khởi tạo phiên lần ${attempt}: ${err.message}`);
+            writeLog(`⚠️ [Session] Lỗi khởi tạo phiên lần ${attempt}/${maxAttempts}: ${err.message}`);
             try {
                 const { execSync } = require('child_process');
                 execSync('pkill -f chrome || true');
             } catch (eKill) {}
+            if (sessionState.stopRequested || sessionState.manualYieldRequested || sessionState.kickDetectedFromLog) {
+                return { browser: null, page: null, inGame: false, error: err.message };
+            }
             if (attempt < maxAttempts) {
                 await new Promise(r => setTimeout(r, 6000));
             } else {
@@ -2065,7 +2106,7 @@ async function run() {
         try { fs.unlinkSync(path.join(__dirname, '.bot_stopped')); } catch (e) {}
         writeLog(`▶️ [Resume] Nhận lệnh chạy lại sau khi dừng -> Đang khởi tạo lại phiên game...`);
         const resumed = await safeLaunchAndEnterGame(sessionState);
-        if (resumed && (resumed.browser || resumed.inGame)) {
+        if (resumed && resumed.browser && resumed.inGame === true) {
             activeBrowser = resumed.browser;
             activePage = resumed.page;
             sessionState.activeBrowser = activeBrowser;
@@ -2094,16 +2135,21 @@ async function run() {
                             writeLog(`⏳ [Nhường Máy] Đang nhường Điện thoại... Còn ${Math.floor(remSec / 60)}p ${remSec % 60}s sẽ tự động đăng nhập lại.`);
                         }
                     }
+                    const yForced = !!sessionState.forceResumeFromYield;
                     sessionState.isYielding = false;
                     sessionState.yieldEndTime = 0;
                     sessionState.forceResumeFromYield = false;
+                    if (Date.now() >= yEnd || yForced || sessionState.stopRequested) {
+                        try { fs.unlinkSync(yieldFile); } catch (e) {}
+                    }
+                } else {
+                    try { fs.unlinkSync(yieldFile); } catch (e) {}
                 }
-                try { fs.unlinkSync(yieldFile); } catch (e) {}
             } catch (e) {}
         }
 
         const session = await safeLaunchAndEnterGame(sessionState);
-        if (session && session.browser) {
+        if (session && session.browser && session.inGame === true) {
             activeBrowser = session.browser;
             activePage = session.page;
             sessionState.activeBrowser = activeBrowser;
@@ -2119,9 +2165,9 @@ async function run() {
 
         while (Date.now() < endTime) {
             cycle++;
-            // Chu kỳ kiểm tra 10 giây, phản ứng ngay lập tức trong 250ms nếu bị KICK, nhận lệnh dừng hoặc yield
+            // Chu kỳ kiểm tra 10 giây, phản ứng ngay lập tức trong 250ms nếu bị KICK, cần làm mới Token, nhận lệnh dừng hoặc yield
             for (let s = 0; s < 40; s++) {
-                if (sessionState.kickDetectedFromLog || sessionState.manualYieldRequested || sessionState.stopRequested || sessionState.maintenanceDetected || !activeBrowser || (activePage && activePage.isClosed())) {
+                if (sessionState.kickDetectedFromLog || sessionState.manualYieldRequested || sessionState.freshReloginRequested || sessionState.stopRequested || sessionState.maintenanceDetected || !activeBrowser || (activePage && activePage.isClosed())) {
                     break;
                 }
                 await new Promise(r => setTimeout(r, 250));
@@ -2133,10 +2179,17 @@ async function run() {
                 continue;
             }
 
-            // Xử lý yêu cầu khởi động lại cửa sổ trình duyệt từ GUI (đổi chế độ ẩn/hiện hoặc tải lại)
-            if (sessionState.restartBrowserRequested) {
+            // Xử lý yêu cầu khởi động lại cửa sổ trình duyệt từ GUI hoặc làm mới Token tức thì khi rớt mạng 4 lần / hết hạn phiên (KHÔNG nhường máy 10 phút)
+            const hasImmediateKick = !!(sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick) || !!sessionState.manualYieldRequested;
+            if (!hasImmediateKick && (sessionState.restartBrowserRequested || sessionState.freshReloginRequested)) {
+                const isFreshToken = !!sessionState.freshReloginRequested && !sessionState.restartBrowserRequested;
+                const freshReason = sessionState.freshReloginReason || 'hết hạn phiên / rớt mạng';
                 sessionState.restartBrowserRequested = false;
-                writeLog("[GUI] Đang khởi tạo lại cửa sổ trình duyệt theo yêu cầu...");
+                sessionState.freshReloginRequested = false;
+                sessionState.freshReloginReason = '';
+                writeLog(isFreshToken
+                    ? `🔄 [Watchdog] Làm mới phiên đăng nhập tức thì (${freshReason}) -> Kết nối lại ngay không chờ 10 phút...`
+                    : "[GUI] Đang khởi tạo lại cửa sổ trình duyệt theo yêu cầu...");
                 if (sessionState.lastKnownStats) {
                     sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
                     sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
@@ -2149,16 +2202,19 @@ async function run() {
                 try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
                 activeBrowser = null;
                 activePage = null;
+                sessionState.activeBrowser = null;
+                sessionState.activePage = null;
                 sessionState.deadSessionStreak = 0;
-                const reSession = await safeLaunchAndEnterGame(sessionState);
-                if (reSession && reSession.browser && reSession.inGame) {
+                const reSession = await safeLaunchAndEnterGame(sessionState, 3);
+                if (reSession && reSession.browser && reSession.inGame === true) {
                     activeBrowser = reSession.browser;
                     activePage = reSession.page;
                     sessionState.activeBrowser = activeBrowser;
                     sessionState.activePage = activePage;
+                    writeLog("✅ [Watchdog] Đã làm mới Token & kết nối lại sảnh chính thành công!");
                 } else {
-                    writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 10s trước khi thử lại...");
-                    await new Promise(r => setTimeout(r, 10000));
+                    writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 8s trước khi thử lại...");
+                    await new Promise(r => setTimeout(r, 8000));
                 }
                 continue;
             }
@@ -2168,18 +2224,19 @@ async function run() {
                 await checkGitConfigHotReload(activePage, sessionState);
             }
 
-            // 1. KIỂM TRA NHƯỜNG MÁY TỪ TÍN HIỆU LOG HOẶC MANUAL YIELD TRƯỚC TIÊN
+            // 1. KIỂM TRA NHƯỜNG MÁY TỪ TÍN HIỆU KICK THIẾT BỊ KHÁC HOẶC MANUAL YIELD TRƯỚC TIÊN
             const hasKickSignal = !!(sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick);
             if (hasKickSignal || sessionState.manualYieldRequested) {
                 const isManual = sessionState.manualYieldRequested;
                 sessionState.manualYieldRequested = false;
                 sessionState.kickDetectedFromLog = false;
+                sessionState.freshReloginRequested = false;
                 sessionState.isYielding = true;
                 sessionState.forceResumeFromYield = false;
                 sessionState.deadSessionStreak = 0;
 
-                const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 15);
-                writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động chạy tiếp...`);
+                const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 10);
+                writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động kết nối lại...`);
 
                 // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
                 if (sessionState.lastKnownStats) {
@@ -2201,6 +2258,9 @@ async function run() {
                 sessionState.activePage = null;
                 sessionState.currentBrowser = null;
                 sessionState.currentPage = null;
+                // Xóa sạch mọi tín hiệu trễ phát sinh trong lúc đóng browser
+                sessionState.kickDetectedFromLog = false;
+                sessionState.freshReloginRequested = false;
 
                 const kickHtml = buildTelegramReportHtml(
                     `📱 [NHƯỜNG MÁY] ĐÃ TẠM DỪNG ${waitMin} PHÚT`,
@@ -2231,27 +2291,34 @@ async function run() {
                 sessionState.isYielding = false;
                 sessionState.yieldEndTime = 0;
                 sessionState.forceResumeFromYield = false;
-                try { fs.unlinkSync(yieldFile); } catch (e) {}
+                sessionState.kickDetectedFromLog = false;
+                sessionState.freshReloginRequested = false;
+
+                if (Date.now() >= waitEnd || wasForcedResume || sessionState.stopRequested) {
+                    try { fs.unlinkSync(yieldFile); } catch (e) {}
+                }
 
                 if (sessionState.stopRequested || sessionState.maintenanceDetected) {
+                    try { fs.unlinkSync(yieldFile); } catch (e) {}
                     const actRes = await handleHardStopOrMaintenance();
                     if (actRes === 'EXIT_WORKFLOW') break;
                     continue;
                 }
 
                 if (Date.now() >= endTime) {
-                    writeLog(`[Nhường Máy] Đã hết thời lượng phiên chạy hiện tại, chuyển sang phiên kế tiếp...`);
+                    writeLog(`[Nhường Máy] Đã hết thời lượng phiên chạy hiện tại, chuyển sang phiên kế tiếp để tự động kết nối lại...`);
                     break;
                 }
 
                 writeLog(`🔄 [Nhường Máy] ${wasForcedResume ? "Nhận lệnh Chạy Lại Ngay" : "Đã hết " + waitMin + " phút nhường máy"}! Đang đăng nhập lại mới 100%...`);
 
-                const resumed = await safeLaunchAndEnterGame(sessionState);
-                if (resumed && resumed.browser) {
+                const resumed = await safeLaunchAndEnterGame(sessionState, 4);
+                if (resumed && resumed.browser && resumed.inGame === true) {
                     activeBrowser = resumed.browser;
                     activePage = resumed.page;
                     sessionState.activeBrowser = activeBrowser;
                     sessionState.activePage = activePage;
+                    sessionState.pendingPostYieldReport = false;
                     const resumeSnap = path.join(CONFIG.screenshotDir, 'latest.png');
                     try {
                         const stResumed = await activePage.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
@@ -2262,17 +2329,21 @@ async function run() {
                         `🟢 [KẾT NỐI LẠI] ĐÃ VÀO LẠI GAME SAU KHI NHƯỜNG MÁY`,
                         sessionState.lastKnownStats || {},
                         sessionState,
-                        `✅ <i>Điện thoại đã nghỉ, Bot đã tự động đăng nhập lại sảnh chính thành công và tiếp tục treo 24/7!</i>`
+                        `✅ <i>Đã hết ${waitMin} phút nhường máy, Bot đã tự động đăng nhập lại sảnh chính thành công và tiếp tục treo 24/7!</i>`
                     );
                     await sendTelegramMessage(resumeHtml, fs.existsSync(resumeSnap) ? resumeSnap : null, sessionState);
                     sessionState.lastReportTime = Date.now();
+                } else {
+                    sessionState.pendingPostYieldReport = true;
+                    writeLog(`⚠️ [Nhường Máy] Hết ${waitMin} phút nhưng lần kết nối đầu chưa vào sảnh -> Chờ 8s và tiếp tục tự động kết nối lại cho tới khi thành công!`);
+                    await new Promise(r => setTimeout(r, 8000));
                 }
                 continue;
             }
 
             // 2. NẾU TRANG ĐANG ĐÓNG (VÀ KHÔNG PHẢI ĐANG YIELD HOẶC DỪNG)
             if (!activePage || activePage.isClosed()) {
-                if (sessionState.isYielding || sessionState.kickDetectedFromLog || sessionState.manualYieldRequested) {
+                if (sessionState.isYielding || (sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick) || sessionState.manualYieldRequested) {
                     continue;
                 }
                 if (sessionState.stopRequested || sessionState.maintenanceDetected) {
@@ -2280,16 +2351,35 @@ async function run() {
                     if (actRes === 'EXIT_WORKFLOW') break;
                     continue;
                 }
-                writeLog("[Watchdog] Trang trình duyệt đã đóng, đang khởi tạo lại phiên...");
+                writeLog("[Watchdog] Trang trình duyệt đang đóng -> Đang tự động kết nối & đăng nhập lại phiên mới...");
                 try { if (activeBrowser) await activeBrowser.close(); } catch (e) {}
                 activeBrowser = null;
                 activePage = null;
-                const reSession = await safeLaunchAndEnterGame(sessionState);
-                if (reSession && (reSession.browser || reSession.inGame)) {
+                sessionState.activeBrowser = null;
+                sessionState.activePage = null;
+                const reSession = await safeLaunchAndEnterGame(sessionState, 3);
+                if (reSession && reSession.browser && reSession.inGame === true) {
                     activeBrowser = reSession.browser;
                     activePage = reSession.page;
                     sessionState.activeBrowser = activeBrowser;
                     sessionState.activePage = activePage;
+                    if (sessionState.pendingPostYieldReport) {
+                        sessionState.pendingPostYieldReport = false;
+                        const resumeSnap = path.join(CONFIG.screenshotDir, 'latest.png');
+                        try {
+                            const stResumed = await activePage.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
+                            if (isStatsLoaded(stResumed)) sessionState.lastKnownStats = stResumed;
+                            await activePage.screenshot({ path: resumeSnap });
+                        } catch (e) {}
+                        const resumeHtml = buildTelegramReportHtml(
+                            `🟢 [KẾT NỐI LẠI] ĐÃ VÀO LẠI GAME SAU KHI NHƯỜNG MÁY`,
+                            sessionState.lastKnownStats || {},
+                            sessionState,
+                            `✅ <i>Bot đã tự động đăng nhập lại sảnh chính thành công và tiếp tục treo 24/7!</i>`
+                        );
+                        await sendTelegramMessage(resumeHtml, fs.existsSync(resumeSnap) ? resumeSnap : null, sessionState);
+                        sessionState.lastReportTime = Date.now();
+                    }
                 } else {
                     writeLog("⚠️ [Watchdog] Khởi tạo lại phiên chưa thành công, chờ 10s trước khi thử lại...");
                     await new Promise(r => setTimeout(r, 10000));
@@ -2325,10 +2415,17 @@ async function run() {
                 continue;
             }
 
-            // Kiểm tra kick từ status
+            // Kiểm tra kick từ status (chỉ khi thực sự bị thiết bị khác đăng nhập)
             if (status && status.kickedByOtherDevice && CONFIG.settings.yield_on_kick) {
                 sessionState.kickDetectedFromLog = true;
                 sessionState.isYielding = true;
+                continue;
+            }
+
+            // Kiểm tra yêu cầu làm mới phiên đăng nhập tức thì (hết hạn JoyPlay token / rớt mạng 4x / Hotfix _res=3)
+            if (status && status.needFreshRelogin) {
+                sessionState.freshReloginRequested = true;
+                sessionState.freshReloginReason = status.freshReloginReason || 'hết hạn phiên mạng';
                 continue;
             }
 

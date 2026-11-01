@@ -246,6 +246,9 @@
             _bgSilentUntil: 0,
             _lastBgRpcSentTs: 0,
             _lastManualUiActionTs: 0,
+            needFreshRelogin: false,
+            freshReloginReason: "",
+            _loginTipInterceptCount: 0,
             rescuedCount: 0,
             rescuedKnbTotal: 0,
             rescueChecking: false,
@@ -859,6 +862,70 @@
                 }
             } catch (e) { }
             return false;
+        },
+
+        isTrueDuplicateDeviceKickTip: function (rawStr) {
+            const s = String(rawStr || "").toLowerCase().trim();
+            if (!s) return false;
+            if (s.includes("mạng bị ngắt") ||
+                s.includes("kết nối gián đoạn") ||
+                s.includes("đã kết nối lại với máy chủ") ||
+                s.includes("dữ liệu bất thường") ||
+                s.includes("có nội dung mới") ||
+                s.includes("yêu cầu quá giờ") ||
+                s.includes("máy chủ đang bảo trì")) {
+                return false;
+            }
+            return s.includes("thiết bị khác") ||
+                   s.includes("nơi khác") ||
+                   s.includes("trùng lặp đăng nhập") ||
+                   s.includes("đăng nhập trùng") ||
+                   s.includes("phiên khác") ||
+                   s.includes("other device") ||
+                   s.includes("another device") ||
+                   s.includes("logged in elsewhere") ||
+                   s.includes("顶号") ||
+                   s.includes("其他设备") ||
+                   s.includes("其它设备") ||
+                   s.includes("重复登录") ||
+                   s.includes("异地登录");
+        },
+
+        requestFreshRelogin: function (reason) {
+            if (bot.state.kickedByOtherDevice || window.__BOT_YIELDING__ || bot.state.needFreshRelogin) return;
+            bot.state.needFreshRelogin = true;
+            bot.state.freshReloginReason = String(reason || "session_expired");
+            bot.log("🔄 [Anti-Kick] Phiên mạng cần làm mới Token/Trình duyệt (" + bot.state.freshReloginReason + ") -> Báo Watchdog kết nối lại ngay (không nhường máy 10p)!");
+            try { bot.stopScheduleLoop(); } catch (e) { }
+            if (window.__AUTO_RESCUE_INTERVAL__) {
+                try { clearInterval(window.__AUTO_RESCUE_INTERVAL__); } catch (e) { }
+                window.__AUTO_RESCUE_INTERVAL__ = null;
+            }
+            if (bot.state && bot.state._reconnectTimer) {
+                try { clearTimeout(bot.state._reconnectTimer); } catch (e) { }
+                bot.state._reconnectTimer = null;
+            }
+            try {
+                const gm = window.G_Mapping;
+                const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                if (nw) {
+                    nw.isManualClose = true;
+                    nw._isCanReconnect = false;
+                    nw.isReconnecting = false;
+                    if (nw.heartBeat && typeof nw.heartBeat.stop === "function") nw.heartBeat.stop();
+                    if (nw.socket && typeof nw.socket.close === "function") nw.socket.close();
+                    if (nw._wsClient && typeof nw._wsClient.close === "function") nw._wsClient.close();
+                }
+            } catch (e) { }
+            if (typeof window.pyOnBotLog === "function") {
+                try {
+                    window.pyOnBotLog({
+                        freshReloginNow: true,
+                        time: new Date().toLocaleTimeString(),
+                        msg: "🔄 [Watchdog] Yêu cầu làm mới phiên đăng nhập ngay (" + bot.state.freshReloginReason + ")"
+                    });
+                } catch (e) { }
+            }
         },
 
         triggerEmergencyYield: function (reason) {
@@ -2511,68 +2578,67 @@
                     const rsmProto = (rsmClass && rsmClass.prototype) || (rsmModel && Object.getPrototypeOf(rsmModel));
                     if (rsmProto && !rsmProto.__QA_PRIVILEGE_HOOKED__) {
                         rsmProto.__QA_PRIVILEGE_HOOKED__ = true;
+                        if (!rsmProto.__ORIG_HAVE_PRIV__ && typeof rsmProto.havePrivilegeById === "function") {
+                            rsmProto.__ORIG_HAVE_PRIV__ = rsmProto.havePrivilegeById;
+                        }
+                        const syncRealPriv1 = function (inst) {
+                            if (!inst) return;
+                            if (!inst._realPrivilegeData) inst._realPrivilegeData = {};
+                            if (inst._privilegeData && typeof inst._privilegeData === "object") {
+                                for (const k in inst._privilegeData) {
+                                    const p = inst._privilegeData[k];
+                                    if (p && p._id && !p._is_fake) {
+                                        inst._realPrivilegeData[p._id] = p;
+                                    }
+                                }
+                            }
+                        };
+                        syncRealPriv1(rsmModel);
 
-                        // Lưu giữ dữ liệu đặc quyền thực tế từ server
                         const origUpdatePriv = rsmProto.updatePrivilegeHis;
                         rsmProto.updatePrivilegeHis = function (e) {
                             if (e && Array.isArray(e._list)) {
                                 if (!this._realPrivilegeData) this._realPrivilegeData = {};
                                 for (let item of e._list) {
-                                    if (item && item._id) this._realPrivilegeData[item._id] = item;
+                                    if (item && item._id && !item._is_fake) this._realPrivilegeData[item._id] = item;
                                 }
                             }
-                            if (origUpdatePriv) return origUpdatePriv.apply(this, arguments);
+                            const resUpd = origUpdatePriv ? origUpdatePriv.apply(this, arguments) : undefined;
+                            syncRealPriv1(this);
+                            return resUpd;
                         };
 
                         rsmProto.havePrivilegeById = function (id) {
-                            // 1. Đặc Quyền 2: Bỏ qua QC 0s & Treo máy (client-side) -> Luôn mở
-                            if (id === 2) {
+                            const numId = Number(id);
+                            if (numId === 2) {
                                 return bot.settings.skip_ads !== false;
                             }
-                            // 2. Đặc Quyền 1: Mở khóa Đào 50 rương (PrivilegeOpenBoxCnt)
-                            // CHỈ trả về true khi tài khoản THỰC SỰ có Đặc Quyền 1 từ server (hoặc còn hạn sử dụng).
-                            // Nếu chưa mua/hết hạn, trả về false để game tính đúng số lượng hợp pháp của VIP và cấp Rương (VD: VIP 4 đào 40 rương/lần).
-                            if (id === 1) {
-                                const real = this._realPrivilegeData && this._realPrivilegeData[1];
-                                if (real) {
-                                    const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
-                                    const now = stm && stm.getServerTime ? stm.getServerTime() : Math.floor(Date.now() / 1000);
-                                    return (real._e_sec === 0 || real._e_sec > now);
-                                }
-                                return false;
-                            }
-                            // 3. Đặc Quyền 3: Thêm Thợ Gia Viên (PrivilegeHostWoker)
-                            if (id === 3) {
-                                const real = this._realPrivilegeData && this._realPrivilegeData[3];
-                                if (real) {
-                                    const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
-                                    const now = stm && stm.getServerTime ? stm.getServerTime() : Math.floor(Date.now() / 1000);
-                                    return (real._e_sec === 0 || real._e_sec > now);
-                                }
-                                return false;
-                            }
-                            // 4. Các đặc quyền khác (4..8): kiểm tra dữ liệu server thực tế
-                            const real = this._realPrivilegeData && this._realPrivilegeData[id];
+                            syncRealPriv1(this);
+                            const real = this._realPrivilegeData && (this._realPrivilegeData[numId] || this._realPrivilegeData[id]);
                             if (real) {
                                 const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
-                                const now = stm && stm.getServerTime ? stm.getServerTime() : Math.floor(Date.now() / 1000);
-                                return (real._e_sec === 0 || real._e_sec > now);
+                                const now = (stm && stm.getServerTime ? stm.getServerTime() : 0) || Math.floor(Date.now() / 1000);
+                                return (real._e_sec === 0 || Number(real._e_sec) > now);
+                            }
+                            if (rsmProto.__ORIG_HAVE_PRIV__ && !(this._privilegeData && this._privilegeData[numId] && this._privilegeData[numId]._is_fake)) {
+                                return !!rsmProto.__ORIG_HAVE_PRIV__.apply(this, arguments);
                             }
                             return false;
                         };
 
                         const origGetPrivilege = rsmProto.getPrivilegeHisById;
                         rsmProto.getPrivilegeHisById = function (id) {
-                            // Chỉ bypass client cho Đặc Quyền 2 (Bỏ qua QC 0s)
-                            if (id === 2) {
+                            const numId = Number(id);
+                            if (numId === 2) {
                                 if (!this._privilegeData) this._privilegeData = {};
-                                if (!this._privilegeData[id]) {
-                                    this._privilegeData[id] = { _id: id, _e_sec: 0, _is_forever: 1, _state: 1, _is_fake: true };
+                                if (!this._privilegeData[numId]) {
+                                    this._privilegeData[numId] = { _id: numId, _e_sec: 0, _is_forever: 1, _state: 1, _is_fake: true };
                                 }
-                                return this._privilegeData[id];
+                                return this._privilegeData[numId];
                             }
-                            if (this._realPrivilegeData && this._realPrivilegeData[id]) {
-                                return this._realPrivilegeData[id];
+                            syncRealPriv1(this);
+                            if (this._realPrivilegeData && (this._realPrivilegeData[numId] || this._realPrivilegeData[id])) {
+                                return this._realPrivilegeData[numId] || this._realPrivilegeData[id];
                             }
                             if (origGetPrivilege) return origGetPrivilege.apply(this, arguments);
                             return null;
@@ -2728,25 +2794,27 @@
                 // ====================================================================
                 // ANTI-KICK & NHƯỜNG MÁY THÔNG MINH (Không tranh chấp khi Điện thoại đăng nhập)
                 // ====================================================================
-                if (nwProto && !nwProto.__QA_KICK_GUARD__) {
+                if (nwProto && nwProto !== Object.prototype && !Object.prototype.hasOwnProperty.call(nwProto, "__QA_KICK_GUARD__")) {
                     nwProto.__QA_KICK_GUARD__ = true;
 
-                    // 1. Hook onLoginKickSc: Khi máy chủ gửi mã kick (bất kể mã nào đều là do thiết bị khác đăng nhập)
+                    // 1. Hook onLoginKickSc: Chỉ _res === 1 là đăng nhập trùng thiết bị khác (Điện thoại/PC); _res === 3 là Hotfix (Desc.24), _res === 2 là bảo trì/reset máy chủ!
                     const origKick = nwProto.onLoginKickSc;
                     nwProto.onLoginKickSc = function (event, data) {
                         const payload = (data && data._res != null) ? data : ((event && event._res != null) ? event : (event || data || {}));
-                        const resCode = payload._res != null ? payload._res : (payload._code != null ? payload._code : 0);
-                        bot.log(`🛡️ [Anti-Kick] Nhận thông điệp kick từ máy chủ: ${JSON.stringify(payload)}`);
+                        const resCode = Number(payload._res != null ? payload._res : (payload._code != null ? payload._code : 0));
+                        bot.log(`🛡️ [Anti-Kick] Nhận gói LoginKickSc từ máy chủ: ${JSON.stringify(payload)}`);
 
-                        // Server gửi kick khi có thiết bị khác (Điện thoại) đăng nhập
-                        // Lập tức kích hoạt Nhường Máy, cắt toàn bộ kết nối và dừng hẳn, tuyệt đối không tự reconnect đè phiên
                         this.kickData = payload;
                         this._isCanReconnect = false;
                         this.isManualClose = true;
                         this.isReconnecting = false;
                         try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
                         try { if (this._wsClient && typeof this._wsClient.close === "function") this._wsClient.close(); } catch (e) { }
-                        bot.triggerEmergencyYield("Mã kick máy chủ (onLoginKickSc: " + resCode + ")");
+                        if (resCode === 1) {
+                            bot.triggerEmergencyYield("Đăng nhập trùng thiết bị (onLoginKickSc _res=1)");
+                        } else {
+                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode);
+                        }
                         return;
                     };
 
@@ -2754,7 +2822,7 @@
                     const origLoginTimeSc = nwProto.onLoginTimeSc;
                     if (origLoginTimeSc) {
                         nwProto.onLoginTimeSc = function (event, data) {
-                            if (this._needFullRelogin && bot.state.hasLoggedInOnce && !bot.state.kickedByOtherDevice) {
+                            if (this._needFullRelogin && bot.state.hasLoggedInOnce && !bot.state.kickedByOtherDevice && !bot.state.needFreshRelogin) {
                                 this.isEnterGame = false;
                                 this.isReconnecting = false;
                             }
@@ -2769,6 +2837,7 @@
                             const wasRelogin = !!this._needFullRelogin;
                             this._needFullRelogin = false;
                             this._reconnectFailStreak = 0;
+                            bot.state._loginTipInterceptCount = 0;
                             this.isReconnecting = false;
                             this.isEnterGame = true;
                             this._isCanReconnect = true;
@@ -2792,6 +2861,7 @@
                         nwProto.onLoginReconnectSc = function (event, data) {
                             this._needFullRelogin = false;
                             this._reconnectFailStreak = 0;
+                            bot.state._loginTipInterceptCount = 0;
                             this.isReconnecting = false;
                             this.isEnterGame = true;
                             this._isCanReconnect = true;
@@ -2802,10 +2872,10 @@
                         };
                     }
 
-                    // 2. Hook onClose: Tự động khôi phục ngầm, nhưng nếu bị Điện thoại kick thì nhường ngay
+                    // 2. Hook onClose: Tự động khôi phục ngầm; chỉ nhường máy khi kickData._res === 1, còn rớt mạng 4 lần liên tiếp thì làm mới Token ngay!
                     const origOnClose = nwProto.onClose;
                     nwProto.onClose = function () {
-                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) {
+                        if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) {
                             this._isCanReconnect = false;
                             this.isManualClose = true;
                             this.isReconnecting = false;
@@ -2813,21 +2883,28 @@
                             return;
                         }
                         if (bot.state.hasLoggedInOnce) {
-                            const hadKick = !!this.kickData;
-                            if (hadKick) {
+                            const kickObj = this.kickData;
+                            if (kickObj) {
+                                const kickRes = Number(kickObj._res != null ? kickObj._res : (kickObj._code != null ? kickObj._code : 0));
                                 this.kickData = null;
                                 this._isCanReconnect = false;
                                 this.isManualClose = true;
                                 this.isReconnecting = false;
                                 try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
-                                bot.log("📱 [Nhường Máy] Phát hiện đóng socket sau khi nhận kick -> Nhường máy ngay!");
-                                bot.triggerEmergencyYield("onClose with kickData (Điện thoại đăng nhập)");
+                                if (kickRes === 1) {
+                                    bot.log("📱 [Nhường Máy] Đóng socket sau mã đăng nhập trùng (_res=1) -> Nhường máy ngay!");
+                                    bot.triggerEmergencyYield("onClose with kickData _res=1 (Điện thoại đăng nhập)");
+                                } else {
+                                    bot.requestFreshRelogin("onClose kickData _res=" + kickRes);
+                                }
                                 return;
                             }
                             this._reconnectFailStreak = (this._reconnectFailStreak || 0) + 1;
+                            if (this._reconnectFailStreak >= 2) {
+                                this._needFullRelogin = true;
+                            }
                             if (this._reconnectFailStreak >= 4) {
-                                bot.log("📱 [Nhường Máy] Mất kết nối liên tục 4 lần -> Có thể do Điện thoại đang vào, kích hoạt Nhường Máy!");
-                                bot.triggerEmergencyYield("Rớt mạng liên tiếp 4 lần");
+                                bot.requestFreshRelogin("Mất kết nối WebSocket 4 lần liên tiếp (hết hạn phiên)");
                                 return;
                             }
                             this._isCanReconnect = true;
@@ -2845,8 +2922,12 @@
                     const origMaxReconnect = nwProto.onMaxReconnect;
                     if (origMaxReconnect) {
                         nwProto.onMaxReconnect = function () {
-                            if (bot.state.kickedByOtherDevice) return;
+                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin) return;
                             if (bot.state.hasLoggedInOnce) {
+                                if ((this._reconnectFailStreak || 0) >= 3) {
+                                    bot.requestFreshRelogin("onMaxReconnect sau chuỗi rớt mạng");
+                                    return;
+                                }
                                 this._reconnectCount = 0;
                                 this.isReconnecting = false;
                                 this._isCanReconnect = true;
@@ -2859,18 +2940,12 @@
                         };
                     }
 
-                    // 3. Hook showErrorTips: Nếu là thông báo kick/đăng nhập khác thì Nhường Máy ngay, nếu lỗi rớt mạng thì kết nối lại ngầm
+                    // 3. Hook showErrorTips: Phân biệt chính xác đăng nhập thiết bị khác vs thông báo rớt mạng thường quy (Desc.23: "Mạng bị ngắt, vui lòng đăng nhập lại.")
                     const origShowErrorTips = nwProto.showErrorTips;
                     nwProto.showErrorTips = function (tip) {
                         const tipStr = String(tip || "");
                         const tipLower = tipStr.toLowerCase();
-                        const isKickTip = tipLower.includes("vui lòng đăng nhập lại") || 
-                                          tipLower.includes("thiết bị khác") || 
-                                          tipLower.includes("trùng lặp") || 
-                                          tipLower.includes("phiên khác") ||
-                                          tipLower.includes("tài khoản của bạn") ||
-                                          tipLower.includes("kick");
-                        if (isKickTip) {
+                        if (bot.isTrueDuplicateDeviceKickTip(tipStr)) {
                             bot.triggerEmergencyYield("showErrorTips: " + tipStr);
                             return;
                         }
@@ -2879,8 +2954,14 @@
                             if (origShowErrorTips) return origShowErrorTips.apply(this, arguments);
                             return;
                         }
-                        if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
-                        bot.log(`🛡️ [Anti-Kick] Đã chặn hộp thoại thông báo mạng: "${tipStr}" -> Tự động kết nối lại ngầm!`);
+                        if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
+                        bot.state._loginTipInterceptCount = (bot.state._loginTipInterceptCount || 0) + 1;
+                        if (tipLower.includes("có nội dung mới") || bot.state._loginTipInterceptCount >= 3 || (this._reconnectFailStreak || 0) >= 3) {
+                            bot.requestFreshRelogin("showErrorTips (" + bot.state._loginTipInterceptCount + "x): " + tipStr);
+                            return;
+                        }
+                        this._needFullRelogin = true;
+                        bot.log(`🛡️ [Anti-Kick] Đã chặn thông báo gián đoạn mạng ("${tipStr}") -> Tự động kết nối lại ngầm!`);
                         this._isCanReconnect = true;
                         this.isManualClose = false;
                         this.isReconnecting = false;
@@ -2924,20 +3005,20 @@
                             }
                             const tipStr = String(tip || "");
                             const tipLower = tipStr.toLowerCase();
-                            const isKickTip = tipLower.includes("vui lòng đăng nhập lại") || 
-                                              tipLower.includes("thiết bị") || 
-                                              tipLower.includes("trùng lặp") || 
-                                              tipLower.includes("phiên") || 
-                                              tipLower.includes("kick");
-                            if (isKickTip) {
+                            if (bot.isTrueDuplicateDeviceKickTip(tipStr)) {
                                 bot.triggerEmergencyYield("LoginController tip: " + tipStr);
                                 return;
                             }
-                            if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
-                            bot.log(`🛡️ [Anti-Kick] Đã triệt tiêu popup ngắt kết nối từ LoginController (${tip || "no_tip"})!`);
+                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
+                            bot.state._loginTipInterceptCount = (bot.state._loginTipInterceptCount || 0) + 1;
                             const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                            if (tipLower.includes("có nội dung mới") || bot.state._loginTipInterceptCount >= 3 || (nw && (nw._reconnectFailStreak || 0) >= 3)) {
+                                bot.requestFreshRelogin("LoginController tip (" + bot.state._loginTipInterceptCount + "x): " + tipStr);
+                                return;
+                            }
+                            bot.log(`🛡️ [Anti-Kick] Đã triệt tiêu popup ngắt kết nối từ LoginController (${tip || "no_tip"})!`);
                             if (nw && !bot.state.kickedByOtherDevice && !window.__BOT_HARD_STOPPED__) {
-                                if (this.clickData || (nw._reconnectFailStreak || 0) >= 2) nw._needFullRelogin = true;
+                                nw._needFullRelogin = true;
                                 bot.scheduleSafeReconnect(nw, "login_show_tips", 2000);
                             }
                         };
@@ -2980,16 +3061,10 @@
                             if (!bot.state.hasLoggedInOnce) {
                                 return origAlertShow ? origAlertShow.apply(this, arguments) : null;
                             }
-                            const txt = String((opt && (opt.text || opt.content || opt.title)) || "").toLowerCase();
-                            const isKickTip = txt.includes("thiết bị khác") || 
-                                              txt.includes("đăng nhập từ nơi khác") || 
-                                              txt.includes("phiên khác") || 
-                                              txt.includes("trùng lặp") || 
-                                              txt.includes("vui lòng đăng nhập lại") || 
-                                              txt.includes("tài khoản của bạn đã") || 
-                                              txt.includes("kick");
-                            if (isKickTip) {
-                                bot.triggerEmergencyYield("AlertUtil kick popup: " + txt);
+                            const txtRaw = String((opt && (opt.text || opt.content || opt.title)) || "");
+                            const txt = txtRaw.toLowerCase();
+                            if (bot.isTrueDuplicateDeviceKickTip(txtRaw)) {
+                                bot.triggerEmergencyYield("AlertUtil kick popup: " + txtRaw);
                                 return [null, ""];
                             }
                             if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__) return [null, ""];
@@ -3057,6 +3132,27 @@
                             lastProtoTimes[10413] = now;
                             window.__LAST_WAR_CLOSE_TIME__ = now;
                         }
+                    if (typeof rpc.sendDelay === "function" && !rpc.__QA_RPCDELAY_HOOKED__) {
+                        rpc.__QA_RPCDELAY_HOOKED__ = true;
+                        const origRpcSendDelay = rpc.sendDelay;
+                        rpc.sendDelay = function (protoD, dataD) {
+                            const nowD = Date.now();
+                            window.__LAST_OUT_PROTO__ = protoD;
+                            window.__LAST_OUT_DATA__ = dataD;
+                            lastProtoTimes[protoD] = nowD;
+                            if (bot.state._bgSilentDepth > 0) {
+                                bot.state._lastBgRpcSentTs = nowD;
+                                bot.state._bgSilentUntil = Math.max(bot.state._bgSilentUntil || 0, nowD + 900);
+                            } else {
+                                bot.state._bgSilentUntil = 0;
+                                bot.state._lastManualUiActionTs = nowD;
+                            }
+                            if (protoD === 13110 && rpc.sendTimeCache) {
+                                rpc.sendTimeCache[13110] = 0;
+                            }
+                            return origRpcSendDelay.apply(this, arguments);
+                        };
+                    }
 
                         // 3. Chống "Lỗi tham số": Chặn tuyệt đối RankLikeCs với RoleID <= 1
                         if (data && data._k !== undefined && data._v !== undefined) {
@@ -3237,6 +3333,7 @@
                                 bcProto.startWarBattleData = function (e) {
                                     if (e) {
                                         bot.cacheWarData(e);
+                                        if (Number(e._type) === 1) { e.__scoutLowPower = !!bot.state.isScoutLowPowerActive; }
                                         if (Number(e._type) === 1 && bot.state.pendingManualStageInstant && !bot.isAutoStageOn()) {
                                             bot.state.pendingManualStageInstant = false;
                                             const res = origStartWarBattleData.apply(this, arguments);
@@ -3258,6 +3355,10 @@
                                                 const pwmManual = (gm && gm.PopWindowManager) || window.PopWindowManager;
                                                 const alreadyPop = (vmInst && typeof vmInst.isOpenView === "function" && vmInst.isOpenView("BattleResultView")) ||
                                                     (pwmManual && pwmManual._currentPopData && pwmManual._currentPopData.name === "BattleResultView");
+                                                if (vmInst && typeof vmInst.close === "function") {
+                                                    try { vmInst.close("BattlePrepareView"); } catch (eClP) { }
+                                                    try { vmInst.close("TeamArrayView"); } catch (eClT) { }
+                                                }
                                                 if (vmInst && typeof vmInst.open === "function" && !alreadyPop) {
                                                     vmInst.open("BattleResultView", {
                                                         battleData: snap,
@@ -3339,16 +3440,26 @@
                                             if (fmInst && fmInst.copyRequstStatus) {
                                                 fmInst.copyRequstStatus[bType] = 0;
                                             }
-                                            // Pre-fetch ải kế tiếp / thử lại ngay sau WarCloseSc CHỈ KHI đang bật Auto Đi Ải hoặc vừa bấm tay Khiêu Chiến Ải (tránh tự xoay 10401 ngầm khi đang Farm KNB!)
+                                            if (bType === 1) {
+                                                const bfmDone = (gm && gm.BattleFastManager) || window.BattleFastManager;
+                                                if (bfmDone && bfmDone.batteStatus === 5) {
+                                                    bfmDone.batteStatus = 6;
+                                                }
+                                            }
+                                            // Pre-fetch đúng 1 đợt ải kế tiếp ngay sau WarCloseSc khi đang bật Auto Đi Ải hoặc vừa bấm tay Khiêu Chiến Ải (0ms vòng sau, 0 xung đột Farm KNB!)
+                                            const hasManualQuota = !!(bot.state._manualStagePrefetchQuota > 0 && bot.state.manualStageFight && (Date.now() - (bot.state.manualStageFightTime || 0) < 15000));
                                             const allowStagePrefetch = bType === 1 &&
-                                                (bot.isAutoStageOn() || bot.state.pendingManualStageInstant || (bot.state.manualStageFight && Date.now() - (bot.state.manualStageFightTime || 0) < 4000)) &&
+                                                (bot.isAutoStageOn() || bot.state.pendingManualStageInstant || hasManualQuota) &&
                                                 !(typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__));
                                             if (allowStagePrefetch) {
                                                 const closedWarId = t._war_id;
-                                                const wasManualOnly = !bot.isAutoStageOn();
+                                                const consumeManualQuota = !bot.isAutoStageOn() && !bot.state.pendingManualStageInstant && hasManualQuota;
+                                                if (consumeManualQuota) {
+                                                    bot.state._manualStagePrefetchQuota = Math.max(0, (bot.state._manualStagePrefetchQuota || 1) - 1);
+                                                }
                                                 setTimeout(function () {
                                                     try {
-                                                        if (typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__)) return;
+                                                        if (!consumeManualQuota && typeof bot.shouldBlockBgStagePull === "function" && bot.shouldBlockBgStagePull(window.__BMV_INSTANCE__)) return;
                                                         const mmNow = window.ModelManager || (gm && gm.ModelManager);
                                                         const bfmNow = (gm && gm.BattleFastManager) || window.BattleFastManager;
                                                         const bmvNow = window.__BMV_INSTANCE__;
@@ -3357,11 +3468,16 @@
                                                         if (bmvNow && progNow && typeof bmvNow.pullBatteData === "function" &&
                                                             (!bfmNow || bfmNow.batteStatus !== 4) &&
                                                             (!hangNow || !hangNow._id || hangNow._id === closedWarId || hangNow._id === bot.state.lastManualSettledStageWarId)) {
-                                                            if (wasManualOnly) bot.state.manualStageFight = false;
-                                                            bmvNow.pullBatteData(progNow);
+                                                            const prevQuota = bot.state._allowImmediateManualPullOnce;
+                                                            if (consumeManualQuota) bot.state._allowImmediateManualPullOnce = true;
+                                                            try {
+                                                                bmvNow.pullBatteData(progNow);
+                                                            } finally {
+                                                                bot.state._allowImmediateManualPullOnce = prevQuota || false;
+                                                            }
                                                         }
                                                     } catch (ePf) { }
-                                                }, 15);
+                                                }, 12);
                                             }
                                         }
                                     } catch (err) { }
@@ -3730,6 +3846,7 @@
 
                                 if (i && isSkip) {
                                     i.skipBattle = true;
+                                    i.quickNext = false;
                                 }
                                 if (origBattleReqFunc) return origBattleReqFunc.apply(this, arguments);
                             };
@@ -3737,11 +3854,28 @@
                             const origClickNext = bcProto.battle_ClickNext;
                             bcProto.battle_ClickNext = function (e, t, i) {
                                 const gType = (i && i.arrayType != null) ? i.arrayType : (typeof e === "number" ? e : 0);
+                                if (gType > 0 && !(typeof bot.isBgSilent === "function" && bot.isBgSilent()) && typeof bot.markManualBattle === "function") {
+                                    bot.markManualBattle(gType, 35000);
+                                }
                                 if (i && canNativeSkipBattle(gType) && bot.settings.skip_battle) {
                                     i.skipBattle = true;
+                                    i.quickNext = false;
                                 }
                                 if (origClickNext) return origClickNext.apply(this, arguments);
                             };
+
+                            const origCheckBattleCfg = bcProto.checkBattleConfigFun;
+                            if (origCheckBattleCfg) {
+                                bcProto.checkBattleConfigFun = function (e, t) {
+                                    if (!bot.state.isReplaying && canNativeSkipBattle(e) && bot.settings && bot.settings.skip_battle) {
+                                        if (!this.BattleConfigs) this.BattleConfigs = [];
+                                        if (!this.BattleConfigs[e]) this.BattleConfigs[e] = { arrayType: e };
+                                        this.BattleConfigs[e].skipBattle = true;
+                                        this.BattleConfigs[e].quickNext = false;
+                                    }
+                                    return origCheckBattleCfg.apply(this, arguments);
+                                };
+                            }
 
                             const origTryToOpen = bcProto.tryToOpen;
                             bcProto.tryToOpen = function (e, t) {
@@ -3894,11 +4028,25 @@
                                     const numCode = Number(code || 0);
                                     if (numCode > 0) {
                                         bot.state.lastServerNotice = { code: numCode, time: Date.now() };
+                                        const lastOutProto = window.__LAST_OUT_PROTO__ || 0;
+                                        if (lastOutProto === 13110 || lastOutProto === 13130) {
+                                            try {
+                                                const trmErr = window.ModelManager && window.ModelManager.TreasureRewardModel;
+                                                if (trmErr) {
+                                                    trmErr._isReqOpenBox = false;
+                                                    trmErr.__reqOpenBoxSince = 0;
+                                                    if (numCode === 7 && typeof trmErr.__scheduleRetryOpenBox === "function") {
+                                                        trmErr.__scheduleRetryOpenBox();
+                                                        return;
+                                                    }
+                                                }
+                                            } catch (eTrmErr) { }
+                                        }
                                         if (numCode === 66) {
                                             bot.state.lastWarError66Time = Date.now();
                                             try { bot.rescueUnsettledBattle("err_code_66"); } catch (e66) { }
                                         }
-                                        const recentManual = !!(bot.state._lastManualUiActionTs && (Date.now() - bot.state._lastManualUiActionTs < 1500));
+                                        const recentManual = !!((bot.state._lastManualUiActionTs && (Date.now() - bot.state._lastManualUiActionTs < 1500)) || (bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 3500)));
                                         if ((typeof bot.isBgSilent === "function" && bot.isBgSilent()) ||
                                             bot.state.rescueFightActive ||
                                             (!recentManual && (bot.isAutoStageOn() || bot.state.isAutoTowerActive === true))) {
@@ -4228,7 +4376,6 @@
                             13,  // FightSkip (Bỏ qua trận đấu)
                             14,  // FightWhack (Đánh nhanh)
                             15,  // FightData (Xem thông số / số liệu dữ liệu trận đấu)
-                            18,  // BoxAuto (Tự động mở rương)
                             37,  // FightSpeed2 (Tốc độ x2)
                             38,  // FightSpeed3 (Tốc độ x3)
                             39,  // FightSpeed4 (Tốc độ x4)
@@ -4272,8 +4419,6 @@
                             172, // TeamSet (Thiết lập đội hình)
                             174, // HeroBag2 (Túi tướng mở rộng)
                             177, // BoxEqBtn (Lọc trang bị rương)
-                            178, // BoxEqSave (Lưu cấu hình lọc trang bị)
-                            179, // BoxEqTime (Mở rương theo thời gian)
                             180, // EquipStone (Khảm Đá Trang Bị)
                             182, // EquipStoneLan (Khảm Đá Lam)
                             183, // EquipStoneLv (Khảm Đá Lục)
@@ -4389,6 +4534,7 @@
 
                         // Hook mu.getConditionTip: Chỉ trả về thỏa mãn cho các module VIP tiện ích
                         const origGetConditionTip = mu.getConditionTip;
+                        mu.__ORIG_GET_COND_TIP__ = origGetConditionTip;
                         mu.getConditionTip = function (t) {
                             const modId = t && (typeof t === "object" ? t.id : t);
                             if (modId && VIP_SET.has(+modId)) {
@@ -4431,71 +4577,72 @@
                     const rsmProto = rsm && (rsm.prototype || Object.getPrototypeOf(rsm));
                     if (rsmProto && !rsmProto.__QA_PRIV_HOOKED__) {
                         rsmProto.__QA_PRIV_HOOKED__ = true;
-
-                        const origUpdatePriv = rsmProto.updatePrivilegeHis;
-                        rsmProto.updatePrivilegeHis = function (e) {
-                            if (e && Array.isArray(e._list)) {
-                                if (!this._realPrivilegeData) this._realPrivilegeData = {};
-                                for (let item of e._list) {
-                                    if (item && item._id) this._realPrivilegeData[item._id] = item;
+                        const syncRealPriv2 = function (inst) {
+                            if (!inst) return;
+                            if (!inst._realPrivilegeData) inst._realPrivilegeData = {};
+                            if (inst._privilegeData && typeof inst._privilegeData === "object") {
+                                for (const k in inst._privilegeData) {
+                                    const p = inst._privilegeData[k];
+                                    if (p && p._id && !p._is_fake) {
+                                        inst._realPrivilegeData[p._id] = p;
+                                    }
                                 }
                             }
-                            if (origUpdatePriv) return origUpdatePriv.apply(this, arguments);
                         };
-
-                        rsmProto.havePrivilegeById = function (id) {
-                            // 1. Đặc Quyền 2: Bỏ qua QC 0s & Treo máy (client-side) -> Luôn mở
-                            if (id === 2) {
-                                return bot.settings.skip_ads !== false;
+                        syncRealPriv2(rsm);
+                        if (!rsmProto.__QA_PRIVILEGE_HOOKED__) {
+                            if (!rsmProto.__ORIG_HAVE_PRIV__ && typeof rsmProto.havePrivilegeById === "function") {
+                                rsmProto.__ORIG_HAVE_PRIV__ = rsmProto.havePrivilegeById;
                             }
-                            // 2. Đặc Quyền 1: Mở khóa Đào 50 rương (PrivilegeOpenBoxCnt)
-                            // CHỈ trả về true khi tài khoản THỰC SỰ có Đặc Quyền 1 từ server (hoặc còn hạn sử dụng).
-                            // Nếu chưa mua/hết hạn, trả về false để game tính đúng số lượng hợp pháp của VIP và cấp Rương (VD: VIP 4 đào 40 rương/lần).
-                            if (id === 1) {
-                                const real = this._realPrivilegeData && this._realPrivilegeData[1];
+                            const origUpdatePriv = rsmProto.updatePrivilegeHis;
+                            rsmProto.updatePrivilegeHis = function (e) {
+                                if (e && Array.isArray(e._list)) {
+                                    if (!this._realPrivilegeData) this._realPrivilegeData = {};
+                                    for (let item of e._list) {
+                                        if (item && item._id && !item._is_fake) this._realPrivilegeData[item._id] = item;
+                                    }
+                                }
+                                const resUpd = origUpdatePriv ? origUpdatePriv.apply(this, arguments) : undefined;
+                                syncRealPriv2(this);
+                                return resUpd;
+                            };
+
+                            rsmProto.havePrivilegeById = function (id) {
+                                const numId = Number(id);
+                                if (numId === 2) {
+                                    return bot.settings.skip_ads !== false;
+                                }
+                                syncRealPriv2(this);
+                                const real = this._realPrivilegeData && (this._realPrivilegeData[numId] || this._realPrivilegeData[id]);
                                 if (real) {
                                     const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
-                                    const now = stm && stm.getServerTime ? stm.getServerTime() : Math.floor(Date.now() / 1000);
-                                    return (real._e_sec === 0 || real._e_sec > now);
+                                    const now = (stm && stm.getServerTime ? stm.getServerTime() : 0) || Math.floor(Date.now() / 1000);
+                                    return (real._e_sec === 0 || Number(real._e_sec) > now);
+                                }
+                                if (rsmProto.__ORIG_HAVE_PRIV__ && !(this._privilegeData && this._privilegeData[numId] && this._privilegeData[numId]._is_fake)) {
+                                    return !!rsmProto.__ORIG_HAVE_PRIV__.apply(this, arguments);
                                 }
                                 return false;
-                            }
-                            // 3. Đặc Quyền 3: Thêm Thợ Gia Viên (PrivilegeHostWoker)
-                            if (id === 3) {
-                                const real = this._realPrivilegeData && this._realPrivilegeData[3];
-                                if (real) {
-                                    const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
-                                    const now = stm && stm.getServerTime ? stm.getServerTime() : Math.floor(Date.now() / 1000);
-                                    return (real._e_sec === 0 || real._e_sec > now);
-                                }
-                                return false;
-                            }
-                            // 4. Các đặc quyền khác (4..8): kiểm tra dữ liệu server thực tế
-                            const real = this._realPrivilegeData && this._realPrivilegeData[id];
-                            if (real) {
-                                const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
-                                const now = stm && stm.getServerTime ? stm.getServerTime() : Math.floor(Date.now() / 1000);
-                                return (real._e_sec === 0 || real._e_sec > now);
-                            }
-                            return false;
-                        };
+                            };
 
-                        const origGetPrivilege = rsmProto.getPrivilegeHisById;
-                        rsmProto.getPrivilegeHisById = function (id) {
-                            // Chỉ bypass client cho Đặc Quyền 2 (Bỏ qua QC 0s)
-                            if (id === 2) {
-                                if (!this._privilegeData) this._privilegeData = {};
-                                if (!this._privilegeData[id]) {
-                                    this._privilegeData[id] = { _id: id, _e_sec: 0, _is_forever: 1, _state: 1, _is_fake: true };
+                            const origGetPrivilege = rsmProto.getPrivilegeHisById;
+                            rsmProto.getPrivilegeHisById = function (id) {
+                                const numId = Number(id);
+                                if (numId === 2) {
+                                    if (!this._privilegeData) this._privilegeData = {};
+                                    if (!this._privilegeData[numId]) {
+                                        this._privilegeData[numId] = { _id: numId, _e_sec: 0, _is_forever: 1, _state: 1, _is_fake: true };
+                                    }
+                                    return this._privilegeData[numId];
                                 }
-                                return this._privilegeData[id];
-                            }
-                            if (this._realPrivilegeData && this._realPrivilegeData[id]) {
-                                return this._realPrivilegeData[id];
-                            }
-                            if (origGetPrivilege) return origGetPrivilege.apply(this, arguments);
-                            return null;
-                        };
+                                syncRealPriv2(this);
+                                if (this._realPrivilegeData && (this._realPrivilegeData[numId] || this._realPrivilegeData[id])) {
+                                    return this._realPrivilegeData[numId] || this._realPrivilegeData[id];
+                                }
+                                if (origGetPrivilege) return origGetPrivilege.apply(this, arguments);
+                                return null;
+                            };
+                        }
                     }
 
                     // 4. Mở khóa Càn Quét Phụ Bản Ngày (Daily Copy Sweep)
@@ -5579,6 +5726,17 @@
                     const ClimbtowerViewClass = (ctvMod && (ctvMod.ClimbtowerView || ctvMod.default || ctvMod)) || (gm && gm.ClimbtowerView) || window.ClimbtowerView;
                     if (ClimbtowerViewClass && ClimbtowerViewClass.prototype && !ClimbtowerViewClass.prototype.__QA_REFRESH_HOOKED__) {
                         ClimbtowerViewClass.prototype.__QA_REFRESH_HOOKED__ = true;
+                        const origCtvShowAnim = ClimbtowerViewClass.prototype._doShowAnimation;
+                        if (origCtvShowAnim) {
+                            ClimbtowerViewClass.prototype._doShowAnimation = function (cb) {
+                                if (bot.settings && bot.settings.skip_battle) {
+                                    this._isDoShowAnimation = false;
+                                    if (typeof cb === "function") cb();
+                                    return;
+                                }
+                                return origCtvShowAnim.apply(this, arguments);
+                            };
+                        }
                         const origCtvInitUI = ClimbtowerViewClass.prototype._initUI;
                         if (origCtvInitUI) {
                             ClimbtowerViewClass.prototype._initUI = function () {
@@ -5723,6 +5881,7 @@
                                                     if (h && ho && ho.power && roleFc / ho.power * 10000 > h.power_ex) qNum++;
                                                 }
                                                 this.quickNum = qNum;
+                                                param.cli = 1;
                                                 param.ext = [{ _type: 0, _key: 0, _val: qNum }];
                                             } else {
                                                 this.quickNum = 0;
@@ -5884,6 +6043,14 @@
                             if (this._args) {
                                 if (this._args.arrayType && typeof bot.markManualBattle === "function") {
                                     bot.markManualBattle(Number(this._args.arrayType), 35000);
+                                }
+                                if (Number(this._args.arrayType) === 1 && !bot.isAutoStageOn()) {
+                                    bot.state.manualStageFight = true;
+                                    bot.state.manualStageFightTime = Date.now();
+                                    bot.state._manualStagePrefetchQuota = 1;
+                                    if (bot.settings && bot.settings.skip_battle) {
+                                        bot.state.pendingManualStageInstant = true;
+                                    }
                                 }
                                 if (this._args.arrayType === 1 && !this._args.copyId && mm && mm.MainUIModel) {
                                     const prog = mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : mm.MainUIModel.mainCopyProgress;
@@ -6060,7 +6227,8 @@
                     ecc.showErroCode = function (code) {
                         try {
                             const line = gm && gm.DynamicConfigDataNew && gm.DynamicConfigDataNew.NoticeDataNotice && gm.DynamicConfigDataNew.NoticeDataNotice.readConfigLine(code);
-                            const content = line ? (line.content || "") : "";
+                            const lcErr = (gm && gm.LanguageConfiger) || window.LanguageConfiger;
+                            const content = line ? (line.content || (line.lang && lcErr && typeof lcErr.getModuleDataLangCh === "function" ? lcErr.getModuleDataLangCh(line.lang) : "") || "") : "";
                             const lower = content.toLowerCase();
                             if (lower.includes("chưa tổng kết") || lower.includes("tổng kết") || content.includes("未结算")) {
                                 bot.rescueUnsettledBattle(content);
@@ -6076,16 +6244,34 @@
                             }
                             const proto = window.__LAST_OUT_PROTO__ || 'N/A';
                             if (proto === 13110 || proto === 13130) {
-                                bot.state.quickDigExhausted = true;
-                                bot.state.treasureFailCooldown = Date.now() + 5000;
+                                if (proto === 13130 || code === 311) {
+                                    bot.state.quickDigExhausted = true;
+                                }
                                 const trm = window.ModelManager && window.ModelManager.TreasureRewardModel;
+                                if (trm) {
+                                    trm._isReqOpenBox = false;
+                                    trm.__reqOpenBoxSince = 0;
+                                    if (code === 7 && typeof trm.__scheduleRetryOpenBox === "function") {
+                                        trm.__scheduleRetryOpenBox();
+                                        return;
+                                    }
+                                }
+                                bot.state.treasureFailCooldown = Date.now() + 3500;
+                                const recentManualDig = !!(bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 4000)) && !(typeof bot.isBgSilent === "function" && bot.isBgSilent());
+                                if (recentManualDig) {
+                                    if (trm && trm._temp_equip && trm._temp_equip.length > 0 && typeof trm.checkAutoTempSell === "function") {
+                                        trm.checkAutoTempSell();
+                                    }
+                                    if (origShowErr) return origShowErr.apply(this, arguments);
+                                    return;
+                                }
                                 if (trm && trm._temp_equip && trm._temp_equip.length > 0 && typeof trm.checkAutoTempSell === "function") {
                                     trm.checkAutoTempSell();
                                 }
                                 if (code === 311) {
-                                    bot.log(`⚠️ [Đào Bảo] Đã hết số lượt Đào Nhanh hôm nay (Mã 311) -> Tự động chuyển sang Đào Thường 40 rương/lần.`);
+                                    bot.log(`⚠️ [Đào Bảo] Đã hết số lượt Đào Nhanh hôm nay (Mã 311) -> Tự động chuyển sang Đào Thường.`);
                                 } else {
-                                    bot.log(`⚠️ [Đào Bảo] Server phản hồi [${code}: ${content || 'Lỗi thao tác đào bảo'}] (Gói ${proto}) -> Đã tự động dọn kho tạm và giãn cách an toàn.`);
+                                    bot.log(`⚠️ [Đào Bảo] Server phản hồi [${code}: ${content || 'Lỗi thao tác đào bảo'}] (Gói ${proto}) -> Đã giãn cách an toàn.`);
                                 }
                                 return;
                             }
@@ -6192,7 +6378,7 @@
                         configurable: true
                     });
 
-                    // 1. Hook setGameMap & resetAndLoadBattelObj: Rút ngắn thời gian chuyển cảnh siêu tốc (0.06s)
+                    // 1. Hook setGameMap & resetAndLoadBattelObj: Rút ngắn thời gian chuyển cảnh siêu tốc (0.02s)
                     const isFastStage = () => (bot.settings && bot.settings.skip_battle) || bot.isAutoStageOn();
                     const origSetGameMap = bmv.prototype.setGameMap;
                     if (origSetGameMap && !bmv.prototype.__QA_SETMAP_HOOKED__) {
@@ -6200,8 +6386,8 @@
                         bmv.prototype.setGameMap = function () {
                             origSetGameMap.apply(this, arguments);
                             if (isFastStage()) {
-                                this.moveTime = 0.06;
-                                this.chapterCrossTime = 0.06;
+                                this.moveTime = 0.02;
+                                this.chapterCrossTime = 0.02;
                             }
                         };
                     }
@@ -6212,8 +6398,8 @@
                         bmv.prototype.resetAndLoadBattelObj = function (e, t) {
                             if (isFastStage()) {
                                 if (t > 0.02) t = 0.02;
-                                this.moveTime = 0.06;
-                                this.chapterCrossTime = 0.06;
+                                this.moveTime = 0.02;
+                                this.chapterCrossTime = 0.02;
                             }
                             return origResetAndLoad.call(this, e, t);
                         };
@@ -6229,6 +6415,9 @@
                                 return origBtnEnterBattle.apply(this, arguments);
                             }
                             if (typeof bot.markManualBattle === "function") bot.markManualBattle(1, 35000);
+                            window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, Date.now() + 3500);
+                            bot.state._manualCombatHoldUntil = Date.now() + 25000;
+                            bot.state._manualStagePrefetchQuota = 1;
                             bot.state.manualStageFight = true;
                             bot.state.manualStageFightTime = Date.now();
                             if (bot.settings && bot.settings.skip_battle) {
@@ -6249,6 +6438,30 @@
                                         if (typeof this.moveNext === "function") {
                                             this.moveNext();
                                         }
+                                        if (bot.state.isScoutLowPowerActive || bot.state._manualRestorePromise || pData.__scoutLowPower === true) {
+                                            // Không bao giờ đánh ải chính tuyến bằng đội hình dò 1..5 tướng của Farm KNB!
+                                            bot.state.pendingManualStageInstant = true;
+                                            const selfBmv = this;
+                                            const progLow = mm && mm.MainUIModel && mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : (mm && mm.MainUIModel && mm.MainUIModel.mainCopyProgress);
+                                            const pullFullStage = function () {
+                                                try {
+                                                    selfBmv.playData = null;
+                                                    if (progLow && typeof selfBmv.pullBatteData === "function") {
+                                                        selfBmv.pullBatteData(progLow);
+                                                    } else if (progLow && progLow._id) {
+                                                        const fmL = bot.getFightManager();
+                                                        if (fmL && typeof fmL.requestCopyData === "function") fmL.requestCopyData(progLow._id);
+                                                    }
+                                                } catch (ePfLow) { }
+                                            };
+                                            const pRestLow = bot.state._manualRestorePromise || ((bot.state.isScoutLowPowerActive && typeof bot.ensureManualFullCombatArray === "function") ? bot.ensureManualFullCombatArray("manual_stage_enter") : null);
+                                            if (pRestLow) {
+                                                Promise.resolve(pRestLow).then(pullFullStage, pullFullStage);
+                                            } else {
+                                                pullFullStage();
+                                            }
+                                            return;
+                                        }
                                         const vm = bot.getViewManager();
                                         const pwmMan = (gm && gm.PopWindowManager) || window.PopWindowManager;
                                         const alreadyPopStg = (vm && typeof vm.isOpenView === "function" && vm.isOpenView("BattleResultView")) ||
@@ -6264,21 +6477,51 @@
                                     }
                                     bot.state.pendingManualStageInstant = true;
                                     const bfmCur = (gm && gm.BattleFastManager) || window.BattleFastManager;
-                                    if (bfmCur && (bfmCur.batteStatus === 4 || bfmCur.batteStatus === 5)) {
-                                        // WarCloseCs (5) hoặc WarStartCs (4) đang trên đường phản hồi -> startWarBattleData sẽ tự chốt 0ms ngay khi gói về, tránh gửi trùng gây mã 66!
+                                    const nowEnter = Date.now();
+                                    const lastStart1 = (window.__LAST_PROTO_TIMES__ && window.__LAST_PROTO_TIMES__["10401_1"]) || 0;
+                                    const lastCloseAny = window.__LAST_WAR_CLOSE_TIME__ || 0;
+                                    if (bfmCur && bfmCur.batteStatus === 4 && (nowEnter - lastStart1 < 900)) {
+                                        // WarStartCs (4) vừa gửi < 0.9s -> startWarBattleData sẽ tự chốt 0ms ngay khi gói về!
                                         return;
                                     }
-                                    const prog = mm && mm.MainUIModel && mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : (mm && mm.MainUIModel && mm.MainUIModel.mainCopyProgress);
-                                    if (prog && typeof this.pullBatteData === "function") {
-                                        this.pullBatteData(prog);
-                                        return;
-                                    } else if (prog && prog._id) {
-                                        const fmInst = bot.getFightManager();
-                                        if (fmInst && typeof fmInst.requestCopyData === "function") {
-                                            fmInst.requestCopyData(prog._id);
+                                    if (bfmCur && bfmCur.batteStatus === 5) {
+                                        if (nowEnter - lastCloseAny < 350) {
+                                            const selfWaitClose = this;
+                                            setTimeout(function () {
+                                                try {
+                                                    if (!bot.state.pendingManualStageInstant) return;
+                                                    if (bfmCur.batteStatus === 5) bfmCur.batteStatus = 6;
+                                                    const progAfter = mm && mm.MainUIModel && mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : (mm && mm.MainUIModel && mm.MainUIModel.mainCopyProgress);
+                                                    if (progAfter && typeof selfWaitClose.pullBatteData === "function") {
+                                                        selfWaitClose.pullBatteData(progAfter);
+                                                    }
+                                                } catch (eWc) { }
+                                            }, Math.max(40, 360 - (nowEnter - lastCloseAny)));
                                             return;
                                         }
+                                        bfmCur.batteStatus = 6;
                                     }
+                                    const selfManualBmv = this;
+                                    const triggerManualPull = function () {
+                                        const prog = mm && mm.MainUIModel && mm.MainUIModel.getMainCopyProgress ? mm.MainUIModel.getMainCopyProgress() : (mm && mm.MainUIModel && mm.MainUIModel.mainCopyProgress);
+                                        if (prog && typeof selfManualBmv.pullBatteData === "function") {
+                                            selfManualBmv.pullBatteData(prog);
+                                            return true;
+                                        } else if (prog && prog._id) {
+                                            const fmInst = bot.getFightManager();
+                                            if (fmInst && typeof fmInst.requestCopyData === "function") {
+                                                fmInst.requestCopyData(prog._id);
+                                                return true;
+                                            }
+                                        }
+                                        return false;
+                                    };
+                                    const pRestMan = bot.state._manualRestorePromise || ((bot.state.isScoutLowPowerActive && typeof bot.ensureManualFullCombatArray === "function") ? bot.ensureManualFullCombatArray("manual_stage_enter") : null);
+                                    if (pRestMan) {
+                                        Promise.resolve(pRestMan).then(triggerManualPull, triggerManualPull);
+                                        return;
+                                    }
+                                    if (triggerManualPull()) return;
                                 } catch (eManual) {
                                     console.warn("[btn_enterBattle Instant Error]", eManual);
                                 }
@@ -6287,10 +6530,8 @@
                         };
                     }
 
-                    // 2. Hook moveNext & evt_requetNextMainCopy: Gửi WarCloseCs (10413) & kéo trước ải kế tiếp tức thì 0ms khi đang Vượt Ải / Đánh Tay!
-                    // Khắc phục triệt để lỗi BattleFastManager.schedule(..., 0.5/4.0s) bị hủy khi CopyAnimState.onLockState đặt canSchedule = false,
-                    // đồng thời KHÔNG tự động bắn WarStartCs (10401 _type: 1) ngầm khi Auto Đi Ải đang TẮT để tránh xung đột mã 66 với Farm KNB!
-                    const isActiveFastStage = () => !!(bot.isAutoStageOn() || bot.state.pendingManualStageInstant || (bot.state.manualStageFight && Date.now() - (bot.state.manualStageFightTime || 0) < 4000));
+                    // 2. Hook moveNext & evt_requetNextMainCopy: Gửi WarCloseCs (10413) & kéo trước đúng 1 ải kế tiếp tức thì 0ms khi đang Vượt Ải / Đánh Tay!
+                    const isActiveFastStage = () => !!(bot.isAutoStageOn() || bot.state.pendingManualStageInstant || (bot.state.manualStageFight && Date.now() - (bot.state.manualStageFightTime || 0) < 15000));
                     const origMoveNext = bmv.prototype.moveNext;
                     if (origMoveNext && !bmv.prototype.__QA_MOVENEXT_HOOKED__) {
                         bmv.prototype.__QA_MOVENEXT_HOOKED__ = true;
@@ -6332,15 +6573,24 @@
                                 if (bot.isAutoStageOn()) bot.state._deferredMainCopyPull = true;
                                 return;
                             }
-                            if (isActiveFastStage() && t && !(typeof this.isInFlimBatte === "function" && this.isInFlimBatte())) {
+                            const allowManualReqNext = bot.isAutoStageOn() || bot.state.pendingManualStageInstant || (bot.state._manualStagePrefetchQuota > 0 && isActiveFastStage());
+                            if (allowManualReqNext && t && !(typeof this.isInFlimBatte === "function" && this.isInFlimBatte())) {
                                 try {
                                     const mmNow = window.ModelManager || (gm && gm.ModelManager);
                                     const curProg = mmNow && mmNow.MainUIModel && mmNow.MainUIModel.getMainCopyProgress ? mmNow.MainUIModel.getMainCopyProgress() : null;
                                     const progKey = `${t._id}_${t._nth}`;
                                     if (this.filmData || !curProg || t._id !== curProg._id || t._nth !== curProg._nth || this.__lastFastPulledProg !== progKey) {
                                         this.__lastFastPulledProg = progKey;
-                                        if (!bot.isAutoStageOn()) bot.state.manualStageFight = false;
-                                        this.pullBatteData(t);
+                                        if (!bot.isAutoStageOn() && !bot.state.pendingManualStageInstant && bot.state._manualStagePrefetchQuota > 0) {
+                                            bot.state._manualStagePrefetchQuota = Math.max(0, bot.state._manualStagePrefetchQuota - 1);
+                                        }
+                                        const prevAllow = bot.state._allowImmediateManualPullOnce;
+                                        bot.state._allowImmediateManualPullOnce = true;
+                                        try {
+                                            this.pullBatteData(t);
+                                        } finally {
+                                            bot.state._allowImmediateManualPullOnce = prevAllow || false;
+                                        }
                                         const mu = (gm && gm.ModuleUtil) || window.ModuleUtil;
                                         if (mu && typeof mu.checkModuleOpen === "function") {
                                             mu.checkModuleOpen(1, t._id);
@@ -7258,181 +7508,376 @@
                     };
                 }
 
-// Hook 10: TreasureBoxView & TreasureRewardModel - Debounce chống lỗi "Mạng không ổn định, không nhấp trùng" (code 7) khi bấm Đào
+// Hook 10: TreasureBoxView, HomePanelHero, TreasureBoxAnim & TreasureRewardModel - Triệt tiêu 100% lỗi "Mạng không ổn định" (code 7), giữ nguyên hiệu ứng Spine & ghép nhịp bấm tay mượt mà!
                 try {
-                    let tbvMod = null;
-                    if (typeof window.__require === "function") {
-                        try { tbvMod = window.__require("TreasureBoxView"); } catch (e) { }
-                    }
+                    const reqTreasureMod = function (modName) {
+                        try {
+                            if (typeof safeRequire === "function") return safeRequire(modName);
+                            if (typeof window.__require === "function") return window.__require(modName);
+                        } catch (eReq) { }
+                        return null;
+                    };
+
+                    const hasRealPriv1Open50 = function () {
+                        try {
+                            const rsmRef = (window.ModelManager && window.ModelManager.RechargeShopModel) || (gm && gm.RechargeShopModel);
+                            const realP1 = rsmRef && rsmRef._realPrivilegeData && rsmRef._realPrivilegeData[1];
+                            if (!realP1) return false;
+                            const stmRef = (window.ModelManager && window.ModelManager.ServerTimeModel) || (gm && gm.ServerTimeModel);
+                            const nowSec = (stmRef && stmRef.getServerTime ? stmRef.getServerTime() : 0) || Math.floor(Date.now() / 1000);
+                            return (realP1._e_sec === 0 || Number(realP1._e_sec) > nowSec);
+                        } catch (eP1) { }
+                        return false;
+                    };
+
+                    const tbvMod = reqTreasureMod("TreasureBoxView");
                     const TreasureBoxViewClass = (tbvMod && (tbvMod.TreasureBoxView || tbvMod.default || tbvMod)) || (gm && gm.TreasureBoxView) || window.TreasureBoxView;
                     if (TreasureBoxViewClass && TreasureBoxViewClass.prototype && !TreasureBoxViewClass.prototype.__QA_DEBOUNCE_HOOKED__) {
                         TreasureBoxViewClass.prototype.__QA_DEBOUNCE_HOOKED__ = true;
                         const origOpenBox = TreasureBoxViewClass.prototype.openBox;
                         TreasureBoxViewClass.prototype.openBox = function () {
                             const now = Date.now();
-                            if (this.__lastOpenBoxClick && (now - this.__lastOpenBoxClick < 400)) {
-                                console.warn("[TreasureBoxView] Bỏ qua nhấp trùng < 400ms");
+                            const isBg = (typeof bot.isBgSilent === "function" && bot.isBgSilent());
+                            if (!isBg) {
+                                bot.state._lastManualUiActionTs = now;
+                                bot.state._lastManualDigTs = now;
+                                bot.state._bgSilentUntil = 0;
+                                window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, now + 4500);
+                            }
+
+                            const selfView = this;
+                            const trmRef = window.ModelManager && window.ModelManager.TreasureRewardModel;
+                            try {
+                                if (trmRef) {
+                                    trmRef.isInOpenBox = true;
+                                    if (trmRef.isFlyAnim) {
+                                        if (!trmRef.__flyAnimSince) {
+                                            trmRef.__flyAnimSince = now;
+                                        } else if (now - trmRef.__flyAnimSince > 900) {
+                                            trmRef.isFlyAnim = false;
+                                            trmRef.__flyAnimSince = 0;
+                                        }
+                                    } else {
+                                        trmRef.__flyAnimSince = 0;
+                                    }
+                                    if (trmRef._isReqOpenBox && trmRef.__reqOpenBoxSince && (now - trmRef.__reqOpenBoxSince > 1400)) {
+                                        trmRef._isReqOpenBox = false;
+                                        trmRef.__reqOpenBoxSince = 0;
+                                    }
+                                }
+                                if (this.boxAnim1 && this.boxAnim1._isInEffect) {
+                                    const effAge = now - (this.boxAnim1.__effectStartTs || 0);
+                                    if (!this.boxAnim1.__effectStartTs || effAge > 1800) {
+                                        this.boxAnim1._isInEffect = false;
+                                        const pendingFn = this.boxAnim1.effCallFun;
+                                        this.boxAnim1.effCallFun = null;
+                                        if (typeof pendingFn === "function") {
+                                            try { pendingFn(); } catch (ePf) { }
+                                        }
+                                    }
+                                }
+                            } catch (eHeal) { }
+
+                            // Nếu vừa gửi gói 13110 chưa đủ 480ms hoặc đang chờ Server trả EquipBoxUpdateTempSc -> Xếp hàng tự đào ngay khi gói trước về (0% lỗi "Mạng không ổn định" code 7!)
+                            if (trmRef && ((trmRef._isReqOpenBox && (now - (trmRef.__reqOpenBoxSince || 0) < 1400)) || (trmRef.__lastBoxSentTs && (now - trmRef.__lastBoxSentTs < 480)))) {
+                                trmRef.__queuedManualOpenView = selfView;
+                                if (!trmRef.__queuedManualOpenTimer) {
+                                    const waitMs = Math.max(80, 485 - (now - (trmRef.__lastBoxSentTs || now)));
+                                    trmRef.__queuedManualOpenTimer = trackTimer(setTimeout(function () {
+                                        trmRef.__queuedManualOpenTimer = null;
+                                        const v = trmRef.__queuedManualOpenView;
+                                        trmRef.__queuedManualOpenView = null;
+                                        if (v && !v.isDisposed && typeof v.openBox === "function") {
+                                            if (trmRef._isReqOpenBox && (Date.now() - (trmRef.__reqOpenBoxSince || 0) < 1200)) {
+                                                trmRef.__queuedManualOpenView = v;
+                                                return;
+                                            }
+                                            try {
+                                                if (v.boxAnim1 && v.boxAnim1._isInEffect) {
+                                                    v.boxAnim1._isInEffect = false;
+                                                    const fn = v.boxAnim1.effCallFun;
+                                                    v.boxAnim1.effCallFun = null;
+                                                    if (typeof fn === "function") fn();
+                                                }
+                                                v.openBox();
+                                            } catch (eQOpen) { }
+                                        }
+                                    }, waitMs));
+                                }
                                 return;
                             }
-                            this.__lastOpenBoxClick = now;
+
                             if (origOpenBox) return origOpenBox.apply(this, arguments);
                         };
                     }
 
-                    const trmModel = (window.ModelManager && window.ModelManager.TreasureRewardModel) || (gm && gm.TreasureRewardModel);
-                    const trmClass = (trmModel && trmModel.constructor) || (gm && gm.TreasureRewardModel);
-                    if (trmClass && trmClass.prototype && !trmClass.prototype.__QA_DEBOUNCE_HOOKED__) {
-                        trmClass.prototype.__QA_DEBOUNCE_HOOKED__ = true;
-                        const origReqOpen = trmClass.prototype.reqEquipBoxOpen;
-                        trmClass.prototype.reqEquipBoxOpen = function (cnt, type) {
-                            type = (typeof type !== "undefined") ? type : 3;
-                            const now = Date.now();
-                            if (this.__lastBoxReqTime && (now - this.__lastBoxReqTime < 250)) {
-                                console.warn("[TreasureRewardModel] Chặn gửi trùng reqEquipBoxOpen < 250ms");
-                                return;
-                            }
-                            this.__lastBoxReqTime = now;
+                    const hphMod = reqTreasureMod("HomePanelHero");
+                    const HomePanelHeroClass = (hphMod && (hphMod.HomePanelHero || hphMod.default || hphMod)) || (gm && gm.HomePanelHero) || window.HomePanelHero;
+                    if (HomePanelHeroClass && HomePanelHeroClass.prototype && !HomePanelHeroClass.prototype.__QA_QUICKDIG_HOOKED__) {
+                        HomePanelHeroClass.prototype.__QA_QUICKDIG_HOOKED__ = true;
+                        const origShowQuickConfirm = HomePanelHeroClass.prototype.showQuickConfirm;
+                        if (typeof origShowQuickConfirm === "function") {
+                            HomePanelHeroClass.prototype.showQuickConfirm = function () {
+                                const nowH = Date.now();
+                                bot.state._lastManualDigTs = nowH;
+                                bot.state._lastManualUiActionTs = nowH;
+                                bot.state._bgSilentUntil = 0;
+                                window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, nowH + 4500);
+                                return origShowQuickConfirm.apply(this, arguments);
+                            };
+                        }
+                    }
 
-                            // Tự động dọn kho tạm nếu có trang bị chờ xử lý trước khi mở tiếp
-                            try {
-                                if (this._temp_equip && this._temp_equip.length > 0 && typeof this.checkAutoTempSell === "function") {
-                                    this.checkAutoTempSell();
+                    const tbaMod = reqTreasureMod("TreasureBoxAnim");
+                    const TreasureBoxAnimClass = (tbaMod && (tbaMod.TreasureBoxAnim || tbaMod.default || tbaMod)) || (gm && gm.TreasureBoxAnim) || window.TreasureBoxAnim;
+                    if (TreasureBoxAnimClass && TreasureBoxAnimClass.prototype && !TreasureBoxAnimClass.prototype.__QA_ANIM_GUARD_HOOKED__) {
+                        TreasureBoxAnimClass.prototype.__QA_ANIM_GUARD_HOOKED__ = true;
+                        const origOpenBoxEffNew = TreasureBoxAnimClass.prototype.open_box_effect_new;
+                        if (typeof origOpenBoxEffNew === "function") {
+                            TreasureBoxAnimClass.prototype.open_box_effect_new = function (evtName, evtData) {
+                                const animSelf = this;
+                                const callFunRef = (evtData && typeof evtData.callFun === "function") ? evtData.callFun : null;
+                                animSelf.__effectStartTs = Date.now();
+                                const trmCur = window.ModelManager && window.ModelManager.TreasureRewardModel;
+                                if (trmCur) {
+                                    trmCur._isReqOpenBox = false;
+                                    trmCur.__reqOpenBoxSince = 0;
                                 }
-                            } catch (eSell) { }
-
-                            // Nếu mở >= 50 và còn lượt Đào Nhanh trong ngày -> dùng reqQuickDig native của server (chỉ khi chưa hết lượt)
-                            try {
-                                const leftQuick = (typeof this.getLeftQuickDigNum === "function") ? (this.getLeftQuickDigNum() || 0) : 0;
-                                if (cnt >= 50 && leftQuick > 0 && bot.state.quickDigExhausted !== true && typeof this.reqQuickDig === "function") {
-                                    return this.reqQuickDig(cnt, type || 3);
-                                }
-                            } catch (eQD) { }
-
-                            // 1. Kiểm tra tài khoản có sở hữu Privilege 1 thực tế trên server không
-                            const rsm = (window.ModelManager && window.ModelManager.RechargeShopModel) || (window.G_Mapping && window.G_Mapping.RechargeShopModel);
-                            const hasRealPriv1 = (function () {
                                 try {
-                                    if (rsm && rsm._realPrivilegeData && rsm._realPrivilegeData[1]) {
-                                        const p1 = rsm._realPrivilegeData[1];
-                                        const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (window.G_Mapping && window.G_Mapping.ServerTimeModel);
-                                        const now = (stm && stm.getServerTime ? stm.getServerTime() : 0) || Math.floor(Date.now() / 1000);
-                                        return (p1._e_sec === 0 || p1._e_sec > now);
+                                    const resAnim = origOpenBoxEffNew.apply(animSelf, arguments);
+                                    trackTimer(setTimeout(function () {
+                                        try {
+                                            if (animSelf && (animSelf._isInEffect || (callFunRef && animSelf.effCallFun === callFunRef))) {
+                                                animSelf._isInEffect = false;
+                                                const fn = animSelf.effCallFun || callFunRef;
+                                                animSelf.effCallFun = null;
+                                                if (typeof fn === "function") fn();
+                                            }
+                                        } catch (eSafeAnim) { }
+                                    }, 1800));
+                                    return resAnim;
+                                } catch (eAnimErr) {
+                                    animSelf._isInEffect = false;
+                                    animSelf.effCallFun = null;
+                                    if (callFunRef) {
+                                        try { callFunRef(); } catch (eCf) { }
                                     }
-                                } catch (eP) { }
-                                return false;
-                            })();
-
-                            // 2. Lấy giới hạn số lượng mở hợp lệ mà server cho phép trong 1 gói (VIP 4 mở được 40 rương/lần)
-                            let legalCnt = 40;
-                            try {
-                                if (typeof this.geBoxOpenRealyNumByType === "function") {
-                                    legalCnt = this.geBoxOpenRealyNumByType(type || 3);
-                                } else if (typeof this.geBoxOpenNumByType === "function") {
-                                    legalCnt = this.geBoxOpenNumByType(type || 3);
-                                }
-                            } catch (eCnt) { }
-                            if (!hasRealPriv1 && legalCnt > 40) {
-                                legalCnt = 40;
-                            }
-                            legalCnt = Math.max(1, legalCnt || 40);
-
-                            // 3. Nếu tài khoản có VIP 1 thật hoặc số lượng gửi <= legalCnt: Gửi thẳng
-                            if (hasRealPriv1 || cnt <= legalCnt) {
-                                if (origReqOpen) return origReqOpen.call(this, cnt, type);
-                                return;
-                            }
-
-                            // 4. Nếu người chơi bấm Mở vượt quá legalCnt (ví dụ 50 rương khi legalCnt là 40):
-                            // Tự động chia nhỏ thành các đợt mở legalCnt (40 rương/lần, đợt sau 10) gửi cách nhau 500ms
-                            const self = this;
-                            let remaining = cnt;
-                            const sendChunk = function () {
-                                if (remaining <= 0) return;
-                                try {
-                                    const costInfo = (typeof self.geBoxCostByType === "function") ? self.geBoxCostByType(type) : null;
-                                    if (costInfo && costInfo.length >= 3) {
-                                        const pm = (window.ModelManager && window.ModelManager.PlayerModel) || (window.G_Mapping && window.G_Mapping.PlayerModel);
-                                        const curMoney = pm ? pm.getMoneyNum(costInfo[1]) : 999;
-                                        const costPerBox = costInfo[2] || 1;
-                                        if (curMoney < costPerBox) {
-                                            console.log("[TreasureRewardModel] Hết xẻng, dừng chuỗi mở rương.");
-                                            return;
-                                        }
-                                    }
-                                } catch (eChk) { }
-
-                                const thisBatch = Math.min(remaining, legalCnt);
-                                remaining -= thisBatch;
-                                self.__lastBoxReqTime = Date.now();
-                                if (origReqOpen) origReqOpen.call(self, thisBatch, type);
-
-                                if (remaining > 0 && bot.state.quickDigExhausted !== true) {
-                                    setTimeout(sendChunk, 500);
                                 }
                             };
-                            sendChunk();
+                        }
+                    }
+
+                    const trmModel = (window.ModelManager && window.ModelManager.TreasureRewardModel) || (gm && gm.TreasureRewardModel);
+                    const trmClass = (trmModel && trmModel.constructor) || (gm && gm.TreasureRewardModel);
+                    const trmProto = (trmClass && trmClass.prototype) || (trmModel && Object.getPrototypeOf(trmModel));
+                    if (trmProto && !trmProto.__QA_DEBOUNCE_HOOKED__) {
+                        trmProto.__QA_DEBOUNCE_HOOKED__ = true;
+
+                        const origGetSaveNum = trmProto.getEquipTempSaveNum;
+                        if (typeof origGetSaveNum === "function") {
+                            trmProto.getEquipTempSaveNum = function () {
+                                if (typeof bot.isSafeModuleOpen === "function" && !bot.isSafeModuleOpen(178)) {
+                                    return 1;
+                                }
+                                return Math.max(1, Number(origGetSaveNum.apply(this, arguments) || 1));
+                            };
+                        }
+
+                        const origGetRealyNum = trmProto.geBoxOpenRealyNumByType;
+                        if (typeof origGetRealyNum === "function") {
+                            trmProto.geBoxOpenRealyNumByType = function (bType) {
+                                const tp = (typeof bType !== "undefined") ? bType : 3;
+                                let rawNum = Number(origGetRealyNum.call(this, tp) || 0);
+                                if (!hasRealPriv1Open50() && rawNum > 40) {
+                                    rawNum = 40;
+                                }
+                                const pmRef = window.ModelManager && window.ModelManager.PlayerModel;
+                                const costArr = (typeof this.geBoxCostByType === "function") ? (this.geBoxCostByType(tp) || []) : [];
+                                const cId = (costArr && costArr[1]) ? costArr[1] : (this.costId3 || 71);
+                                const unitCost = Math.max(1, Number((costArr && costArr[2]) || 1));
+                                const openMult = Math.max(1, Number(this.open_count || this._open_count || 1));
+                                const stepCost = unitCost * openMult;
+                                if (pmRef && typeof pmRef.getMoneyNum === "function") {
+                                    const curMoney = Number(pmRef.getMoneyNum(cId) || 0);
+                                    const afford = Math.floor(curMoney / stepCost);
+                                    if (afford <= 0) return 0;
+                                    rawNum = Math.min(Math.max(1, rawNum), afford);
+                                }
+                                return Math.max(0, rawNum);
+                            };
+                        }
+
+                        const flushQueuedTreasureOpen = function (inst) {
+                            if (!inst) return;
+                            inst._isReqOpenBox = false;
+                            inst.__reqOpenBoxSince = 0;
+                            inst.__lastBoxSettledTs = Date.now();
+                            if (inst.__queuedBoxOpenArgs || inst.__queuedManualOpenView) {
+                                if (inst.__queuedFlushTimer) clearTimeout(inst.__queuedFlushTimer);
+                                const waitNext = Math.max(45, 485 - (Date.now() - (inst.__lastBoxSentTs || 0)));
+                                inst.__queuedFlushTimer = trackTimer(setTimeout(function () {
+                                    inst.__queuedFlushTimer = null;
+                                    if (inst._isReqOpenBox) return;
+                                    if (inst.__queuedBoxOpenArgs) {
+                                        const q = inst.__queuedBoxOpenArgs;
+                                        inst.__queuedBoxOpenArgs = null;
+                                        if (q.isBg && typeof bot.runInBgAutoContext === "function") {
+                                            bot.runInBgAutoContext(function () { inst.reqEquipBoxOpen(q.cnt, q.type); });
+                                        } else {
+                                            inst.reqEquipBoxOpen(q.cnt, q.type);
+                                        }
+                                        return;
+                                    }
+                                    if (inst.__queuedManualOpenView) {
+                                        const v = inst.__queuedManualOpenView;
+                                        inst.__queuedManualOpenView = null;
+                                        if (v && !v.isDisposed && typeof v.openBox === "function") {
+                                            try {
+                                                if (v.boxAnim1 && v.boxAnim1._isInEffect) {
+                                                    v.boxAnim1._isInEffect = false;
+                                                    const fn = v.boxAnim1.effCallFun;
+                                                    v.boxAnim1.effCallFun = null;
+                                                    if (typeof fn === "function") fn();
+                                                }
+                                                v.openBox();
+                                            } catch (eFv) { }
+                                        }
+                                    }
+                                }, waitNext));
+                            }
                         };
 
-                        // Tương tự cho reqQuickDig (Đào nhanh)
-                        if (typeof trmClass.prototype.reqQuickDig === "function") {
-                            const origReqQuickDig = trmClass.prototype.reqQuickDig;
-                            trmClass.prototype.reqQuickDig = function (cnt, type) {
-                                type = (typeof type !== "undefined") ? type : 3;
-                                // Nếu đã báo hết lượt đào nhanh (311) -> chuyển thẳng sang reqEquipBoxOpen
-                                if (bot.state.quickDigExhausted === true) {
-                                    return this.reqEquipBoxOpen(cnt, type);
-                                }
-                                const rsm = (window.ModelManager && window.ModelManager.RechargeShopModel) || (window.G_Mapping && window.G_Mapping.RechargeShopModel);
-                                const hasRealPriv1 = (function () {
-                                    try {
-                                        if (rsm && rsm._realPrivilegeData && rsm._realPrivilegeData[1]) {
-                                            const p1 = rsm._realPrivilegeData[1];
-                                            const stm = (window.ModelManager && window.ModelManager.ServerTimeModel) || (window.G_Mapping && window.G_Mapping.ServerTimeModel);
-                                            const now = (stm && stm.getServerTime ? stm.getServerTime() : 0) || Math.floor(Date.now() / 1000);
-                                            return (p1._e_sec === 0 || p1._e_sec > now);
-                                        }
-                                    } catch (eP) { }
-                                    return false;
-                                })();
+                        ["updateTempNew", "refreshTemp", "refreshTempNew", "updateEquipNew"].forEach(function (fnName) {
+                            const origFn = trmProto[fnName];
+                            if (typeof origFn === "function") {
+                                trmProto[fnName] = function () {
+                                    const r = origFn.apply(this, arguments);
+                                    flushQueuedTreasureOpen(this);
+                                    return r;
+                                };
+                            }
+                        });
 
-                                let legalCnt = 40;
-                                try {
-                                    if (typeof this.geBoxOpenRealyNumByType === "function") {
-                                        legalCnt = this.geBoxOpenRealyNumByType(type || 3);
-                                    } else if (typeof this.geBoxOpenNumByType === "function") {
-                                        legalCnt = this.geBoxOpenNumByType(type || 3);
+                        const origReqOpen = trmProto.reqEquipBoxOpen;
+                        trmProto.__scheduleRetryOpenBox = function () {
+                            const inst = this;
+                            const lastArgs = inst.__lastDispatchedBoxArgs;
+                            if (!lastArgs || inst.__retryCode7Timer) return;
+                            inst.__retryCode7Timer = trackTimer(setTimeout(function () {
+                                inst.__retryCode7Timer = null;
+                                if (!inst._isReqOpenBox) {
+                                    inst.reqEquipBoxOpen(lastArgs.cnt, lastArgs.type);
+                                }
+                            }, 520));
+                        };
+
+                        trmProto.reqEquipBoxOpen = function (cnt, type) {
+                            type = (typeof type !== "undefined") ? type : 3;
+                            const now = Date.now();
+                            const isBg = (typeof bot.isBgSilent === "function" && bot.isBgSilent());
+                            if (!isBg) {
+                                bot.state._lastManualDigTs = now;
+                                bot.state._lastManualUiActionTs = now;
+                                bot.state._bgSilentUntil = 0;
+                                window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, now + 4500);
+                            }
+
+                            const legalMax = hasRealPriv1Open50() ? 50 : 40;
+                            let safeCnt = Math.max(1, Math.min(legalMax, Number(cnt) || 1));
+
+                            const pmRef = window.ModelManager && window.ModelManager.PlayerModel;
+                            const costArr = (typeof this.geBoxCostByType === "function") ? (this.geBoxCostByType(type) || []) : [];
+                            const cId = (costArr && costArr[1]) ? costArr[1] : (this.costId3 || 71);
+                            const unitCost = Math.max(1, Number((costArr && costArr[2]) || 1));
+                            const openMult = Math.max(1, Number(this.open_count || this._open_count || 1));
+                            const stepCost = unitCost * openMult;
+                            if (pmRef && typeof pmRef.getMoneyNum === "function") {
+                                const curMoney = Number(pmRef.getMoneyNum(cId) || 0);
+                                const afford = Math.floor(curMoney / stepCost);
+                                if (afford < 1) {
+                                    this._isReqOpenBox = false;
+                                    this.__reqOpenBoxSince = 0;
+                                    if (!isBg) {
+                                        const vmRef = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
+                                        if (vmRef && typeof vmRef.open === "function") vmRef.open("HookLinkView", cId);
                                     }
-                                } catch (eCnt) { }
-                                if (!hasRealPriv1 && legalCnt > 40) {
-                                    legalCnt = 40;
-                                }
-                                legalCnt = Math.max(1, legalCnt || 40);
-
-                                let targetCnt = cnt;
-                                if (!targetCnt) {
-                                    try {
-                                        targetCnt = (typeof this.geBoxOpenRealyNumByType === "function") ? this.geBoxOpenRealyNumByType(type || 3) : 40;
-                                    } catch (eC) { targetCnt = 40; }
-                                }
-
-                                if (hasRealPriv1 || targetCnt <= legalCnt) {
-                                    if (origReqQuickDig) return origReqQuickDig.call(this, targetCnt, type);
                                     return;
                                 }
+                                safeCnt = Math.min(safeCnt, afford);
+                            }
 
-                                const self = this;
-                                let remaining = targetCnt;
-                                const sendQuickChunk = function () {
-                                    if (remaining <= 0) return;
-                                    const thisBatch = Math.min(remaining, legalCnt);
-                                    remaining -= thisBatch;
-                                    self.__lastBoxReqTime = Date.now();
-                                    if (origReqQuickDig) origReqQuickDig.call(self, thisBatch, type);
-                                    if (remaining > 0 && bot.state.quickDigExhausted !== true) {
-                                        setTimeout(sendQuickChunk, 500);
+                            if (Array.isArray(this._temp_equip) && this._temp_equip.length > 0) {
+                                if (typeof this.checkAutoTempSell === "function") {
+                                    try { this.checkAutoTempSell(); } catch (eCats) { }
+                                }
+                                const realCap = (typeof this.getEquipTempSaveNum === "function") ? Number(this.getEquipTempSaveNum() || 1) : 1;
+                                const lastSellTs = (window.__LAST_PROTO_TIMES__ && window.__LAST_PROTO_TIMES__[13114]) || 0;
+                                if (lastSellTs && (now - lastSellTs < 170)) {
+                                    const selfAfterSell = this;
+                                    this.__queuedBoxOpenArgs = { cnt: safeCnt, type: type, isBg: isBg };
+                                    if (!this.__afterSellOpenTimer) {
+                                        this.__afterSellOpenTimer = trackTimer(setTimeout(function () {
+                                            selfAfterSell.__afterSellOpenTimer = null;
+                                            const q = selfAfterSell.__queuedBoxOpenArgs;
+                                            selfAfterSell.__queuedBoxOpenArgs = null;
+                                            if (q) selfAfterSell.reqEquipBoxOpen(q.cnt, q.type);
+                                        }, 185));
                                     }
-                                };
-                                sendQuickChunk();
+                                    return;
+                                }
+                                if (Array.isArray(this._temp_equip) && this._temp_equip.length >= realCap) {
+                                    this._isReqOpenBox = false;
+                                    this.__reqOpenBoxSince = 0;
+                                    if (!isBg && typeof this.showNewEquip === "function") {
+                                        try { this.showNewEquip(); } catch (eSne) { }
+                                    }
+                                    return;
+                                }
+                            }
+
+                            if (this._isReqOpenBox && this.__reqOpenBoxSince && (now - this.__reqOpenBoxSince > 1400)) {
+                                this._isReqOpenBox = false;
+                                this.__reqOpenBoxSince = 0;
+                            }
+
+                            if ((this._isReqOpenBox && (now - (this.__reqOpenBoxSince || 0) < 1400)) || (this.__lastBoxSentTs && (now - this.__lastBoxSentTs < 480))) {
+                                const selfQ = this;
+                                this.__queuedBoxOpenArgs = { cnt: safeCnt, type: type, isBg: isBg };
+                                if (!this.__queuedFlushTimer) {
+                                    const delayMs = Math.max(90, 485 - (now - (this.__lastBoxSentTs || now)));
+                                    this.__queuedFlushTimer = trackTimer(setTimeout(function () {
+                                        selfQ.__queuedFlushTimer = null;
+                                        if (selfQ._isReqOpenBox && (Date.now() - (selfQ.__reqOpenBoxSince || 0) < 1200)) return;
+                                        const q = selfQ.__queuedBoxOpenArgs;
+                                        selfQ.__queuedBoxOpenArgs = null;
+                                        if (q) selfQ.reqEquipBoxOpen(q.cnt, q.type);
+                                    }, delayMs));
+                                }
+                                return;
+                            }
+
+                            this.__lastBoxSentTs = now;
+                            this._isReqOpenBox = true;
+                            this.__reqOpenBoxSince = now;
+                            this.__lastDispatchedBoxArgs = { cnt: safeCnt, type: type };
+                            if (origReqOpen) return origReqOpen.call(this, safeCnt, type);
+                        };
+
+                        if (typeof trmProto.reqQuickDig === "function") {
+                            const origReqQuickDig = trmProto.reqQuickDig;
+                            trmProto.reqQuickDig = function (cnt, type) {
+                                type = (typeof type !== "undefined") ? type : 3;
+                                const nowQd = Date.now();
+                                if (!(typeof bot.isBgSilent === "function" && bot.isBgSilent())) {
+                                    bot.state._lastManualDigTs = nowQd;
+                                    bot.state._lastManualUiActionTs = nowQd;
+                                    window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, nowQd + 4500);
+                                }
+                                if (bot.state.quickDigExhausted === true) {
+                                    const openCnt = (typeof this.geBoxOpenRealyNumByType === "function" ? this.geBoxOpenRealyNumByType(type) : cnt) || 1;
+                                    return this.reqEquipBoxOpen(openCnt, type);
+                                }
+                                if (origReqQuickDig) return origReqQuickDig.apply(this, arguments);
                             };
                         }
                     }
@@ -7658,8 +8103,14 @@
                         disp.dispatchEvent = function (evt, ...args) {
                             try {
                                 if (evt === "evt_LoginKickSc") {
-                                    bot.log("📱 [Nhường Máy] Bắt được sự kiện evt_LoginKickSc từ Dispatcher -> Nhường máy ngay!");
-                                    bot.triggerEmergencyYield("Dispatcher evt_LoginKickSc (10103)");
+                                    const kData = args[0] || {};
+                                    const kRes = Number(kData._res != null ? kData._res : (kData._code != null ? kData._code : 0));
+                                    if (kRes === 1) {
+                                        bot.log("📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=1) -> Nhường máy ngay!");
+                                        bot.triggerEmergencyYield("Dispatcher evt_LoginKickSc (_res=1)");
+                                    } else if (typeof bot.requestFreshRelogin === "function") {
+                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes);
+                                    }
                                 }
                                 const evType = (gm && gm.EventType) || window.EventType || {};
                                 if (evt === "skvs_pre_guess_role_update" || evt === evType.skvs_pre_guess_role_update) {
@@ -8325,12 +8776,19 @@
                 }
                 if (mm && mm.RechargeShopModel) {
                     const rsm = mm.RechargeShopModel;
-                    // Dọn dẹp triệt để bất kỳ dữ liệu fake nào của Privilege 1 & 3 để giao diện và tính toán về chuẩn xác thực tế của server
+                    // Đồng bộ đặc quyền thật đã tải từ server trước khi hook & chỉ xóa mục _is_fake client-side!
                     if (rsm._privilegeData) {
-                        if (rsm._privilegeData[1] && (!rsm._realPrivilegeData || !rsm._realPrivilegeData[1])) {
+                        if (!rsm._realPrivilegeData) rsm._realPrivilegeData = {};
+                        for (const pk in rsm._privilegeData) {
+                            const pv = rsm._privilegeData[pk];
+                            if (pv && pv._id && !pv._is_fake) {
+                                rsm._realPrivilegeData[pv._id] = pv;
+                            }
+                        }
+                        if (rsm._privilegeData[1] && rsm._privilegeData[1]._is_fake === true) {
                             delete rsm._privilegeData[1];
                         }
-                        if (rsm._privilegeData[3] && (!rsm._realPrivilegeData || !rsm._realPrivilegeData[3])) {
+                        if (rsm._privilegeData[3] && rsm._privilegeData[3]._is_fake === true) {
                             delete rsm._privilegeData[3];
                         }
                     }
@@ -13042,104 +13500,203 @@
             const mm = window.ModelManager;
             const gm = window.G_Mapping;
             if (!mm || !mm.TreasureRewardModel || !mm.PlayerModel) return false;
+            if (bot.state._handlingTreasureSmart) return false;
 
-            // KIỂM TRA TƯƠNG TÁC NGƯỜI CHƠI: Nếu người chơi đang mở giao diện Đào Bảo (TreasureBoxView), bot dừng hoàn toàn để người chơi tự bấm
-            const vm = bot.getViewManager();
-            if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("TreasureBoxView")) {
+            // Nhường hoàn toàn khi người chơi đang chạm màn hình, mở popup Đào Nhanh (TreasureCallingView) hoặc vừa tự bấm Đào Bảo trong 8s!
+            // Lưu ý: TreasureBoxView là half-view nằm trong MutiWindow (MainUI_2025View) nên isOpenView("TreasureBoxView") giữ true suốt phiên sau lần mở tab đầu tiên!
+            if (window.__USER_TOUCH_YIELD_UNTIL__ && Date.now() < window.__USER_TOUCH_YIELD_UNTIL__) {
+                return false;
+            }
+            if (bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 8000)) {
+                return false;
+            }
+            if (bot.state.treasureFailCooldown && Date.now() < bot.state.treasureFailCooldown) return false;
+
+            const vm = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
+            if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("TreasureCallingView")) {
+                return false;
+            }
+            const trm = mm.TreasureRewardModel;
+            if ((trm._isReqOpenBox && trm.__reqOpenBoxSince && (Date.now() - trm.__reqOpenBoxSince < 2000)) || (trm.__lastBoxSentTs && (Date.now() - trm.__lastBoxSentTs < 650))) {
+                return false;
+            }
+            const pm = mm.PlayerModel;
+            const autoShovel = !!(bot.settings && bot.settings.auto_shovel === true);
+
+            // Nếu KHÔNG bật Auto Đào Bảo và người chơi đang tự xem popup chọn đồ -> tuyệt đối không đụng vào _temp_equip
+            if (!autoShovel && vm && typeof vm.isOpenView === "function" && vm.isOpenView("TreasureEquipHandlerView")) {
                 return false;
             }
 
-            // Chống "Thao tác quá nhanh" hoặc cooldown sau lỗi đào bảo
-            if (bot.state.treasureFailCooldown && Date.now() < bot.state.treasureFailCooldown) return false;
-
-            const trm = mm.TreasureRewardModel;
-            const pm = mm.PlayerModel;
-
-            // CONDITION-DRIVEN: Fast exit nếu kho tạm rỗng, không đủ xẻng, không có nâng cấp rương
-            const hasTemp = trm._temp_equip && trm._temp_equip.length > 0;
-            const autoShovel = bot.settings && bot.settings.auto_shovel === true;
-            const costCfg = trm.geBoxCostByType ? (trm.geBoxCostByType(3) || trm.geBoxCostByType(2)) : [];
-            const costId = (costCfg && costCfg[1]) ? costCfg[1] : 71; // Xẻng phổ thông (71 - Đồng)
+            const hasTemp = autoShovel && Array.isArray(trm._temp_equip) && trm._temp_equip.length > 0;
+            const costCfg = trm.geBoxCostByType ? (trm.geBoxCostByType(3) || []) : [];
+            const costId = (costCfg && costCfg[1]) ? costCfg[1] : (trm.costId3 || 71);
             const costPerOpen = (costCfg && costCfg[2]) ? costCfg[2] : 1;
             const shovels = pm.getMoneyNum ? pm.getMoneyNum(costId) : 0;
-            const canDig = autoShovel && shovels >= costPerOpen && bot.canDo("treasure_dig_cycle", 12);
-            const canBoxUp = bot.canDo("treasure_box_lvup", 30) && bot.hasRed("V_BoxUp");
+            const canDig = autoShovel && !hasTemp && shovels >= costPerOpen && bot.canDo("treasure_dig_cycle", 3);
+            const canBoxUp = autoShovel && bot.canDo("treasure_box_lvup", 20) && bot.hasRed("V_BoxUp");
 
             if (!hasTemp && !canDig && !canBoxUp) return false;
 
             let didSomething = false;
+            bot.state._handlingTreasureSmart = true;
+
+            const resolveTreasureMod = function (modName) {
+                try {
+                    if (typeof safeRequire === "function") return safeRequire(modName);
+                    if (typeof window.__require === "function") return window.__require(modName);
+                } catch (eReq) { }
+                return null;
+            };
+
+            const buildEquipItemObj = function (rawItem) {
+                if (!rawItem) return null;
+                if (typeof rawItem.getPowerTotal === "function" && typeof rawItem.getPos === "function") {
+                    return rawItem;
+                }
+                const eqMod = resolveTreasureMod("EquipItemData");
+                const EquipCls = (eqMod && (eqMod.EquipItemData || eqMod.default || eqMod)) || (gm && gm.EquipItemData) || window.EquipItemData;
+                if (typeof EquipCls === "function") {
+                    try {
+                        const eq = new EquipCls();
+                        if (typeof eq.setEquipDataByPPItem === "function") {
+                            eq.setEquipDataByPPItem(rawItem);
+                            return eq;
+                        }
+                    } catch (eEq) { }
+                }
+                const obcMod = resolveTreasureMod("OpenBoxConfiger");
+                const obc = (obcMod && (obcMod.OpenBoxConfiger || obcMod.default || obcMod)) || (gm && gm.OpenBoxConfiger) || window.OpenBoxConfiger;
+                const cfg = (obc && typeof obc.getBoxEquipCfgById === "function" && rawItem._tid) ? obc.getBoxEquipCfgById(rawItem._tid) : null;
+                const fallbackPos = Number((cfg && (cfg.set !== undefined ? cfg.set : (cfg.part !== undefined ? cfg.part : cfg.pos))) || rawItem._pos || 0);
+                const fallbackPow = Number(rawItem._power || rawItem.power || (cfg && cfg.power) || 0);
+                const fallbackId = rawItem._id !== undefined ? rawItem._id : rawItem.id;
+                return {
+                    _raw: rawItem,
+                    getId: function () { return fallbackId; },
+                    getPos: function () { return fallbackPos; },
+                    getPowerTotal: function () { return fallbackPow; }
+                };
+            };
 
             try {
-                // A. Kiểm tra và giải quyết toàn bộ trang bị đang nằm trong kho tạm (_temp_equip)
+                // A. Xử lý kho tạm (_temp_equip): Chọn duy nhất 1 món tăng LC cao nhất cho mỗi ô trang bị (kèm _sell: 1 tự bán đồ cũ) & bán sạch phần còn lại!
                 if (hasTemp) {
-                    bot.log(`⛏️ Đào Bảo: Phát hiện ${trm._temp_equip.length} trang bị trong kho tạm -> Đang xử lý...`);
                     const tempList = [...trm._temp_equip];
+                    const bestByPos = {};
                     const toSell = [];
-                    for (let rawItem of tempList) {
-                        try {
-                            const isBetter = trm.compareEquipTemp ? trm.compareEquipTemp(rawItem) : false;
-                            if (isBetter) {
-                                bot.log(`✨ Đào Bảo: Trang bị vượt trội lực chiến -> Tiến hành thay trang bị mới!`);
-                                const itId = rawItem.getId ? rawItem.getId() : (rawItem._id || rawItem.id);
-                                if (gm.EquipBoxSelectCs) {
-                                    gm.RPCReq.send(gm.EquipBoxSelectCs.protocol, { _id: itId, _sell: 0 });
-                                }
-                                await bot.sleep(800);
+
+                    for (let i = 0; i < tempList.length; i++) {
+                        const rawItem = tempList[i];
+                        if (!rawItem) continue;
+                        const eq = buildEquipItemObj(rawItem);
+                        const id = (eq && typeof eq.getId === "function") ? eq.getId() : (rawItem._id !== undefined ? rawItem._id : rawItem.id);
+                        const pos = Number((eq && typeof eq.getPos === "function") ? eq.getPos() : (rawItem._pos || 0));
+                        const newPower = Number((eq && typeof eq.getPowerTotal === "function") ? eq.getPowerTotal() : (rawItem._power || 0));
+                        const wearEq = (pos > 0 && typeof trm.getEquipByPos === "function") ? trm.getEquipByPos(pos) : null;
+                        const wearPower = Number((wearEq && typeof wearEq.getPowerTotal === "function") ? wearEq.getPowerTotal() : (wearEq && wearEq._power ? wearEq._power : 0));
+
+                        const strictlyBetter = pos > 0 && (!wearEq || (newPower > 0 && newPower > wearPower));
+                        if (strictlyBetter) {
+                            const prevBest = bestByPos[pos];
+                            if (!prevBest || newPower > prevBest.newPower) {
+                                if (prevBest) toSell.push(prevBest);
+                                bestByPos[pos] = { raw: rawItem, eq: eq, id: id, pos: pos, newPower: newPower, wearPower: wearPower };
                             } else {
-                                toSell.push(rawItem);
+                                toSell.push({ raw: rawItem, eq: eq, id: id });
                             }
-                        } catch (itemErr) {
-                            console.error("[AutoTreasure Item Error]", itemErr);
+                        } else {
+                            toSell.push({ raw: rawItem, eq: eq, id: id });
                         }
                     }
+
+                    const upgradeSlots = Object.keys(bestByPos);
+                    for (let u = 0; u < upgradeSlots.length; u++) {
+                        const pick = bestByPos[upgradeSlots[u]];
+                        if (!pick || pick.id === undefined) continue;
+                        const sellOld = (trm.sell !== undefined && trm.sell !== null) ? Number(trm.sell) : 1;
+                        bot.log(`✨ [Đào Bảo] Mặc trang bị mới tăng LC (Ô ${pick.pos}: ${pick.wearPower} -> ${pick.newPower}) & tự tách đồ cũ!`);
+                        if (typeof trm.reqEquipBoxSelect === "function" && pick.eq && typeof pick.eq.getId === "function") {
+                            trm.reqEquipBoxSelect(pick.eq, sellOld);
+                        } else if (gm.EquipBoxSelectCs) {
+                            gm.RPCReq.send(gm.EquipBoxSelectCs.protocol, { _id: pick.id, _sell: sellOld });
+                        }
+                        didSomething = true;
+                        await bot.sleep(320);
+                    }
+
                     if (toSell.length > 0) {
-                        bot.log(`♻️ Đào Bảo: Tự động bán gom ${toSell.length} trang bị phẩm chất thấp lấy EXP & Vàng.`);
-                        const sellIds = toSell.map(it => ({ _val: (it.getId ? it.getId() : (it._id || it.id)) }));
-                        if (gm.EquipBoxSellCs) {
-                            gm.RPCReq.send(gm.EquipBoxSellCs.protocol, { _list: sellIds });
+                        const validSellEqs = [];
+                        const sellIds = [];
+                        for (let s = 0; s < toSell.length; s++) {
+                            const entry = toSell[s];
+                            if (!entry || entry.id === undefined) continue;
+                            sellIds.push({ _val: entry.id });
+                            if (entry.eq && typeof entry.eq.getId === "function") validSellEqs.push(entry.eq);
                         }
-                        await bot.sleep(800);
+                        if (sellIds.length > 0) {
+                            bot.log(`♻️ [Đào Bảo] Tự động bán ${sellIds.length} trang bị LC thấp nhận EXP & Vàng.`);
+                            if (typeof trm.reqEquipBoxSell === "function" && validSellEqs.length === sellIds.length) {
+                                trm.reqEquipBoxSell(validSellEqs);
+                            } else if (gm.EquipBoxSellCs) {
+                                gm.RPCReq.send(gm.EquipBoxSellCs.protocol, { _list: sellIds });
+                            }
+                            didSomething = true;
+                            await bot.sleep(280);
+                        }
                     }
-                    bot.closeBattleViews();
-                    return true; // Dừng tại đây, hoàn tất xử lý kho tạm trước khi đào lượt kế
+
+                    if (typeof trm.hideEquipView === "function") {
+                        try { trm.hideEquipView(); } catch (eHide) { }
+                    } else if (vm && typeof vm.isOpenView === "function" && vm.isOpenView("TreasureEquipHandlerView") && typeof vm.close === "function") {
+                        try { vm.close("TreasureEquipHandlerView"); } catch (eCls) { }
+                    }
+                    if (bot.lastAction) bot.lastAction["treasure_dig_cycle"] = 0;
+                    return didSomething;
                 }
 
-                // B. Kiểm tra số xẻng hiện có trước khi đào tiếp (chỉ mở xẻng đồng khi người chơi chủ động bật auto_shovel)
+                // B. Mở xẻng phổ thông miễn phí (0 KNB) qua reqEquipBoxOpen chuẩn 100% của game
                 if (canDig) {
                     bot.markDone("treasure_dig_cycle");
-                    const leftQuick = (typeof trm.getLeftQuickDigNum === "function") ? (trm.getLeftQuickDigNum() || 0) : 0;
-                    const maxBatch = (typeof trm.geBoxOpenRealyNumByType === "function") ? trm.geBoxOpenRealyNumByType(3) : ((typeof trm.geBoxOpenNumByType === "function") ? trm.geBoxOpenNumByType(3) : 40);
-                    const actualBatch = Math.min(shovels, Math.max(1, maxBatch || 40));
-
-                    const canQuickDig = (shovels >= actualBatch && leftQuick > 0 && bot.state.quickDigExhausted !== true && typeof trm.reqQuickDig === "function");
-                    if (canQuickDig) {
-                        bot.log(`⛏️ Đào Bảo: Tự động Đào Nhanh ${actualBatch} xẻng phổ thông (${shovels} xẻng còn lại, ${leftQuick} lượt nhanh)...`);
-                        trm.reqQuickDig(actualBatch, 3);
-                    } else {
-                        bot.log(`⛏️ Đào Bảo: Tự động mở ${actualBatch} xẻng phổ thông (${shovels} xẻng còn lại)...`);
-                        if (trm.reqEquipBoxOpen) {
-                            trm.reqEquipBoxOpen(actualBatch, 3);
+                    let openBatch = 0;
+                    if (typeof trm.geBoxOpenRealyNumByType === "function") {
+                        openBatch = Number(trm.geBoxOpenRealyNumByType(3) || 0);
+                    } else if (typeof trm.geBoxOpenNumByType === "function") {
+                        openBatch = Number(trm.geBoxOpenNumByType(3) || 0);
+                    }
+                    const maxAffordable = Math.floor(shovels / Math.max(1, costPerOpen));
+                    const actualBatch = Math.min(maxAffordable, Math.max(1, openBatch || 1));
+                    if (actualBatch >= 1) {
+                        bot.log(`⛏️ [Đào Bảo] Tự động đào ${actualBatch} xẻng (${shovels} xẻng hiện có, 0 KNB)...`);
+                        if (typeof trm.reqEquipBoxOpen === "function") {
+                            if (bot.runInBgAutoContext) {
+                                bot.runInBgAutoContext(function () { trm.reqEquipBoxOpen(actualBatch, 3); });
+                            } else {
+                                trm.reqEquipBoxOpen(actualBatch, 3);
+                            }
                         } else if (gm.EquipBoxOpenCs) {
                             gm.RPCReq.send(gm.EquipBoxOpenCs.protocol, { _type: 3, _cnt: actualBatch });
                         }
+                        didSomething = true;
+                        await bot.sleep(450);
                     }
-                    didSomething = true;
-                    await bot.sleep(1200);
                 }
 
-                // C. Tự động nâng cấp Rương Đào Bảo (Box Level Up) khi đủ điều kiện
+                // C. Tự động nâng cấp Rương Đào Bảo (Box Level Up) khi đủ điều kiện miễn phí (0 KNB)
                 if (canBoxUp) {
                     bot.markDone("treasure_box_lvup");
-                    if (trm.checkBoxUpLvHongdian) trm.checkBoxUpLvHongdian();
-                    if (bot.hasRed("V_BoxUp") && trm.reqEquipBoxLvUp) {
-                        bot.log("📦 Đào Bảo: Đủ điều kiện thăng cấp -> Tự động nâng cấp Rương Đào Bảo!");
+                    if (typeof trm.checkBoxUpLvHongdian === "function") trm.checkBoxUpLvHongdian();
+                    if (bot.hasRed("V_BoxUp") && typeof trm.reqEquipBoxLvUp === "function") {
+                        bot.log("📦 [Đào Bảo] Đủ điều kiện thăng cấp -> Tự động nâng cấp Rương Đào Bảo!");
                         trm.reqEquipBoxLvUp();
                         didSomething = true;
-                        await bot.sleep(600);
+                        await bot.sleep(350);
                     }
                 }
             } catch (e) {
                 bot.log("Lỗi Đào Bảo: " + e.toString());
+            } finally {
+                bot.state._handlingTreasureSmart = false;
             }
             return didSomething;
         },
@@ -14998,7 +15555,7 @@
 
                             // 6. Đào bảo mở xẻng & nâng rương
                             try {
-                                if (bot.settings.auto_treasure && typeof bot.runAutoTreasureSmart === "function" && bot.tryDo("loop_treasure", 30)) {
+                                if (bot.settings.auto_treasure && typeof bot.runAutoTreasureSmart === "function" && bot.tryDo("loop_treasure", 3)) {
                                     await bot.runAutoTreasureSmart();
                                 }
                             } catch (e6) { }
@@ -15329,12 +15886,15 @@
                 bot.checkAndDismissRestartAlert();
             }
             const isKicked = !!bot.state.kickedByOtherDevice;
+            const needFresh = !!bot.state.needFreshRelogin;
             return {
                 stats: bot.updateStats(),
                 rescueTelemetry: (typeof bot.getRescueTelemetry === "function") ? bot.getRescueTelemetry() : null,
-                isDisconnected: isKicked || bot.isDisconnected(),
-                ready: !isKicked && bot.isReady(),
-                kickedByOtherDevice: isKicked
+                isDisconnected: isKicked || needFresh || bot.isDisconnected(),
+                ready: !isKicked && !needFresh && bot.isReady(),
+                kickedByOtherDevice: isKicked,
+                needFreshRelogin: needFresh,
+                freshReloginReason: bot.state.freshReloginReason || ""
             };
         },
 
@@ -15673,11 +16233,33 @@
         bot.state._manualBattleUntilByType[tp] = 0;
     };
 
+    bot.ensureManualFullCombatArray = function (reason) {
+        if (bot.state._manualRestorePromise) return bot.state._manualRestorePromise;
+        if (!bot.state.isScoutLowPowerActive || typeof bot.restoreFullCombatArray !== "function") return null;
+        try {
+            const p = Promise.resolve(bot.restoreFullCombatArray(reason || "manual_combat"));
+            bot.state._manualRestorePromise = p;
+            const clearP = function () {
+                if (bot.state._manualRestorePromise === p) bot.state._manualRestorePromise = null;
+            };
+            p.then(clearP, clearP);
+            return p;
+        } catch (eEns) {
+            bot.state._manualRestorePromise = null;
+            return null;
+        }
+    };
+
     bot.markManualBattle = function (bType, ttlMs) {
         const tp = Number(bType || 0);
         const now = Date.now();
         bot.state._lastManualUiActionTs = now;
         bot.state._bgSilentUntil = 0;
+        bot.state._manualCombatHoldUntil = Math.max(bot.state._manualCombatHoldUntil || 0, now + 25000);
+        window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, now + 3200);
+        if (tp !== 106 && bot.state.isScoutLowPowerActive) {
+            bot.ensureManualFullCombatArray("manual_battle_" + tp);
+        }
         if (!tp) return;
         if (!bot.state._manualBattleUntilByType) bot.state._manualBattleUntilByType = {};
         if (!bot.state._autoBattleUntilByType) bot.state._autoBattleUntilByType = {};
@@ -15760,8 +16342,8 @@
 
     bot.shouldBlockBgStagePull = function (bmvSelf) {
         try {
-            if (bot.state.pendingManualStageInstant) return false;
-            if (bot.state.manualStageFight && (Date.now() - (bot.state.manualStageFightTime || 0) < 4000)) return false;
+            if (bot.state._allowImmediateManualPullOnce || bot.state.pendingManualStageInstant) return false;
+            if (bot.state._manualStagePrefetchQuota > 0 && bot.state.manualStageFight && (Date.now() - (bot.state.manualStageFightTime || 0) < 15000)) return false;
             if (bot.state.rescueFightActive || bot.state.ysTowerBgFighting || bot.state.dailyCopyBgFighting || bot.state.wbossBgFighting || bot.state.kunlunBgFighting) {
                 return true;
             }
@@ -15928,7 +16510,7 @@
                 }
             } catch (eHookPc) { }
 
-            // 2. Hook ViewManager.open: Chặn trực tiếp mọi lệnh mở trực tiếp BattleResultView / BattleOverwhelmingView / ItemGetView / TaskTipView khi chạy ngầm!
+            // 2. Hook ViewManager.open: Chặn trực tiếp mọi lệnh mở trực tiếp BattleResultView / BattleOverwhelmingView / ItemGetView / TaskTipView khi chạy ngầm & Khôi phục 100% đội hình trước khi đánh tay!
             try {
                 const vm = (bot.getViewManager && bot.getViewManager()) || window.ViewManager || gm.ViewManager;
                 const vmTarget = (vm && typeof vm.open === "function") ? vm : null;
@@ -15937,6 +16519,19 @@
                     const origVmOpen = vmTarget.open;
                     vmTarget.open = function (viewName, args) {
                         try {
+                            if (viewName && MANUAL_COMBAT_VIEWS.indexOf(viewName) !== -1 && !bot.isBgSilent()) {
+                                const nowOpen = Date.now();
+                                bot.state._manualCombatHoldUntil = Math.max(bot.state._manualCombatHoldUntil || 0, nowOpen + 30000);
+                                window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, nowOpen + 3000);
+                                if (bot.state.isScoutLowPowerActive && typeof bot.ensureManualFullCombatArray === "function") {
+                                    bot.ensureManualFullCombatArray("open_view_" + viewName);
+                                }
+                            }
+                            if (viewName === "TreasureBoxView" && !bot.isBgSilent()) {
+                                const nowTbv = Date.now();
+                                bot.state._lastManualDigTs = nowTbv;
+                                window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, nowTbv + 4000);
+                            }
                             if ((viewName === "BattleResultView" || viewName === "BattleOverwhelmingView") && !bot.state.viewingBattleData && !bot.state.isReplaying) {
                                 const bData = args && (args.battleData || args.playData || args);
                                 const bType = Number((bData && bData._type) || (args && args.arrayType) || 0);
@@ -15954,6 +16549,24 @@
                             if ((viewName === "TaskTipView" || viewName === "FundTipView" || viewName === "ActLpTaskTipView") &&
                                 (bot.isBgSilent() || bot.state.isAutoDaily3QActive || bot.isAutoStageOn() || bot.state.isAutoTowerActive)) {
                                 return;
+                            }
+                            if (viewName === "TreasureEquipHandlerView" && bot.settings && bot.settings.auto_shovel === true && bot.state.master !== false) {
+                                const recentManualDig = !!(bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 4000));
+                                const boxTabOpen = !!(vmTarget.isOpenView && vmTarget.isOpenView("TreasureBoxView"));
+                                if (!recentManualDig && (bot.isBgSilent() || !boxTabOpen)) {
+                                    trackTimer(setTimeout(function () {
+                                        try {
+                                            if (bot.settings && bot.settings.auto_shovel === true && typeof bot.runAutoTreasureSmart === "function" && !bot.state._handlingTreasureSmart) {
+                                                if (typeof bot.runInBgAutoContext === "function") {
+                                                    bot.runInBgAutoContext(function () { return bot.runAutoTreasureSmart(); });
+                                                } else {
+                                                    bot.runAutoTreasureSmart();
+                                                }
+                                            }
+                                        } catch (eAutoEq) { }
+                                    }, 150));
+                                    return;
+                                }
                             }
                         } catch (eVmOpen) { }
                         return origVmOpen.apply(this, arguments);
@@ -15976,6 +16589,51 @@
                     };
                 }
             } catch (eHookTm) { }
+
+            // 4. Hook RewardModel.prototype.pushRewardQues: Mở bảng thưởng tức thì 0ms khi BattleResultView cũ vừa đóng!
+            try {
+                const rmInst = mm && mm.RewardModel;
+                const rmProto = rmInst && Object.getPrototypeOf(rmInst);
+                if (rmProto && typeof rmProto.pushRewardQues === "function" && !rmProto.__QA_FAST_REWARD_QUE__) {
+                    rmProto.__QA_FAST_REWARD_QUE__ = true;
+                    const origPushRewardQues = rmProto.pushRewardQues;
+                    rmProto.pushRewardQues = function (cb) {
+                        if (typeof cb === "function") {
+                            const vmChk = (bot.getViewManager && bot.getViewManager()) || window.ViewManager || gm.ViewManager;
+                            if (!vmChk || typeof vmChk.isOpenView !== "function" || !vmChk.isOpenView("BattleResultView")) {
+                                return cb();
+                            }
+                        }
+                        return origPushRewardQues.apply(this, arguments);
+                    };
+                }
+            } catch (eHookRm) { }
+
+            // 5. Passive Native Touch Yield trên iOS/Cocos/FairyGUI: Chạm tay là nhường 100% băng thông Socket tức thì (không bao giờ nuốt touch!)
+            try {
+                const markNativeTouch = function () {
+                    const tNow = Date.now();
+                    window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, tNow + 2600);
+                    bot.state._lastManualUiActionTs = tNow;
+                    bot.state._bgSilentUntil = 0;
+                };
+                const fgui = window.fgui || window.fairygui;
+                const groot = fgui && fgui.GRoot && fgui.GRoot.inst;
+                const dispObj = groot && (groot.node || groot._node || (groot.displayObject && groot.displayObject.node));
+                if (dispObj && typeof dispObj.on === "function" && !dispObj.__QA_PASSIVE_TOUCH_YIELD__) {
+                    dispObj.__QA_PASSIVE_TOUCH_YIELD__ = true;
+                    const touchStartEvt = (window.cc && window.cc.Node && window.cc.Node.EventType && window.cc.Node.EventType.TOUCH_START) || "touchstart";
+                    dispObj.on(touchStartEvt, markNativeTouch, null, true);
+                } else if (window.cc && window.cc.director && typeof window.cc.director.getScene === "function") {
+                    const scene = window.cc.director.getScene();
+                    const canvasNode = scene && typeof scene.getChildByName === "function" ? scene.getChildByName("Canvas") : null;
+                    if (canvasNode && typeof canvasNode.on === "function" && !canvasNode.__QA_PASSIVE_TOUCH_YIELD__) {
+                        canvasNode.__QA_PASSIVE_TOUCH_YIELD__ = true;
+                        const touchStartEvt2 = (window.cc.Node && window.cc.Node.EventType && window.cc.Node.EventType.TOUCH_START) || "touchstart";
+                        canvasNode.on(touchStartEvt2, markNativeTouch, null, true);
+                    }
+                }
+            } catch (eTouchYield) { }
         } catch (eSilentAll) { }
     };
 
@@ -16027,6 +16685,17 @@
             const muMod = safeRequire("ModuleUtil");
             const mu = gm.ModuleUtil || window.ModuleUtil || (muMod && (muMod.ModuleUtil || muMod.default));
             if (!mu) return false;
+            const numMod = Number(modId);
+            if (mu._closeModuleId && mu._closeModuleId[numMod]) return false;
+            if (typeof mu.__ORIG_GET_COND_TIP__ === "function") {
+                const mcMod = safeRequire("ModuleConfiger");
+                const mc = gm.ModuleConfiger || window.ModuleConfiger || (mcMod && (mcMod.ModuleConfiger || mcMod.default));
+                const cfg = mc && typeof mc.getModuleCfg === "function" ? mc.getModuleCfg(numMod) : null;
+                if (cfg) {
+                    const tipRes = mu.__ORIG_GET_COND_TIP__.call(mu, cfg);
+                    if (Array.isArray(tipRes)) return !!tipRes[1];
+                }
+            }
             if (typeof mu.origHasModuleOpen === "function") return !!mu.origHasModuleOpen.call(mu, modId, false);
             if (typeof mu.moduleOpen === "function") return !!mu.moduleOpen.call(mu, modId, false);
             if (typeof mu.hasModuleOpen === "function") return !!mu.hasModuleOpen.call(mu, modId);
