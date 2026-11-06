@@ -2,9 +2,9 @@
   "schemaVersion": "3.8",
   "runNumber": 166,
   "runId": 42178061848,
-  "updatedAtIso": "2026-11-06T09:29:06.786Z",
-  "updatedAtVn": "2026-11-06 16:29:06",
-  "uptimeMin": 148.12,
+  "updatedAtIso": "2026-11-06T09:32:09.894Z",
+  "updatedAtVn": "2026-11-06 16:32:09",
+  "uptimeMin": 151.17,
   "server": "Tam Quốc S6",
   "isLobbyHealthy": true,
   "roleName": "s6.TàoPhi",
@@ -18,20 +18,20 @@
   "deltaJade": 3159,
   "totalRescued": 61,
   "totalRescuedKnb": 3050,
-  "knbPerHour": 1235.5,
-  "rescuesPerHour": 24.71,
-  "totalScanned": 38068,
+  "knbPerHour": 1210.6,
+  "rescuesPerHour": 24.21,
+  "totalScanned": 38870,
   "scansPerMin": 257,
   "rescueTelemetry": {
     "rescuedCount": 61,
     "rescuedKnbTotal": 3050,
-    "totalRescueScanned": 38068,
-    "totalWaves": 16916,
-    "occupiedFound": 160,
+    "totalRescueScanned": 38870,
+    "totalWaves": 17276,
+    "occupiedFound": 161,
     "winnableFights": 82,
     "winCount": 61,
     "lossCount": 15,
-    "skippedStrongRobbers": 78,
+    "skippedStrongRobbers": 79,
     "code66Count": 1,
     "myFullPower": 392583458,
     "winRatioLimit": 1.03,
@@ -44,8 +44,8 @@
     "rankPagesCrawled": 932,
     "tierStats": {
       "1": {
-        "waves": 6717,
-        "unique": 6121,
+        "waves": 6897,
+        "unique": 6298,
         "burning": 2,
         "occupied": 4,
         "winnable": 1,
@@ -55,60 +55,51 @@
         "lastRealPow": 60775873
       },
       "2": {
-        "waves": 2308,
-        "unique": 1613,
+        "waves": 2343,
+        "unique": 1632,
         "burning": 0,
         "occupied": 0,
         "winnable": 0,
         "wins": 0,
         "losses": 0,
         "tooStrong": 0,
-        "lastRealPow": 103466652
+        "lastRealPow": 112311843
       },
       "3": {
-        "waves": 2937,
-        "unique": 2424,
+        "waves": 2977,
+        "unique": 2460,
         "burning": 1,
         "occupied": 0,
         "winnable": 0,
         "wins": 0,
         "losses": 0,
         "tooStrong": 0,
-        "lastRealPow": 216077501
+        "lastRealPow": 170529317
       },
       "4": {
-        "waves": 2304,
-        "unique": 1847,
+        "waves": 2339,
+        "unique": 1870,
         "burning": 0,
         "occupied": 0,
         "winnable": 0,
         "wins": 0,
         "losses": 0,
         "tooStrong": 0,
-        "lastRealPow": 222932183
+        "lastRealPow": 264837935
       },
       "5": {
-        "waves": 2650,
-        "unique": 2059,
+        "waves": 2720,
+        "unique": 2111,
         "burning": 3,
         "occupied": 0,
         "winnable": 0,
         "wins": 1,
         "losses": 0,
         "tooStrong": 0,
-        "lastRealPow": 328293513
+        "lastRealPow": 285887963
       }
     },
     "recentRescueEvents": [
-      {
-        "t": 1793955879018,
-        "kind": "too_strong",
-        "tier": 3,
-        "src": "Mục Tiêu Nóng Liên SV",
-        "victim": "s25.Bintovip",
-        "robber": "s25.FanChoTym",
-        "robPow": 600836662
-      },
       {
         "t": 1793955897502,
         "kind": "too_strong",
@@ -234,6 +225,15 @@
         "victim": "s21.TriệuTânYên",
         "robber": "s21.Lehiuu",
         "robPow": 462989055
+      },
+      {
+        "t": 1793957510361,
+        "kind": "too_strong",
+        "tier": 5,
+        "src": "Mục Tiêu Nóng Liên SV",
+        "victim": "s14.Viemm",
+        "robber": "s14.SuperStar",
+        "robPow": 412361903
       }
     ]
   },
@@ -267,27 +267,6 @@
     "mod_headframe_title": true
   },
   "recentLogs": [
-    "[2026-11-06 16:25:01] [AutoBot] 9:25:01 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 49,460,358 • 1 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:25:03] [AutoBot] 9:25:03 AM 📊 [Farm KNB] Đã quét: 36,893 nhà (Đội dò: 3 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:25:21] [AutoBot] 9:25:21 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 168,478,423 • 3 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:25:29] [AutoBot] 9:25:29 AM 📊 [Farm KNB] Đã quét: 37,015 nhà (Đội dò: 1 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:25:30] [AutoBot] 9:25:30 AM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
-    "[2026-11-06 16:25:44] [AutoBot] 9:25:44 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 220,231,959 • 4 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:25:56] [AutoBot] 9:25:56 AM 📊 [Farm KNB] Đã quét: 37,120 nhà (Đội dò: 5 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:26:05] [AutoBot] 9:26:05 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 49,460,358 • 1 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:26:07] [AutoBot] 9:26:07 AM 🗺️ Phái Tướng: Có 1 nhiệm vụ hoàn thành -> Nhận toàn bộ!",
-    "[2026-11-06 16:26:10] [AutoBot] 9:26:10 AM 🗺️ Phái Tướng: Ưu tiên [Xẻng Đào Bảo] - Thưởng: Đan Tăng Bậc (Điểm: 750)",
-    "[2026-11-06 16:26:11] [AutoBot] 9:26:11 AM 🗺️ Phái Tướng: Đã tự động phái 1 nhiệm vụ theo thứ tự ưu tiên thành công!",
-    "[2026-11-06 16:26:23] [AutoBot] 9:26:23 AM 📊 [Farm KNB] Đã quét: 37,239 nhà (Đội dò: 3 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:26:27] [AutoBot] 9:26:27 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 167,603,123 • 3 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:26:48] [AutoBot] 9:26:48 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 268,606,153 • 4 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:26:48] [AutoBot] 9:26:48 AM 📊 [Farm KNB] Đã quét: 37,374 nhà (Đội dò: 4 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:27:10] [AutoBot] 9:27:10 AM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
-    "[2026-11-06 16:27:10] [AutoBot] 9:27:10 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 49,460,358 • 1 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:27:14] [AutoBot] 9:27:14 AM 📊 [Farm KNB] Đã quét: 37,511 nhà (Đội dò: 1 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:27:30] [AutoBot] 9:27:30 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 335,414,796 • 5 tướng) | Tự động: BẬT",
-    "[2026-11-06 16:27:40] [AutoBot] 9:27:40 AM 📊 [Farm KNB] Đã quét: 37,643 nhà (Đội dò: 2 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
-    "[2026-11-06 16:27:51] [AutoBot] 9:27:51 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 209,557,133 • 3 tướng) | Tự động: BẬT",
     "[2026-11-06 16:28:05] [AutoBot] 9:28:05 AM 📊 [Farm KNB] Đã quét: 37,798 nhà (Đội dò: 4 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 75) | KNB: 85,524",
     "[2026-11-06 16:28:13] [AutoBot] 9:28:13 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 49,460,358 • 1 tướng) | Tự động: BẬT",
     "[2026-11-06 16:28:14] [AutoBot] 9:28:14 AM ⚔️ [Farm KNB • Mục Tiêu Nóng Liên SV] Phát hiện gia viên [s4.ACE•SóiBéTí] (ID: 305598169181) đang bị cướp bởi [s4.ACE•Thangws]! Đang kiểm tra LC kẻ địch...",
@@ -301,6 +280,27 @@
     "[2026-11-06 16:28:41] [AutoBot] 9:28:41 AM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
     "[2026-11-06 16:28:51] [AutoBot] 9:28:51 AM 🎁 Treo Máy: Đã thu thập thưởng AFK tích lũy (5 phút)!",
     "[2026-11-06 16:28:57] [AutoBot] 9:28:57 AM 📊 [Farm KNB] Đã quét: 38,014 nhà (Đội dò: 2 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
-    "[2026-11-06 16:28:57] [AutoBot] 9:28:57 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 103,466,652 • 2 tướng) | Tự động: BẬT"
+    "[2026-11-06 16:28:57] [AutoBot] 9:28:57 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 103,466,652 • 2 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:29:17] [AutoBot] 9:29:17 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 285,887,963 • 5 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:29:24] [AutoBot] 9:29:24 AM 📊 [Farm KNB] Đã quét: 38,129 nhà (Đội dò: 4 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
+    "[2026-11-06 16:29:38] [AutoBot] 9:29:38 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 60,775,873 • 1 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:29:50] [AutoBot] 9:29:50 AM 📊 [Farm KNB] Đã quét: 38,259 nhà (Đội dò: 3 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
+    "[2026-11-06 16:29:58] [Trạng Thái] s6.TàoPhi | Ải: 6367 | LC: 392,583,458 | KNB: 85,524 | Giải cứu: 61 lượt (+3050 KNB) | Đã quét: 38,275 nhà (~257 nhà/p)",
+    "[2026-11-06 16:29:59] [AutoBot] 9:29:59 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 108,081,356 • 2 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:30:15] [AutoBot] 9:30:15 AM 📊 [Farm KNB] Đã quét: 38,315 nhà (Đội dò: 1 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
+    "[2026-11-06 16:30:20] [AutoBot] 9:30:20 AM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
+    "[2026-11-06 16:30:22] [AutoBot] 9:30:22 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 338,466,580 • 5 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:30:41] [AutoBot] 9:30:41 AM 📊 [Farm KNB] Đã quét: 38,396 nhà (Đội dò: 4 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
+    "[2026-11-06 16:30:43] [AutoBot] 9:30:43 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 49,681,420 • 1 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:31:04] [AutoBot] 9:31:04 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 60,775,873 • 1 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:31:07] [AutoBot] 9:31:07 AM 📊 [Farm KNB] Đã quét: 38,540 nhà (Đội dò: 3 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
+    "[2026-11-06 16:31:25] [AutoBot] 9:31:25 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 329,437,713 • 5 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:31:33] [AutoBot] 9:31:33 AM 📊 [Farm KNB] Đã quét: 38,676 nhà (Đội dò: 1 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 78) | KNB: 85,524",
+    "[2026-11-06 16:31:46] [AutoBot] 9:31:46 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 264,837,935 • 4 tướng) | Tự động: BẬT",
+    "[2026-11-06 16:31:50] [AutoBot] 9:31:50 AM ⚔️ [Farm KNB • Mục Tiêu Nóng Liên SV] Phát hiện gia viên [s14.Viemm] (ID: 305598497007) đang bị cướp bởi [s14.SuperStar]! Đang kiểm tra LC kẻ địch...",
+    "[2026-11-06 16:31:50] [AutoBot] 9:31:50 AM 🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [s14.SuperStar] có LC 412,361,903 > 103% LC mình (392,583,458) -> Bỏ qua ngay, không tốn trận!",
+    "[2026-11-06 16:31:59] [AutoBot] 9:31:59 AM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
+    "[2026-11-06 16:31:59] [AutoBot] 9:31:59 AM 📊 [Farm KNB] Đã quét: 38,813 nhà (Đội dò: 1 tướng • Kho Liên SV: 1788) | Giải cứu: 61 lượt (+3,050 KNB • Bỏ qua quá LC: 79) | KNB: 85,524",
+    "[2026-11-06 16:32:06] [AutoBot] 9:32:06 AM 🟢 [Hệ Thống] Trực chiến: Ải [6367] (Đợt 1/3) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 392,583,458 (Hạ LC dò: 170,529,317 • 3 tướng) | Tự động: BẬT"
   ]
 }
