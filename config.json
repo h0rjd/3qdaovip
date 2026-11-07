@@ -50,7 +50,7 @@
     "auto_free_lottery": true,
     "auto_longmach": true,
     "auto_skvs": true,
-    "auto_guild_mine": true,
+    "auto_guild_mine": false,
     "mod_skin": true,
     "mod_headframe_title": true
   },
