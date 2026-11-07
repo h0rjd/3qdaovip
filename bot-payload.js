@@ -7725,7 +7725,7 @@
                     };
                 }
 
-// Hook 10: TreasureBoxView, HomePanelHero, TreasureBoxAnim & TreasureRewardModel - Triệt tiêu 100% lỗi "Mạng không ổn định" (code 7), giữ nguyên hiệu ứng Spine & ghép nhịp bấm tay mượt mà!
+// Hook 10: TreasureBoxView, HomePanelHero, TreasureBoxAnim & TreasureRewardModel - Triệt tiêu 100% lỗi "Mạng không ổn định" (code 7), tự bán 100% đồ không tăng LC (xanh lục/cam/đỏ) & ghép nhịp bấm tay mượt mà!
                 try {
                     const reqTreasureMod = function (modName) {
                         try {
@@ -7747,6 +7747,64 @@
                         return false;
                     };
 
+                    const inspectTempEquipItem = function (trmInst, rawItem) {
+                        if (!rawItem) return null;
+                        let eqObj = null;
+                        if (typeof rawItem.getPowerTotal === "function" && typeof rawItem.getPos === "function" && typeof rawItem.getId === "function") {
+                            eqObj = rawItem;
+                        } else {
+                            const eqMod = reqTreasureMod("EquipItemData");
+                            const EquipCls = (eqMod && (eqMod.EquipItemData || eqMod.default || eqMod)) || (gm && gm.EquipItemData) || window.EquipItemData;
+                            if (typeof EquipCls === "function") {
+                                try {
+                                    const eqInst = new EquipCls();
+                                    if (typeof eqInst.setEquipDataByPPItem === "function") {
+                                        eqInst.setEquipDataByPPItem(rawItem);
+                                    }
+                                    eqObj = eqInst;
+                                } catch (eEqCtor) {
+                                    try { eqObj = new EquipCls(rawItem); } catch (eEqCtor2) { }
+                                }
+                            }
+                        }
+
+                        const obcMod = reqTreasureMod("OpenBoxConfiger");
+                        const obc = (obcMod && (obcMod.OpenBoxConfiger || obcMod.default || obcMod)) || (gm && gm.OpenBoxConfiger) || window.OpenBoxConfiger;
+                        const tid = rawItem._tid !== undefined ? rawItem._tid : (rawItem.tid !== undefined ? rawItem.tid : (eqObj && typeof eqObj.getItemCode === "function" ? eqObj.getItemCode() : 0));
+                        const cfg = (obc && typeof obc.getBoxEquipCfgById === "function" && tid) ? obc.getBoxEquipCfgById(tid) : null;
+
+                        const id = (rawItem._id !== undefined) ? rawItem._id : ((eqObj && typeof eqObj.getId === "function") ? eqObj.getId() : rawItem.id);
+                        const pos = Number((eqObj && typeof eqObj.getPos === "function" ? eqObj.getPos() : 0) || (cfg && (cfg.set !== undefined ? cfg.set : (cfg.part !== undefined ? cfg.part : cfg.pos))) || rawItem._pos || 0);
+                        const newPower = Number((eqObj && typeof eqObj.getPowerTotal === "function" ? eqObj.getPowerTotal() : 0) || rawItem._power || rawItem.power || (cfg && cfg.power) || 0);
+                        const wearEq = (trmInst && pos > 0 && typeof trmInst.getEquipByPos === "function") ? trmInst.getEquipByPos(pos) : null;
+                        const wearPower = Number((wearEq && typeof wearEq.getPowerTotal === "function" ? wearEq.getPowerTotal() : 0) || (wearEq && (wearEq._power || wearEq.power)) || 0);
+
+                        if (!eqObj || typeof eqObj.getId !== "function") {
+                            eqObj = {
+                                _raw: rawItem,
+                                getId: function () { return id; },
+                                getPos: function () { return pos; },
+                                getPowerTotal: function () { return newPower; },
+                                getItemCode: function () { return tid; },
+                                getColor: function () { return Number((cfg && cfg.quality) || rawItem._quality || 1); },
+                                getEquipLv: function () { return Number(rawItem._lv || 1); },
+                                getAllAttr: function () { return {}; }
+                            };
+                        }
+
+                        const strictlyBetter = (pos > 0) && (!wearEq || (newPower > 0 && newPower > wearPower));
+                        return {
+                            raw: rawItem._raw || rawItem,
+                            eq: eqObj,
+                            id: id,
+                            tid: tid,
+                            pos: pos,
+                            newPower: newPower,
+                            wearPower: wearPower,
+                            strictlyBetter: strictlyBetter
+                        };
+                    };
+
                     const tbvMod = reqTreasureMod("TreasureBoxView");
                     const TreasureBoxViewClass = (tbvMod && (tbvMod.TreasureBoxView || tbvMod.default || tbvMod)) || (gm && gm.TreasureBoxView) || window.TreasureBoxView;
                     if (TreasureBoxViewClass && TreasureBoxViewClass.prototype && !TreasureBoxViewClass.prototype.__QA_DEBOUNCE_HOOKED__) {
@@ -7765,52 +7823,66 @@
                             const selfView = this;
                             const trmRef = window.ModelManager && window.ModelManager.TreasureRewardModel;
                             try {
+                                if (!this.costArr || !this.costArr.length) {
+                                    const mcMod = reqTreasureMod("MiscConfiger");
+                                    const mc = (mcMod && (mcMod.MiscConfiger || mcMod.default || mcMod)) || (gm && gm.MiscConfiger) || window.MiscConfiger;
+                                    const boxCostMisc = mc && typeof mc.getMiscDataById === "function" ? mc.getMiscDataById("box_cost") : null;
+                                    if (boxCostMisc && boxCostMisc.int_val) this.costArr = boxCostMisc.int_val;
+                                }
                                 if (trmRef) {
                                     trmRef.isInOpenBox = true;
-                                    if (trmRef.isFlyAnim) {
-                                        if (!trmRef.__flyAnimSince) {
-                                            trmRef.__flyAnimSince = now;
-                                        } else if (now - trmRef.__flyAnimSince > 900) {
-                                            trmRef.isFlyAnim = false;
-                                            trmRef.__flyAnimSince = 0;
-                                        }
-                                    } else {
-                                        trmRef.__flyAnimSince = 0;
-                                    }
-                                    if (trmRef._isReqOpenBox && trmRef.__reqOpenBoxSince && (now - trmRef.__reqOpenBoxSince > 1400)) {
+                                    // Không bao giờ để cờ isFlyAnim (bay EXP 0.3s) nuốt cú bấm nút Đào của người chơi!
+                                    trmRef.isFlyAnim = false;
+                                    trmRef.__flyAnimSince = 0;
+                                    if (trmRef._isReqOpenBox && trmRef.__reqOpenBoxSince && (now - trmRef.__reqOpenBoxSince > 1200)) {
                                         trmRef._isReqOpenBox = false;
                                         trmRef.__reqOpenBoxSince = 0;
                                     }
                                 }
-                                if (this.boxAnim1 && this.boxAnim1._isInEffect) {
-                                    const effAge = now - (this.boxAnim1.__effectStartTs || 0);
-                                    if (!this.boxAnim1.__effectStartTs || effAge > 1800) {
-                                        this.boxAnim1._isInEffect = false;
-                                        const pendingFn = this.boxAnim1.effCallFun;
-                                        this.boxAnim1.effCallFun = null;
-                                        if (typeof pendingFn === "function") {
-                                            try { pendingFn(); } catch (ePf) { }
-                                        }
+                                // Nếu nhân vật đang diễn hoạt vung xẻng từ lượt trước -> hoàn tất callback ngay để không bao giờ chặn cú bấm mới!
+                                if (this.boxAnim1 && (this.boxAnim1._isInEffect || typeof this.boxAnim1.effCallFun === "function")) {
+                                    this.boxAnim1._isInEffect = false;
+                                    const pendingFn = this.boxAnim1.effCallFun;
+                                    this.boxAnim1.effCallFun = null;
+                                    if (typeof pendingFn === "function") {
+                                        try { pendingFn(); } catch (ePf) { }
                                     }
+                                }
+                                // Tự động bán sạch mọi trang bị không tăng LC trong _temp_equip trước khi kiểm tra showNewEquip()
+                                if (trmRef && Array.isArray(trmRef._temp_equip) && trmRef._temp_equip.length > 0 && typeof trmRef.checkAutoTempSell === "function") {
+                                    try { trmRef.checkAutoTempSell(); } catch (ePreSell) { }
                                 }
                             } catch (eHeal) { }
 
-                            // Nếu vừa gửi gói 13110 chưa đủ 480ms hoặc đang chờ Server trả EquipBoxUpdateTempSc -> Xếp hàng tự đào ngay khi gói trước về (0% lỗi "Mạng không ổn định" code 7!)
-                            if (trmRef && ((trmRef._isReqOpenBox && (now - (trmRef.__reqOpenBoxSince || 0) < 1400)) || (trmRef.__lastBoxSentTs && (now - trmRef.__lastBoxSentTs < 480)))) {
+                            // Nếu trong kho tạm thực sự còn trang bị TĂNG LC (newPower > wearPower) -> mở bảng so sánh trang bị ngay cho người chơi
+                            if (trmRef && Array.isArray(trmRef._temp_equip) && trmRef._temp_equip.length > 0) {
+                                if (typeof trmRef.showNewEquip === "function") {
+                                    try {
+                                        if (trmRef.showNewEquip()) {
+                                            if (typeof this.hideGuide === "function") this.hideGuide();
+                                            return;
+                                        }
+                                    } catch (eSneOpen) { }
+                                }
+                            }
+
+                            // Nếu vừa gửi gói 13110 chưa đủ 450ms hoặc đang chờ Server trả EquipBoxUpdateTempSc -> Xếp hàng tự đào ngay khi sẵn sàng!
+                            const lastOpenDiff = now - ((trmRef && trmRef.__lastBoxSentTs) || 0);
+                            if (trmRef && ((trmRef._isReqOpenBox && (now - (trmRef.__reqOpenBoxSince || 0) < 1200)) || lastOpenDiff < 450)) {
                                 trmRef.__queuedManualOpenView = selfView;
                                 if (!trmRef.__queuedManualOpenTimer) {
-                                    const waitMs = Math.max(80, 485 - (now - (trmRef.__lastBoxSentTs || now)));
+                                    const waitMs = Math.max(60, lastOpenDiff < 450 ? (455 - lastOpenDiff) : 80);
                                     trmRef.__queuedManualOpenTimer = trackTimer(setTimeout(function () {
                                         trmRef.__queuedManualOpenTimer = null;
                                         const v = trmRef.__queuedManualOpenView;
                                         trmRef.__queuedManualOpenView = null;
                                         if (v && !v.isDisposed && typeof v.openBox === "function") {
-                                            if (trmRef._isReqOpenBox && (Date.now() - (trmRef.__reqOpenBoxSince || 0) < 1200)) {
+                                            if (trmRef._isReqOpenBox && (Date.now() - (trmRef.__reqOpenBoxSince || 0) < 1100)) {
                                                 trmRef.__queuedManualOpenView = v;
                                                 return;
                                             }
                                             try {
-                                                if (v.boxAnim1 && v.boxAnim1._isInEffect) {
+                                                if (v.boxAnim1) {
                                                     v.boxAnim1._isInEffect = false;
                                                     const fn = v.boxAnim1.effCallFun;
                                                     v.boxAnim1.effCallFun = null;
@@ -7849,11 +7921,36 @@
                     const TreasureBoxAnimClass = (tbaMod && (tbaMod.TreasureBoxAnim || tbaMod.default || tbaMod)) || (gm && gm.TreasureBoxAnim) || window.TreasureBoxAnim;
                     if (TreasureBoxAnimClass && TreasureBoxAnimClass.prototype && !TreasureBoxAnimClass.prototype.__QA_ANIM_GUARD_HOOKED__) {
                         TreasureBoxAnimClass.prototype.__QA_ANIM_GUARD_HOOKED__ = true;
+                        const origStopRoleAnim = TreasureBoxAnimClass.prototype.stop_role_anim;
+                        if (typeof origStopRoleAnim === "function") {
+                            TreasureBoxAnimClass.prototype.stop_role_anim = function () {
+                                const pendingFn = this.effCallFun;
+                                this.effCallFun = null;
+                                this._isInEffect = false;
+                                const resStop = origStopRoleAnim.apply(this, arguments);
+                                if (typeof pendingFn === "function") {
+                                    try { pendingFn(); } catch (eStopCb) { }
+                                }
+                                return resStop;
+                            };
+                        }
                         const origOpenBoxEffNew = TreasureBoxAnimClass.prototype.open_box_effect_new;
                         if (typeof origOpenBoxEffNew === "function") {
                             TreasureBoxAnimClass.prototype.open_box_effect_new = function (evtName, evtData) {
                                 const animSelf = this;
-                                const callFunRef = (evtData && typeof evtData.callFun === "function") ? evtData.callFun : null;
+                                const rawCallFun = (evtData && typeof evtData.callFun === "function") ? evtData.callFun : null;
+                                let cbInvoked = false;
+                                const safeOnceCallFun = function () {
+                                    if (cbInvoked) return;
+                                    cbInvoked = true;
+                                    if (animSelf) {
+                                        animSelf._isInEffect = false;
+                                        if (animSelf.effCallFun === safeOnceCallFun) animSelf.effCallFun = null;
+                                    }
+                                    if (rawCallFun) {
+                                        try { rawCallFun(); } catch (eRawCb) { }
+                                    }
+                                };
                                 animSelf.__effectStartTs = Date.now();
                                 const trmCur = window.ModelManager && window.ModelManager.TreasureRewardModel;
                                 if (trmCur) {
@@ -7861,24 +7958,16 @@
                                     trmCur.__reqOpenBoxSince = 0;
                                 }
                                 try {
-                                    const resAnim = origOpenBoxEffNew.apply(animSelf, arguments);
-                                    trackTimer(setTimeout(function () {
-                                        try {
-                                            if (animSelf && (animSelf._isInEffect || (callFunRef && animSelf.effCallFun === callFunRef))) {
-                                                animSelf._isInEffect = false;
-                                                const fn = animSelf.effCallFun || callFunRef;
-                                                animSelf.effCallFun = null;
-                                                if (typeof fn === "function") fn();
-                                            }
-                                        } catch (eSafeAnim) { }
-                                    }, 1800));
-                                    return resAnim;
+                                     const patchedEvtData = evtData ? Object.assign({}, evtData, { callFun: safeOnceCallFun }) : { callFun: safeOnceCallFun };
+                                     const resAnim = origOpenBoxEffNew.call(animSelf, evtName, patchedEvtData);
+                                     // Giải phóng ngay cờ _isInEffect để người chơi có thể bấm Đào liên tiếp mà vẫn giữ nguyên hoạt ảnh Spine!
+                                     animSelf._isInEffect = false;
+                                     trackTimer(setTimeout(safeOnceCallFun, 150));
+                                     return resAnim;
                                 } catch (eAnimErr) {
                                     animSelf._isInEffect = false;
                                     animSelf.effCallFun = null;
-                                    if (callFunRef) {
-                                        try { callFunRef(); } catch (eCf) { }
-                                    }
+                                    safeOnceCallFun();
                                 }
                             };
                         }
@@ -7931,7 +8020,10 @@
                             inst.__lastBoxSettledTs = Date.now();
                             if (inst.__queuedBoxOpenArgs || inst.__queuedManualOpenView) {
                                 if (inst.__queuedFlushTimer) clearTimeout(inst.__queuedFlushTimer);
-                                const waitNext = Math.max(45, 485 - (Date.now() - (inst.__lastBoxSentTs || 0)));
+                                const nowF = Date.now();
+                                const waitSent = Math.max(45, 485 - (nowF - (inst.__lastBoxSentTs || 0)));
+                                const waitSell = Math.max(45, 175 - (nowF - (inst.__lastTempSellSentTs || 0)));
+                                const waitNext = Math.max(waitSent, waitSell);
                                 inst.__queuedFlushTimer = trackTimer(setTimeout(function () {
                                     inst.__queuedFlushTimer = null;
                                     if (inst._isReqOpenBox) return;
@@ -7950,7 +8042,7 @@
                                         inst.__queuedManualOpenView = null;
                                         if (v && !v.isDisposed && typeof v.openBox === "function") {
                                             try {
-                                                if (v.boxAnim1 && v.boxAnim1._isInEffect) {
+                                                if (v.boxAnim1) {
                                                     v.boxAnim1._isInEffect = false;
                                                     const fn = v.boxAnim1.effCallFun;
                                                     v.boxAnim1.effCallFun = null;
@@ -7964,7 +8056,267 @@
                             }
                         };
 
-                        ["updateTempNew", "refreshTemp", "refreshTempNew", "updateEquipNew"].forEach(function (fnName) {
+                        // Chuẩn hóa tuyệt đối compareEquipTemp: CHỈ giữ lại trang bị thực sự TĂNG LỰC CHIẾN (newPower > wearPower) và mạnh nhất ở mỗi ô!
+                        trmProto.compareEquipTemp = function (rawItem) {
+                            const info = inspectTempEquipItem(this, rawItem);
+                            if (!info || !info.strictlyBetter) {
+                                if (this._notSellTempId && info && info.id !== undefined) {
+                                    delete this._notSellTempId[info.id];
+                                }
+                                return false;
+                            }
+                            if (Array.isArray(this._temp_equip) && this._temp_equip.length > 1) {
+                                for (let i = 0; i < this._temp_equip.length; i++) {
+                                    const otherRaw = this._temp_equip[i];
+                                    if (!otherRaw || otherRaw === rawItem) continue;
+                                    const otherInfo = inspectTempEquipItem(this, otherRaw);
+                                    if (!otherInfo || otherInfo.id === info.id || otherInfo.pos !== info.pos) continue;
+                                    if (otherInfo.newPower > info.newPower || (otherInfo.newPower === info.newPower && Number(otherInfo.id) < Number(info.id))) {
+                                        if (this._notSellTempId && info.id !== undefined) {
+                                            delete this._notSellTempId[info.id];
+                                        }
+                                        return false;
+                                    }
+                                }
+                            }
+                            return true;
+                        };
+
+                        // Chuẩn hóa tuyệt đối checkAutoTempSell: Tự động bán 100% trang bị không tăng LC (xanh lục, lam, tím, cam, đỏ) ngay lập tức & xóa khỏi _temp_equip!
+                        trmProto.checkAutoTempSell = function (returnCount) {
+                            const wantCount = !!returnCount;
+                            if (!Array.isArray(this._temp_equip) || this._temp_equip.length === 0) {
+                                this._notSellTempId = {};
+                                if (typeof this.checkEquipSaveNumRed === "function") {
+                                    try { this.checkEquipSaveNumRed(); } catch (eRed0) { }
+                                }
+                                return wantCount ? 0 : false;
+                            }
+
+                            const bestByPos = {};
+                            const toSellEntries = [];
+                            for (let i = 0; i < this._temp_equip.length; i++) {
+                                const rawItem = this._temp_equip[i];
+                                if (!rawItem) continue;
+                                const info = inspectTempEquipItem(this, rawItem);
+                                if (!info || info.id === undefined) continue;
+                                if (info.strictlyBetter) {
+                                    const prevBest = bestByPos[info.pos];
+                                    if (!prevBest || info.newPower > prevBest.newPower) {
+                                        if (prevBest) toSellEntries.push(prevBest);
+                                        bestByPos[info.pos] = info;
+                                    } else {
+                                        toSellEntries.push(info);
+                                    }
+                                } else {
+                                    toSellEntries.push(info);
+                                }
+                            }
+
+                            const keptRawList = [];
+                            const newNotSellMap = {};
+                            const posKeys = Object.keys(bestByPos);
+                            for (let k = 0; k < posKeys.length; k++) {
+                                const keepInfo = bestByPos[posKeys[k]];
+                                if (keepInfo && keepInfo.raw) {
+                                    keptRawList.push(keepInfo.raw);
+                                    if (keepInfo.id !== undefined) newNotSellMap[keepInfo.id] = true;
+                                }
+                            }
+                            this._notSellTempId = newNotSellMap;
+
+                            if (toSellEntries.length > 0) {
+                                // Cập nhật _temp_equip ngay lập tức để trang bị LC thấp không bao giờ bật popup TreasureEquipHandlerView hay chặn nút Đào!
+                                this._temp_equip = keptRawList;
+                                const nowSell = Date.now();
+                                this.__lastTempSellSentTs = nowSell;
+                                if (window.__LAST_PROTO_TIMES__) {
+                                    window.__LAST_PROTO_TIMES__[13113] = nowSell;
+                                    window.__LAST_PROTO_TIMES__[13114] = nowSell;
+                                }
+
+                                const sellEqs = [];
+                                const sellIdObjs = [];
+                                for (let s = 0; s < toSellEntries.length; s++) {
+                                    const entry = toSellEntries[s];
+                                    if (!entry || entry.id === undefined) continue;
+                                    sellEqs.push(entry.eq);
+                                    sellIdObjs.push({ _val: entry.id });
+                                }
+                                if (sellEqs.length > 0) {
+                                    try {
+                                        if (typeof this.reqEquipBoxSell === "function") {
+                                            this.reqEquipBoxSell(sellEqs);
+                                        } else if (gm && gm.RPCReq && typeof gm.RPCReq.send === "function") {
+                                            const sellProto = (gm.EquipBoxSellCs && gm.EquipBoxSellCs.protocol) || 13113;
+                                            gm.RPCReq.send(sellProto, { _list: sellIdObjs });
+                                        }
+                                    } catch (eSellRpc) { }
+                                }
+
+                                if (this._temp_equip.length === 0) {
+                                    if (typeof this.hideEquipView === "function") {
+                                        try { this.hideEquipView(); } catch (eHide0) { }
+                                    }
+                                    if (typeof this.showMainEquipTip === "function") {
+                                        try { this.showMainEquipTip(); } catch (eTip0) { }
+                                    }
+                                    flushQueuedTreasureOpen(this);
+                                } else {
+                                    if (typeof this.tempSort === "function") {
+                                        try { this.tempSort(); } catch (eSort) { }
+                                    }
+                                    const isBgNow = (typeof bot.isBgSilent === "function" && bot.isBgSilent());
+                                    if (!isBgNow && (typeof this.canPopEquip !== "function" || this.canPopEquip())) {
+                                        if (typeof this.showNewEquip === "function") {
+                                            try { this.showNewEquip(); } catch (ePopUp) { }
+                                        }
+                                    }
+                                    if (typeof this.showMainEquipTip === "function") {
+                                        try { this.showMainEquipTip(); } catch (eTip1) { }
+                                    }
+                                }
+                            }
+
+                            if (typeof this.checkEquipSaveNumRed === "function") {
+                                try { this.checkEquipSaveNumRed(); } catch (eRed1) { }
+                            }
+                            return wantCount ? toSellEntries.length : (toSellEntries.length > 0);
+                        };
+
+                        // Bảo vệ showNewEquip: Chỉ mở TreasureEquipHandlerView khi thực sự còn trang bị TĂNG LC trong _temp_equip!
+                        const origShowNewEquip = trmProto.showNewEquip;
+                        if (typeof origShowNewEquip === "function") {
+                            trmProto.showNewEquip = function () {
+                                if (Array.isArray(this._temp_equip) && this._temp_equip.length > 0 && typeof this.checkAutoTempSell === "function") {
+                                    try { this.checkAutoTempSell(); } catch (ePreCheck) { }
+                                }
+                                if (!Array.isArray(this._temp_equip) || this._temp_equip.length === 0) {
+                                    if (typeof this.hideEquipView === "function") {
+                                        try { this.hideEquipView(); } catch (eHideEmpty) { }
+                                    }
+                                    return false;
+                                }
+                                const topRaw = this._temp_equip[0];
+                                const topInfo = inspectTempEquipItem(this, topRaw);
+                                if (!topInfo || !topInfo.strictlyBetter) {
+                                    if (typeof this.checkAutoTempSell === "function") {
+                                        try { this.checkAutoTempSell(); } catch (eRecheck) { }
+                                    }
+                                    if (!Array.isArray(this._temp_equip) || this._temp_equip.length === 0) {
+                                        return false;
+                                    }
+                                }
+                                return origShowNewEquip.apply(this, arguments);
+                            };
+                        }
+
+                        // Khi mặc trang bị mới (updateEquip / setEquipBoxInfo) -> xóa khóa _notSellTempId cũ và lọc bán ngay mọi món còn dư không còn tăng LC!
+                        const origUpdateEquip = trmProto.updateEquip;
+                        if (typeof origUpdateEquip === "function") {
+                            trmProto.updateEquip = function () {
+                                const r = origUpdateEquip.apply(this, arguments);
+                                this._notSellTempId = {};
+                                return r;
+                            };
+                        }
+
+                        const origSetEquipBoxInfo = trmProto.setEquipBoxInfo;
+                        if (typeof origSetEquipBoxInfo === "function") {
+                            trmProto.setEquipBoxInfo = function () {
+                                const r = origSetEquipBoxInfo.apply(this, arguments);
+                                this._notSellTempId = {};
+                                if (Array.isArray(this._temp_equip) && this._temp_equip.length > 0 && typeof this.checkAutoTempSell === "function") {
+                                    try { this.checkAutoTempSell(); } catch (eInitSell) { }
+                                }
+                                return r;
+                            };
+                        }
+
+                        // Chuẩn hóa updateTempNew: Không bao giờ để evt_checkGetNewCardShow (khi isShowGain rỗng) hoặc Spine làm treo updateTemp!
+                        const origUpdateTempNew = trmProto.updateTempNew;
+                        if (typeof origUpdateTempNew === "function") {
+                            trmProto.updateTempNew = function (msg) {
+                                const selfTrm = this;
+                                const wasReqOpenBox = !!selfTrm._isReqOpenBox;
+                                selfTrm._isReqOpenBox = false;
+                                selfTrm.__reqOpenBoxSince = 0;
+                                const isBg = (typeof bot.isBgSilent === "function" && bot.isBgSilent());
+
+                                if (msg) {
+                                    selfTrm._fix_gains = msg._fix_gains || [];
+                                    if (!isBg && ((Array.isArray(msg._gains) && msg._gains.length > 0) || (Array.isArray(msg._fix_gains) && msg._fix_gains.length > 0))) {
+                                        try {
+                                            const rewardList = [];
+                                            const fixTimes = Number(msg._fix_times || 0);
+                                            if (Array.isArray(msg._fix_gains) && msg._fix_gains.length > 0) {
+                                                for (let t = 0; t < fixTimes; t++) {
+                                                    for (let fg = 0; fg < msg._fix_gains.length; fg++) {
+                                                        rewardList.push(msg._fix_gains[fg]);
+                                                    }
+                                                }
+                                            }
+                                            if (Array.isArray(msg._gains)) {
+                                                for (let g = 0; g < msg._gains.length; g++) {
+                                                    rewardList.push(msg._gains[g]);
+                                                }
+                                            }
+                                            const dispRef = (gm && gm.Dispatcher) || window.Dispatcher;
+                                            if (dispRef && typeof dispRef.dispatchEvent === "function" && rewardList.length > 0) {
+                                                dispRef.dispatchEvent("evt_checkGetNewCardShow", { _type: 1, _arg: 0, _p_reward: rewardList }, function () { });
+                                            }
+                                        } catch (eGainShow) { }
+                                    }
+
+                                    // 1. Cập nhật _temp_equip đầy đủ từ cả dạng mảng lẫn đối tượng
+                                    const rawTempList = Array.isArray(msg)
+                                        ? msg
+                                        : (Array.isArray(msg._temp_equip) ? msg._temp_equip : (Array.isArray(msg.list) ? msg.list : []));
+                                    selfTrm._temp_equip = rawTempList;
+                                    if (typeof selfTrm.updateTemp === "function") {
+                                        try {
+                                            selfTrm.updateTemp(rawTempList, true);
+                                        } catch (eUpdTemp) { }
+                                    }
+
+                                    // Callback hiển thị đồ mới khi Spine vung xẻng kết thúc (hoặc gọi ngay nếu không phát Spine)
+                                    const effCall = function () {
+                                        if (Array.isArray(selfTrm._temp_equip) && selfTrm._temp_equip.length > 0 && typeof selfTrm.showNewEquip === "function") {
+                                            try { selfTrm.showNewEquip(); } catch (eSne) { }
+                                        }
+                                    };
+
+                                    // 2. Phát hoạt ảnh vung xẻng Spine (nếu đang mở giao diện) sau khi updateTemp đã chạy xong để equip_main_tip không ngắt ngang Spine!
+                                    if (wasReqOpenBox && !isBg && selfTrm.isInOpenBox) {
+                                        let effDispatched = false;
+                                        try {
+                                            const dispRef = (gm && gm.Dispatcher) || window.Dispatcher;
+                                            const evtMod = reqTreasureMod("EventType");
+                                            const evtMap = (evtMod && (evtMod.EventType || evtMod.default || evtMod)) || (gm && gm.EventType) || window.EventType;
+                                            const effEvtName = (evtMap && evtMap.open_box_effect_new) || "open_box_effect_new";
+                                            if (dispRef && typeof dispRef.dispatchEvent === "function") {
+                                                dispRef.dispatchEvent(effEvtName, { callFun: effCall });
+                                                effDispatched = true;
+                                            }
+                                        } catch (eEffDisp) { }
+                                        if (!effDispatched) {
+                                            effCall();
+                                        }
+                                    } else {
+                                        effCall();
+                                    }
+                                } else {
+                                    origUpdateTempNew.apply(selfTrm, arguments);
+                                }
+
+                                if (typeof selfTrm.checkEquipSaveNumRed === "function") {
+                                    try { selfTrm.checkEquipSaveNumRed(); } catch (eRedUtn) { }
+                                }
+                                flushQueuedTreasureOpen(selfTrm);
+                            };
+                        }
+
+                        ["refreshTemp", "refreshTempNew", "updateEquipNew"].forEach(function (fnName) {
                             const origFn = trmProto[fnName];
                             if (typeof origFn === "function") {
                                 trmProto[fnName] = function () {
@@ -8027,22 +8379,11 @@
                                 if (typeof this.checkAutoTempSell === "function") {
                                     try { this.checkAutoTempSell(); } catch (eCats) { }
                                 }
+                            }
+
+                            if (Array.isArray(this._temp_equip) && this._temp_equip.length > 0) {
                                 const realCap = (typeof this.getEquipTempSaveNum === "function") ? Number(this.getEquipTempSaveNum() || 1) : 1;
-                                const lastSellTs = (window.__LAST_PROTO_TIMES__ && window.__LAST_PROTO_TIMES__[13114]) || 0;
-                                if (lastSellTs && (now - lastSellTs < 170)) {
-                                    const selfAfterSell = this;
-                                    this.__queuedBoxOpenArgs = { cnt: safeCnt, type: type, isBg: isBg };
-                                    if (!this.__afterSellOpenTimer) {
-                                        this.__afterSellOpenTimer = trackTimer(setTimeout(function () {
-                                            selfAfterSell.__afterSellOpenTimer = null;
-                                            const q = selfAfterSell.__queuedBoxOpenArgs;
-                                            selfAfterSell.__queuedBoxOpenArgs = null;
-                                            if (q) selfAfterSell.reqEquipBoxOpen(q.cnt, q.type);
-                                        }, 185));
-                                    }
-                                    return;
-                                }
-                                if (Array.isArray(this._temp_equip) && this._temp_equip.length >= realCap) {
+                                if (this._temp_equip.length >= realCap) {
                                     this._isReqOpenBox = false;
                                     this.__reqOpenBoxSince = 0;
                                     if (!isBg && typeof this.showNewEquip === "function") {
@@ -8052,19 +8393,19 @@
                                 }
                             }
 
-                            if (this._isReqOpenBox && this.__reqOpenBoxSince && (now - this.__reqOpenBoxSince > 1400)) {
+                            if (this._isReqOpenBox && this.__reqOpenBoxSince && (now - this.__reqOpenBoxSince > 1200)) {
                                 this._isReqOpenBox = false;
                                 this.__reqOpenBoxSince = 0;
                             }
 
-                            if ((this._isReqOpenBox && (now - (this.__reqOpenBoxSince || 0) < 1400)) || (this.__lastBoxSentTs && (now - this.__lastBoxSentTs < 480))) {
+                            if ((this._isReqOpenBox && (now - (this.__reqOpenBoxSince || 0) < 1200)) || (this.__lastBoxSentTs && (now - this.__lastBoxSentTs < 480))) {
                                 const selfQ = this;
                                 this.__queuedBoxOpenArgs = { cnt: safeCnt, type: type, isBg: isBg };
                                 if (!this.__queuedFlushTimer) {
-                                    const delayMs = Math.max(90, 485 - (now - (this.__lastBoxSentTs || now)));
+                                    const delayMs = Math.max(70, 485 - (now - (this.__lastBoxSentTs || now)));
                                     this.__queuedFlushTimer = trackTimer(setTimeout(function () {
                                         selfQ.__queuedFlushTimer = null;
-                                        if (selfQ._isReqOpenBox && (Date.now() - (selfQ.__reqOpenBoxSince || 0) < 1200)) return;
+                                        if (selfQ._isReqOpenBox && (Date.now() - (selfQ.__reqOpenBoxSince || 0) < 1100)) return;
                                         const q = selfQ.__queuedBoxOpenArgs;
                                         selfQ.__queuedBoxOpenArgs = null;
                                         if (q) selfQ.reqEquipBoxOpen(q.cnt, q.type);
@@ -8077,6 +8418,11 @@
                             this._isReqOpenBox = true;
                             this.__reqOpenBoxSince = now;
                             this.__lastDispatchedBoxArgs = { cnt: safeCnt, type: type };
+                            if (window.__LAST_PROTO_TIMES__) window.__LAST_PROTO_TIMES__[13110] = now;
+                            window.__LAST_OUT_PROTO__ = 13110;
+                            if (gm && gm.RPCReq && gm.RPCReq.sendTimeCache) {
+                                gm.RPCReq.sendTimeCache[13110] = 0;
+                            }
                             if (origReqOpen) return origReqOpen.call(this, safeCnt, type);
                         };
 
@@ -16063,7 +16409,7 @@
                     }
                 } catch (eFastRescue) { }
             }, 380));
-            bot.log("⚡ [Engine v3.8] Farm KNB Tối Đa (Dò 1..5 Tướng UCB1 • Lọc 103% LC Thắng Chắc • Chạy Ẩn 100% • 0 KNB Quest).");
+            bot.log("⚡ [Engine v3.9] Farm KNB Tối Đa (Dò 1..5 Tướng UCB1 • Lọc 103% LC Thắng Chắc • Đào Bảo Chuẩn • Chạy Ẩn 100% • 0 KNB Quest).");
         },
 
         setToggles: function (t) {
@@ -16848,7 +17194,7 @@
                                     return;
                                 }
                             }
-                            if ((viewName === "ItemGetView" || viewName === "ItemGetTurntableView") && bot.isBgSilent()) {
+                            if ((viewName === "ItemGetView" || viewName === "ItemGetTurntableView" || viewName === "ItemGetTreasureView") && bot.isBgSilent()) {
                                 if (args && typeof args.callback === "function") {
                                     try { args.callback(); } catch (eCb) { }
                                 }
@@ -16858,22 +17204,34 @@
                                 (bot.isBgSilent() || bot.state.isAutoDaily3QActive || bot.isAutoStageOn() || bot.state.isAutoTowerActive)) {
                                 return;
                             }
-                            if (viewName === "TreasureEquipHandlerView" && bot.settings && bot.settings.auto_shovel === true && bot.state.master !== false) {
-                                const recentManualDig = !!(bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 4000));
-                                const boxTabOpen = !!(vmTarget.isOpenView && vmTarget.isOpenView("TreasureBoxView"));
-                                if (!recentManualDig && (bot.isBgSilent() || !boxTabOpen)) {
-                                    trackTimer(setTimeout(function () {
-                                        try {
-                                            if (bot.settings && bot.settings.auto_shovel === true && typeof bot.runAutoTreasureSmart === "function" && !bot.state._handlingTreasureSmart) {
-                                                if (typeof bot.runInBgAutoContext === "function") {
-                                                    bot.runInBgAutoContext(function () { return bot.runAutoTreasureSmart(); });
-                                                } else {
-                                                    bot.runAutoTreasureSmart();
+                            if (viewName === "TreasureEquipHandlerView") {
+                                const trmOpen = window.ModelManager && window.ModelManager.TreasureRewardModel;
+                                if (trmOpen && typeof trmOpen.compareEquipTemp === "function" && args && !trmOpen.compareEquipTemp(args)) {
+                                    if (typeof trmOpen.checkAutoTempSell === "function") {
+                                        try { trmOpen.checkAutoTempSell(); } catch (eVmSell) { }
+                                    }
+                                    if (!Array.isArray(trmOpen._temp_equip) || trmOpen._temp_equip.length === 0) {
+                                        return;
+                                    }
+                                    args = trmOpen._temp_equip[0];
+                                }
+                                if (bot.settings && bot.settings.auto_shovel === true && bot.state.master !== false) {
+                                    const recentManualDig = !!(bot.state._lastManualDigTs && (Date.now() - bot.state._lastManualDigTs < 4000));
+                                    const boxTabOpen = !!(vmTarget.isOpenView && vmTarget.isOpenView("TreasureBoxView"));
+                                    if (!recentManualDig && (bot.isBgSilent() || !boxTabOpen)) {
+                                        trackTimer(setTimeout(function () {
+                                            try {
+                                                if (bot.settings && bot.settings.auto_shovel === true && typeof bot.runAutoTreasureSmart === "function" && !bot.state._handlingTreasureSmart) {
+                                                    if (typeof bot.runInBgAutoContext === "function") {
+                                                        bot.runInBgAutoContext(function () { return bot.runAutoTreasureSmart(); });
+                                                    } else {
+                                                        bot.runAutoTreasureSmart();
+                                                    }
                                                 }
-                                            }
-                                        } catch (eAutoEq) { }
-                                    }, 150));
-                                    return;
+                                            } catch (eAutoEq) { }
+                                        }, 150));
+                                        return;
+                                    }
                                 }
                             }
                         } catch (eVmOpen) { }
@@ -19489,7 +19847,7 @@
     };
 
     // ====================================================================
-    // MUA SẠCH 100% LƯỢT VÀNG CÂY TÀI LỘC (FREE + KNB) & 1-CLICK 100/100 NV NGÀY
+    // MUA SẠCH 100% LƯỢT VÀNG CÂY TÀI LỘC (FREE + KNB) & 1-CLICK 100/100 NV NGÀY (v4.0)
     // ====================================================================
     bot.runBuyAllGoldSmart = async function (allowPaidKnb) {
         const result = { ok: false, freeBought: 0, knbBought: 0, totalBought: 0, knbSpentEst: 0, stoppedLowKnb: false };
@@ -19503,12 +19861,16 @@
             const gpcMod = safeRequire("GoldPointConfiger");
             const gpc = gm.GoldPointConfiger || window.GoldPointConfiger || (gpcMod && (gpcMod.GoldPointConfiger || gpcMod.default || gpcMod));
             const fallbackGoldPointCfg = {
-                1: { id: 1, cost: [] },
-                2: { id: 2, cost: [[2, 30]] },
-                3: { id: 3, cost: [[2, 80]] }
+                1: { id: 1, cost: [], limit: 3 },
+                2: { id: 2, cost: [[2, 30]], limit: 5 },
+                3: { id: 3, cost: [[2, 80]], limit: 5 }
             };
             let ids = (gpc && typeof gpc.getGoldPointCfgIds === "function") ? (gpc.getGoldPointCfgIds() || []) : [];
             if (!Array.isArray(ids) || ids.length === 0) ids = [1, 2, 3];
+            // Luôn bảo đảm duyệt đủ cả 3 tầng: ID 1 (Free), ID 2 (30 KNB), ID 3 (80 KNB)
+            for (let fid of [1, 2, 3]) {
+                if (ids.indexOf(fid) < 0) ids.push(fid);
+            }
 
             for (let i = 0; i < ids.length; i++) {
                 const id = Number(ids[i]);
@@ -19526,20 +19888,34 @@
                 // Khi không bật allowPaidKnb: chỉ mua lượt 0 KNB (costAmt <= 0); khi bật allowPaidKnb: mua sạch cả Free + KNB (TidDiam = 2)
                 if (costAmt > 0 && (!allowPaidKnb || costType !== 2)) continue;
 
-                const getRemainTurns = function () {
-                    if (typeof mtm.getTotalTimes === "function" && typeof mtm.getBuyTimes === "function") {
-                        return Math.max(0, Number(mtm.getTotalTimes(id) || 0) - Number(mtm.getBuyTimes(id) || 0));
+                const getCurBuyTimes = function () {
+                    if (typeof mtm.getBuyTimes === "function") return Number(mtm.getBuyTimes(id) || 0);
+                    const row = mtm.welfareGold && mtm.welfareGold[id];
+                    return Number((row && (row.buy_cnt !== undefined ? row.buy_cnt : row._buy_cnt)) || 0);
+                };
+                const getCurTotalTimes = function () {
+                    if (typeof mtm.getTotalTimes === "function") {
+                        const t = Number(mtm.getTotalTimes(id) || 0);
+                        if (t > 0) return t;
                     }
                     const row = mtm.welfareGold && mtm.welfareGold[id];
-                    if (row) return Math.max(0, Number(row.tot_cnt || 0) - Number(row.buy_cnt || 0));
-                    return 0;
+                    const rowTot = Number((row && (row.tot_cnt !== undefined ? row.tot_cnt : row._tot_cnt)) || 0);
+                    if (rowTot > 0) return rowTot;
+                    const defLim = (cfg && (cfg.limit || (Array.isArray(cfg) && cfg[3]))) || (fallbackGoldPointCfg[id] && fallbackGoldPointCfg[id].limit) || 5;
+                    return Number(defLim || 5);
                 };
 
-                const initRem = Math.min(20, getRemainTurns());
-                if (initRem <= 0) continue;
+                let curBuy = getCurBuyTimes();
+                let totLim = getCurTotalTimes();
+                let remTurns = Math.max(0, totLim - curBuy);
+                // Giới hạn an toàn tối đa 15 lượt cho 1 loại
+                const maxStep = Math.min(15, remTurns > 0 ? remTurns : (costAmt > 0 ? 5 : 3));
 
-                for (let step = 0; step < initRem; step++) {
-                    if (getRemainTurns() <= 0) break;
+                for (let step = 0; step < maxStep; step++) {
+                    curBuy = getCurBuyTimes();
+                    totLim = getCurTotalTimes();
+                    if (totLim > 0 && curBuy >= totLim) break;
+
                     if (costAmt > 0 && pm && typeof pm.getMoneyNum === "function") {
                         const curJade = Number(pm.getMoneyNum(2) || 0);
                         if (curJade < costAmt) {
@@ -19547,7 +19923,8 @@
                             break;
                         }
                     }
-                    const prevBuy = (typeof mtm.getBuyTimes === "function") ? Number(mtm.getBuyTimes(id) || 0) : -1;
+
+                    const prevBuy = curBuy;
                     mtm.reqWelfareGoldBuy(id);
                     if (costAmt <= 0) {
                         result.freeBought++;
@@ -19556,11 +19933,12 @@
                         result.knbSpentEst += costAmt;
                     }
                     result.totalBought++;
-                    await bot.sleep(240);
-                    if (prevBuy >= 0 && typeof mtm.getBuyTimes === "function") {
-                        for (let w = 0; w < 2 && Number(mtm.getBuyTimes(id) || 0) === prevBuy; w++) {
-                            await bot.sleep(150);
-                        }
+                    await bot.sleep(300);
+
+                    // Đợi server phản hồi cập nhật buy_cnt tối đa 3 nhịp (450ms)
+                    for (let w = 0; w < 3; w++) {
+                        if (getCurBuyTimes() > prevBuy) break;
+                        await bot.sleep(150);
                     }
                 }
             }
@@ -19604,8 +19982,10 @@
                 if (!tm || typeof tm.getTaskState !== "function") return 0;
                 return Number(tm.getTaskState(2, Number(tid)) || 0);
             };
+
             const claimReadyDailyTasksAndBoxes = async function () {
-                if (!tm || typeof tm.getTaskState !== "function") return;
+                if (!tm) return;
+                // 1. Nhận tất cả nhiệm vụ ngày đã hoàn thành (TaskType = 2)
                 const candidateTaskIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
                 if (typeof tm.getTaskListByType === "function") {
                     const dList = tm.getTaskListByType(2) || [];
@@ -19630,10 +20010,11 @@
                     await bot.sleep(380);
                 }
 
-                // Rương Năng Động Ngày (TaskDailyBox = 5: chuẩn bảng IPA là [1001, 1002, 1003, 1004] tương ứng 25/50/75/100 điểm)
+                // 2. Mở 4 Rương Năng Động Ngày (TaskDailyBox = 5: mốc 25/50/75/100 điểm)
                 const tCfgMod = safeRequire("TaskConfiger");
                 const tCfg = gm.TaskConfiger || window.TaskConfiger || (tCfgMod && (tCfgMod.TaskConfiger || tCfgMod.default || tCfgMod));
-                const dailyBoxIds = [1001, 1002, 1003, 1004, 1, 2, 3, 4, 5];
+                const dailyBoxThresholds = { 1001: 25, 1002: 50, 1003: 75, 1004: 100, 1: 25, 2: 50, 3: 75, 4: 100 };
+                const dailyBoxIds = [1001, 1002, 1003, 1004, 1, 2, 3, 4];
                 if (tCfg && typeof tCfg.getTaskActiveCfgArray === "function") {
                     const bArr = tCfg.getTaskActiveCfgArray(1) || [];
                     for (let i = 0; i < bArr.length; i++) {
@@ -19641,9 +20022,12 @@
                         if (bid > 0 && dailyBoxIds.indexOf(bid) < 0) dailyBoxIds.unshift(bid);
                     }
                 }
+                const curScore = readMoney(7);
                 for (let i = 0; i < dailyBoxIds.length; i++) {
                     const bid = dailyBoxIds[i];
-                    if (Number(tm.getTaskState(5, bid)) === 2) {
+                    const st = Number(tm.getTaskState(5, bid) || 0);
+                    const thresh = dailyBoxThresholds[bid] || 100;
+                    if (st === 2 || (st !== 3 && curScore >= thresh)) {
                         if (bot.claimTaskSafe(tm, 5, bid)) {
                             summary.dailyBoxesOpened++;
                             await bot.sleep(180);
@@ -19651,7 +20035,7 @@
                     }
                 }
 
-                // Nhiệm Vụ Tuần (TaskWeekly = 3) & Rương Tuần (TaskWeeklyBox = 6: [2001..2005])
+                // 3. Nhiệm Vụ Tuần (TaskWeekly = 3) & Rương Tuần (TaskWeeklyBox = 6: [2001..2005])
                 if (typeof tm.getTaskListByType === "function") {
                     const wList = tm.getTaskListByType(3) || [];
                     const readyWeekly = [];
@@ -19665,6 +20049,7 @@
                         await bot.sleep(280);
                     }
                 }
+                const weeklyBoxThresholds = { 2001: 100, 2002: 250, 2003: 500, 2004: 750, 2005: 1000, 1: 100, 2: 250, 3: 500, 4: 750, 5: 1000 };
                 const weeklyBoxIds = [2001, 2002, 2003, 2004, 2005, 1, 2, 3, 4, 5];
                 if (tCfg && typeof tCfg.getTaskActiveCfgArray === "function") {
                     const wbArr = tCfg.getTaskActiveCfgArray(2) || [];
@@ -19673,10 +20058,16 @@
                         if (wbid > 0 && weeklyBoxIds.indexOf(wbid) < 0) weeklyBoxIds.unshift(wbid);
                     }
                 }
+                const curWeekScore = readMoney(8);
                 for (let i = 0; i < weeklyBoxIds.length; i++) {
                     const wbid = weeklyBoxIds[i];
-                    if (Number(tm.getTaskState(6, wbid)) === 2) {
-                        if (bot.claimTaskSafe(tm, 6, wbid)) summary.weeklyBoxesOpened++;
+                    const wst = Number(tm.getTaskState(6, wbid) || 0);
+                    const wthresh = weeklyBoxThresholds[wbid] || 1000;
+                    if (wst === 2 || (wst !== 3 && curWeekScore >= wthresh)) {
+                        if (bot.claimTaskSafe(tm, 6, wbid)) {
+                            summary.weeklyBoxesOpened++;
+                            await bot.sleep(180);
+                        }
                     }
                 }
             };
@@ -19701,6 +20092,9 @@
                 await bot.sleep(300);
             } catch (eSync) { }
 
+            // Nhận đợt 0 các nhiệm vụ đã sẵn sàng từ trước
+            await claimReadyDailyTasksAndBoxes();
+
             // 1. Mua Sạch 100% Lượt Vàng Cây Tài Lộc (Hoàn thành NV Ngày #11: +10 điểm)
             summary.goldResult = await bot.runBuyAllGoldSmart(!!allowPaidGold);
 
@@ -19718,7 +20112,6 @@
                             const exD = (typeof mui.getCopyExData === "function") ? mui.getCopyExData() : mui.copyExData;
                             const freeStd = prog ? (Number(prog._quick_free || 0) - Number(prog._quick_use || 0)) : 0;
                             const freeEx = exD ? (Number(exD._ex_free || 0) - Number(exD._ex_free_use || 0)) : 0;
-                            // CHỐT CHẶN 0 KNB: Chỉ gọi reqCopyQuick khi thực sự còn lượt miễn phí chuẩn/đặc quyền!
                             if (freeStd <= 0 && freeEx <= 0) break;
                             mui.reqCopyQuick();
                             await bot.sleep(280);
@@ -19899,9 +20292,9 @@
 
             // 10. Nếu điểm Sôi Nổi vẫn < 100 và NV Đào Bảo 10 lần (#4: +10 điểm) chưa xong + sẵn Xẻng thường (0 KNB) -> Đào đủ mốc!
             try {
-                const curScoreMid = readMoney(7);
+                let curScoreMid = readMoney(7);
                 const shovels = (pm && typeof pm.getItemNum === "function") ? Number(pm.getItemNum(1001) || 0) : 0;
-                if (curScoreMid < 100 && (!tm || getDailyTaskState(4) === 1) && shovels >= 10 && typeof bot.runAutoTreasureSmart === "function") {
+                if (curScoreMid < 100 && (!tm || getDailyTaskState(4) !== 3) && shovels >= 10 && typeof bot.runAutoTreasureSmart === "function") {
                     for (let dg = 0; dg < 10; dg++) {
                         if (tm && getDailyTaskState(4) >= 2) break;
                         await bot.runAutoTreasureSmart();
@@ -19920,7 +20313,39 @@
             }
             if (typeof bot.runAutoQuestsMasterSmart === "function") await bot.runAutoQuestsMasterSmart();
             if (typeof bot.runAutoDailyRewardsSmart === "function") await bot.runAutoDailyRewardsSmart(true);
+
+            // Nhận đợt 2 và mở sạch tất cả rương ngày & rương tuần
             await claimReadyDailyTasksAndBoxes();
+
+            // 12. Kiểm tra nếu vẫn < 100 điểm: Chạy vòng cứu trợ bổ sung (Càn quét phó bản / Chiêu mộ / Đấu trường)
+            try {
+                let finalScoreCheck = readMoney(7);
+                if (finalScoreCheck < 100) {
+                    if (cm && typeof cm.reqDailyDungeonQuick === "function" && (!tm || getDailyTaskState(8) === 1)) {
+                        for (let cid = 1; cid <= 5; cid++) {
+                            cm.reqDailyDungeonQuick(cid, 1);
+                            await bot.sleep(200);
+                        }
+                    }
+                    if (typeof bot.runAutoArenaSmart === "function" && (!tm || getDailyTaskState(12) === 1)) {
+                        for (let ar = 0; ar < 3; ar++) {
+                            await bot.runAutoArenaSmart(true);
+                            await bot.sleep(250);
+                        }
+                    }
+                    if ((!tm || getDailyTaskState(5) === 1) && hbm && typeof hbm.getHaveHeroDataList === "function") {
+                        const hList = hbm.getHaveHeroDataList() || [];
+                        if (hList[0] && typeof hList[0].levelUP === "function") {
+                            for (let u = 0; u < 3; u++) {
+                                hList[0].levelUP(1);
+                                await bot.sleep(200);
+                            }
+                        }
+                    }
+                    await bot.sleep(300);
+                    await claimReadyDailyTasksAndBoxes();
+                }
+            } catch (eCatchUp) { }
 
             summary.dailyScore = readMoney(7);
         } catch (eEnsure100) { }

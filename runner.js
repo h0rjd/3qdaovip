@@ -43,7 +43,13 @@ const CONFIG = {
     email: process.env.JOYPLAY_EMAIL || primaryAccount.email || 'dungby5@gmail.com',
     password: process.env.JOYPLAY_PASSWORD || primaryAccount.password || 'ntdung12',
     server: process.env.GAME_SERVER || primaryAccount.server_name || 'Tam Quốc S6',
-    durationMinutes: parseInt(process.env.RUN_DURATION_MINUTES || (isGitHubActions ? '330' : '999999'), 10),
+    durationMinutes: (() => {
+        const raw = parseInt(process.env.RUN_DURATION_MINUTES || (isGitHubActions ? '330' : '999999'), 10);
+        if (isGitHubActions) {
+            return Math.min(330, Math.max(1, isNaN(raw) ? 330 : raw));
+        }
+        return isNaN(raw) ? 999999 : raw;
+    })(),
     headless: forceHeadless,
     settings: {
         show_browser: !forceHeadless,
@@ -754,7 +760,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                             const txt = upd.message.text.trim().toLowerCase();
 
                             if (txt === '/menu' || txt === '/settings' || txt === '/start' || txt === '/status' || txt === '/report') {
-                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v3.8');
+                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v4.0');
                             } else if (txt === '/daily' || txt === '/nhanh' || txt === '/nvngay' || txt === '/muavang') {
                                 void runOneClickDailyTaskAsync('Telegram /daily');
                             } else if (txt === '/pause' || txt === '/nghi') {
@@ -1605,7 +1611,7 @@ async function launchAndEnterGame(sessionState) {
     const payloadFile = fs.existsSync(path.join(__dirname, 'injected_agent.js'))
         ? path.join(__dirname, 'injected_agent.js')
         : path.join(__dirname, 'bot-payload.js');
-    writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v3.0 Final)...`);
+    writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v4.0 Final)...`);
     const botPayloadCode = fs.readFileSync(payloadFile, 'utf8');
 
     await page.evaluate((code, cfg, isCloudHeadless) => {
@@ -1634,7 +1640,7 @@ async function launchAndEnterGame(sessionState) {
         }
     }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles }, !!(isGitHubActions || CONFIG.headless));
 
-    writeLog("[Bot] ✅ AutoBot v3.0 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
+    writeLog("[Bot] ✅ AutoBot v4.0 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
     await new Promise(r => setTimeout(r, 4000));
 
     const snapStart = path.join(CONFIG.screenshotDir, '03_bot_started.png');
@@ -2608,7 +2614,7 @@ async function run() {
                         fs.copyFileSync(startSnap, latestSnap);
                     } catch (e) {}
                     const html = buildTelegramReportHtml(
-                        '🚀 3Q AUTOBOT v3.0 Final - ĐÃ VÀO GAME & BẮT ĐẦU TREO 24/7',
+                        '🚀 3Q AUTOBOT v4.0 Final - ĐÃ VÀO GAME & BẮT ĐẦU TREO 24/7',
                         st,
                         sessionState,
                         '✅ <i>Anh có thể điều khiển trực tiếp trên cửa sổ GUI (http://127.0.0.1:3939) hoặc bấm các nút bên dưới trên Telegram!</i>'
@@ -2632,7 +2638,7 @@ async function run() {
                     if (process.env.GITHUB_STEP_SUMMARY && cycle % 6 === 0) {
                         try {
                             const summaryMd = [
-                                `## ⚡ 3Q AutoBot v3.0 Final - Trạng Thái Farm KNB Realtime`,
+                                `## ⚡ 3Q AutoBot v4.0 Final - Trạng Thái Farm KNB Realtime`,
                                 `| Chỉ số | Chi tiết |`,
                                 `| :--- | :--- |`,
                                 `| 👤 **Nhân vật** | **${dispSt.roleName || '---' }** (Server: ${CONFIG.server}) |`,
