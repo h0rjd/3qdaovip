@@ -40,8 +40,8 @@ const forceHeadless = isGitHubActions || process.env.HEADLESS === 'true' || cfgS
 const GUI_PORT = parseInt(process.env.GUI_PORT || '3939', 10);
 
 const CONFIG = {
-    email: process.env.JOYPLAY_EMAIL || primaryAccount.email || 'dungby5@gmail.com',
-    password: process.env.JOYPLAY_PASSWORD || primaryAccount.password || 'ntdung12',
+    email: process.env.JOYPLAY_EMAIL || primaryAccount.email || '',
+    password: process.env.JOYPLAY_PASSWORD || primaryAccount.password || '',
     server: process.env.GAME_SERVER || primaryAccount.server_name || 'Tam Quốc S6',
     durationMinutes: (() => {
         const raw = parseInt(process.env.RUN_DURATION_MINUTES || (isGitHubActions ? '330' : '999999'), 10);
@@ -278,20 +278,40 @@ async function pushLiveTelemetryToGitHub(telemetryObj, sessionState) {
 
 function saveConfigToDisk() {
     try {
-        rawConfig.account = Object.assign(rawConfig.account || {}, {
-            email: CONFIG.email,
-            password: CONFIG.password,
-            server_name: CONFIG.server
-        });
-        if (Array.isArray(rawConfig.accounts) && rawConfig.accounts.length > 0) {
-            rawConfig.accounts[0] = Object.assign(rawConfig.accounts[0] || {}, {
+        if (!isGitHubActions) {
+            rawConfig.account = Object.assign(rawConfig.account || {}, {
                 email: CONFIG.email,
                 password: CONFIG.password,
                 server_name: CONFIG.server
             });
+            if (Array.isArray(rawConfig.accounts) && rawConfig.accounts.length > 0) {
+                rawConfig.accounts[0] = Object.assign(rawConfig.accounts[0] || {}, {
+                    email: CONFIG.email,
+                    password: CONFIG.password,
+                    server_name: CONFIG.server
+                });
+            }
+            rawConfig.telegram = Object.assign(rawConfig.telegram || {}, CONFIG.telegram);
+        } else {
+            rawConfig.account = Object.assign(rawConfig.account || {}, {
+                email: "",
+                password: "",
+                server_name: CONFIG.server
+            });
+            if (Array.isArray(rawConfig.accounts) && rawConfig.accounts.length > 0) {
+                rawConfig.accounts[0] = Object.assign(rawConfig.accounts[0] || {}, {
+                    email: "",
+                    password: "",
+                    server_name: CONFIG.server
+                });
+            }
+            rawConfig.telegram = Object.assign(rawConfig.telegram || {}, {
+                bot_token: "",
+                chat_id: "",
+                report_interval_min: CONFIG.telegram.report_interval_min
+            });
         }
         rawConfig.settings = Object.assign(rawConfig.settings || {}, CONFIG.settings);
-        rawConfig.telegram = Object.assign(rawConfig.telegram || {}, CONFIG.telegram);
         rawConfig.toggles = Object.assign(rawConfig.toggles || {}, CONFIG.toggles);
         fs.writeFileSync(CONFIG_PATH, JSON.stringify(rawConfig, null, 2), 'utf8');
     } catch (e) {}

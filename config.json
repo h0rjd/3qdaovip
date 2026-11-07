@@ -1,13 +1,13 @@
 {
   "account": {
-    "email": "dungby5@gmail.com",
-    "password": "ntdung12",
+    "email": "",
+    "password": "",
     "server_name": "Tam Quốc S6"
   },
   "accounts": [
     {
-      "email": "dungby5@gmail.com",
-      "password": "ntdung12",
+      "email": "",
+      "password": "",
       "server_name": "Tam Quốc S6"
     }
   ],
@@ -21,8 +21,8 @@
     "bot_stopped": false
   },
   "telegram": {
-    "bot_token": "8918744112:AAHy6EyEud73Ta3D42awSlJlDzRaFhCcjXk",
-    "chat_id": "7182418544",
+    "bot_token": "",
+    "chat_id": "",
     "report_interval_min": 30
   },
   "toggles": {
