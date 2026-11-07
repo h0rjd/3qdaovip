@@ -730,7 +730,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                 await answerCallbackFast(cq.id, '📸 Đang chụp màn hình và gửi báo cáo mới nhất...');
                                 void runInstantReportAsync('📸 BÁO CÁO TRẠNG THÁI TỨC THÌ (THEO YÊU CẦU)');
                             } else if (actionData === 'action:pause_5m' || actionData === 'action:pause_15m') {
-                                const waitM = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 5);
+                                const waitM = Math.max(5, Number(CONFIG.settings.yield_wait_minutes) || 5);
                                 sessionState.manualYieldRequested = true;
                                 await answerCallbackFast(cq.id, `⏸️ Đang tạm dừng Bot ${waitM} phút để nhường máy...`);
                             } else if (actionData === 'action:stop_bot') {
@@ -760,7 +760,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                             const txt = upd.message.text.trim().toLowerCase();
 
                             if (txt === '/menu' || txt === '/settings' || txt === '/start' || txt === '/status' || txt === '/report') {
-                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v4.0');
+                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v4.1');
                             } else if (txt === '/daily' || txt === '/nhanh' || txt === '/nvngay' || txt === '/muavang') {
                                 void runOneClickDailyTaskAsync('Telegram /daily');
                             } else if (txt === '/pause' || txt === '/nghi') {
@@ -1172,7 +1172,7 @@ async function launchAndEnterGame(sessionState) {
         const isHotfixKickLog = m.includes('_res=3');
         const isTrueDeviceKick = entry.kickNow === true ||
             m.includes('[Nhường Máy] Khẩn cấp') ||
-            (!isHotfixKickLog && (m.includes('onLoginKickSc _res=') || m.includes('evt_LoginKickSc (_res='))) ||
+            (!isHotfixKickLog && (m.includes('LoginKickSc') || m.includes('onLoginKickSc') || m.includes('evt_LoginKickSc'))) ||
             mLower.includes('thiết bị khác') ||
             mLower.includes('nơi khác') ||
             mLower.includes('trùng lặp đăng nhập') ||
@@ -1611,7 +1611,7 @@ async function launchAndEnterGame(sessionState) {
     const payloadFile = fs.existsSync(path.join(__dirname, 'injected_agent.js'))
         ? path.join(__dirname, 'injected_agent.js')
         : path.join(__dirname, 'bot-payload.js');
-    writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v4.0 Final)...`);
+    writeLog(`[Bot] Đang nạp mã nguồn ${path.basename(payloadFile)} (AutoBot v4.1 Final)...`);
     const botPayloadCode = fs.readFileSync(payloadFile, 'utf8');
 
     await page.evaluate((code, cfg, isCloudHeadless) => {
@@ -1640,7 +1640,7 @@ async function launchAndEnterGame(sessionState) {
         }
     }, botPayloadCode, { settings: CONFIG.settings, toggles: CONFIG.toggles }, !!(isGitHubActions || CONFIG.headless));
 
-    writeLog("[Bot] ✅ AutoBot v4.0 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
+    writeLog("[Bot] ✅ AutoBot v4.1 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!");
     await new Promise(r => setTimeout(r, 4000));
 
     const snapStart = path.join(CONFIG.screenshotDir, '03_bot_started.png');
@@ -2268,7 +2268,7 @@ async function run() {
                 sessionState.forceResumeFromYield = false;
                 sessionState.deadSessionStreak = 0;
 
-                const waitMin = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 5);
+                const waitMin = Math.max(5, Number(CONFIG.settings.yield_wait_minutes) || 5);
                 writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động kết nối lại...`);
 
                 // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
@@ -2500,8 +2500,9 @@ async function run() {
                 if (sessionState.deadSessionStreak >= 9) {
                     sessionState.deadSessionStreak = 0;
                     const sinceLastAuto = Date.now() - Number(sessionState.lastAutoReloginAt || 0);
-                    if (CONFIG.settings.yield_on_kick && sessionState.lastAutoReloginAt && sinceLastAuto < 180000) {
-                        writeLog(`📱 [Nhường Máy] Phiên lại tiếp tục mất kết nối chỉ sau ${Math.round(sinceLastAuto / 1000)}s kể từ lần tự đăng nhập lại -> Có thiết bị đang chơi, tạm nghỉ ${CONFIG.settings.yield_wait_minutes || 5} phút!`);
+                    if (CONFIG.settings.yield_on_kick) {
+                        const waitYieldM = Math.max(5, Number(CONFIG.settings.yield_wait_minutes) || 5);
+                        writeLog(`📱 [Nhường Máy] Phát hiện mất kết nối / kẹt trạng thái quá 90s (nghi do Điện thoại đang chơi) -> Tạm nghỉ ${waitYieldM} phút để nhường máy!`);
                         sessionState.kickDetectedFromLog = true;
                         sessionState.isYielding = true;
                         continue;
@@ -2614,7 +2615,7 @@ async function run() {
                         fs.copyFileSync(startSnap, latestSnap);
                     } catch (e) {}
                     const html = buildTelegramReportHtml(
-                        '🚀 3Q AUTOBOT v4.0 Final - ĐÃ VÀO GAME & BẮT ĐẦU TREO 24/7',
+                        '🚀 3Q AUTOBOT v4.1 Final - ĐÃ VÀO GAME & BẮT ĐẦU TREO 24/7',
                         st,
                         sessionState,
                         '✅ <i>Anh có thể điều khiển trực tiếp trên cửa sổ GUI (http://127.0.0.1:3939) hoặc bấm các nút bên dưới trên Telegram!</i>'
@@ -2638,7 +2639,7 @@ async function run() {
                     if (process.env.GITHUB_STEP_SUMMARY && cycle % 6 === 0) {
                         try {
                             const summaryMd = [
-                                `## ⚡ 3Q AutoBot v4.0 Final - Trạng Thái Farm KNB Realtime`,
+                                `## ⚡ 3Q AutoBot v4.1 Final - Trạng Thái Farm KNB Realtime`,
                                 `| Chỉ số | Chi tiết |`,
                                 `| :--- | :--- |`,
                                 `| 👤 **Nhân vật** | **${dispSt.roleName || '---' }** (Server: ${CONFIG.server}) |`,
