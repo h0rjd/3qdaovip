@@ -18665,6 +18665,8 @@
             const gm = window.G_Mapping || {};
             const mm = window.ModelManager || gm.ModelManager;
             const hlm = mm && mm.HomeLandModel;
+            const cwm = mm && mm.CountryWarModel;
+            const pm = mm && mm.PlayerModel;
             const mcCfg = gm.MaincityConfiger || window.MaincityConfiger || (safeRequire("MaincityConfiger") && (safeRequire("MaincityConfiger").MaincityConfiger || safeRequire("MaincityConfiger").default));
             if (!hlm || !mcCfg) return false;
 
@@ -18674,34 +18676,47 @@
             const hlClass = (hlm && hlm.constructor) || gm.HomeLandModel || window.HomeLandModel;
             const pickFn = (hlClass && hlClass.reqHostPickSoldier) || hlm.reqHostPickSoldier;
             const addFn = (hlClass && hlClass.reqHostAddSoldier) || hlm.reqHostAddSoldier;
+            const upBuildFn = (hlClass && hlClass.reqBuildLvUp) || hlm.reqBuildLvUp;
 
-            // 1. Quét các ô công trình Trại Lính trong Gia Viên
+            // 1. Quét các ô công trình Trại Lính trong Gia Viên (Hỗ trợ cả Map lẫn Object + Fallback nhóm 96, 97, 98)
             const barrackPlots = [];
+            const seenPlots = new Set();
+            const tryPushBarrackPlot = function (plotId) {
+                const pid = Number(plotId || 0);
+                if (!pid || seenPlots.has(pid)) return;
+                const b = (typeof hlm.getBuildingInfoByPlotId === "function") ? hlm.getBuildingInfoByPlotId(pid) : null;
+                if (b && b.id > 0 && typeof mcCfg.getBuildingLvUpDataById === "function") {
+                    const upCfg = mcCfg.getBuildingLvUpDataById(b.id, Math.max(1, b.rawLv || b.lv || 1));
+                    if (upCfg && Array.isArray(upCfg.build_soldier) && upCfg.build_soldier.length > 0) {
+                        seenPlots.add(pid);
+                        barrackPlots.push({ plot: pid, build: b, upCfg: upCfg });
+                    }
+                }
+            };
+
             if (hlm._plotId_BuildingMap) {
-                for (let pKey in hlm._plotId_BuildingMap) {
-                    const plotId = Number(pKey);
-                    const b = (typeof hlm.getBuildingInfoByPlotId === "function") ? hlm.getBuildingInfoByPlotId(plotId) : null;
-                    if (b && b.id > 0 && typeof mcCfg.getBuildingLvUpDataById === "function") {
-                        const upCfg = mcCfg.getBuildingLvUpDataById(b.id, Math.max(1, b.rawLv || b.lv || 1));
-                        if (upCfg && Array.isArray(upCfg.build_soldier) && upCfg.build_soldier.length > 0) {
-                            barrackPlots.push({ plot: plotId, build: b, upCfg: upCfg });
-                        }
+                if (typeof hlm._plotId_BuildingMap.forEach === "function") {
+                    hlm._plotId_BuildingMap.forEach(function (_val, pKey) {
+                        tryPushBarrackPlot(pKey);
+                    });
+                } else {
+                    for (let pKey in hlm._plotId_BuildingMap) {
+                        tryPushBarrackPlot(pKey);
                     }
                 }
             }
 
-            // Fallback nếu map chưa nạp: thử các plot mặc định của nhóm binh chủng 96, 97, 98
-            if (barrackPlots.length === 0 && typeof mcCfg.getMainCityByGroup === "function") {
-                const soldierGroups = [96, 97, 98];
-                for (let gIdx = 0; gIdx < soldierGroups.length; gIdx++) {
-                    const grp = mcCfg.getMainCityByGroup(soldierGroups[gIdx]);
-                    if (grp && grp[0] && grp[0].build_type) {
-                        const plotId = Number(grp[0].build_type);
-                        const b = (typeof hlm.getBuildingInfoByPlotId === "function") ? hlm.getBuildingInfoByPlotId(plotId) : null;
-                        if (b && b.id > 0) {
-                            const upCfg = mcCfg.getBuildingLvUpDataById(b.id, Math.max(1, b.rawLv || b.lv || 1));
-                            if (upCfg) barrackPlots.push({ plot: plotId, build: b, upCfg: upCfg });
-                        }
+            const soldierGroups = [96, 97, 98];
+            for (let gIdx = 0; gIdx < soldierGroups.length; gIdx++) {
+                const sGrp = soldierGroups[gIdx];
+                if (cwm && typeof cwm.getSoldierBuildIdAndPlot === "function") {
+                    const bp = cwm.getSoldierBuildIdAndPlot(sGrp);
+                    if (bp && bp.plotId) tryPushBarrackPlot(bp.plotId);
+                }
+                if (typeof mcCfg.getMainCityByGroup === "function") {
+                    const grp = mcCfg.getMainCityByGroup(sGrp);
+                    if (Array.isArray(grp) && grp[0] && grp[0].build_type) {
+                        tryPushBarrackPlot(grp[0].build_type);
                     }
                 }
             }
@@ -18724,34 +18739,70 @@
                     pickFn.call(hlClass || hlm, plot);
                     bot.log(`🪖 [Chiêu Binh] Thu hoạch lính đã luyện xong tại Trại Lính (Ô #${plot})!`);
                     didSomething = true;
-                    await bot.sleep(300);
+                    await bot.sleep(320);
                 }
 
-                // 3. Tiến hành Chiêu Binh nếu trại đang rảnh
+                // 3. Tiến hành Chiêu Binh nếu trại đang rảnh (0 KNB: _is_acc = 0)
+                const sQueueAfter = (typeof hlm.getSoldier === "function") ? hlm.getSoldier(plot) : null;
                 const isTraining = (typeof hlm.checkIsTaining === "function") ? hlm.checkIsTaining(plot)
-                    : (sQueue && Number(sQueue._e_sec || 0) > serverTime);
+                    : !!(sQueueAfter && Number(sQueueAfter._e_sec || 0) > serverTime);
 
-                if (!isTraining && !bInfo.Upgrading && (force || bot.tryDo("hl_train_sol_" + plot, 10))) {
+                if (isTraining) {
+                    if (force && bot.tryDo("hl_train_busy_log_" + plot, 120)) {
+                        const leftSec = Math.max(0, Number((sQueueAfter && sQueueAfter._e_sec) || 0) - serverTime);
+                        bot.log(`🪖 [Chiêu Binh] Trại Lính (Ô #${plot}) đang luyện quân (còn ${Math.ceil(leftSec / 60)}p -> tự thu hoạch khi xong)!`);
+                    }
+                    continue;
+                }
+
+                if (!bInfo.Upgrading && (force || bot.tryDo("hl_train_sol_" + plot, 10))) {
                     const batchSize = Math.max(1, Number(upCfg.build_soldier[2] || 10));
                     const maxCap = Number(upCfg.build_soldier[1] || 100);
                     const baseQueue = Number(upCfg.build_soldier[4] || maxCap);
-                    const sType = Number(upCfg.build_soldier[0] || (95 + idx));
-                    const cwm = mm.CountryWarModel;
-                    const pm = mm.PlayerModel;
+                    const bonusQueue = (cwm && typeof cwm.getScienceAddValueByAttr === "function")
+                        ? Number(cwm.getScienceAddValueByAttr(197) || 0) : 0;
+                    const maxQueue = Math.max(batchSize, baseQueue + bonusQueue);
+                    const sType = Number(upCfg.build_soldier[0] || (96 + i));
                     const hasNum = (cwm && typeof cwm.getHasSoldierNumByID === "function")
                         ? Number(cwm.getHasSoldierNumByID(sType) || 0)
                         : (pm && typeof pm.getItemNum === "function" ? Number(pm.getItemNum(sType) || 0) : 0);
                     const room = Math.max(0, maxCap - hasNum);
-                    if (room >= batchSize) {
-                        const maxTimes = Math.max(1, Math.min(10, Math.floor(Math.min(room, baseQueue) / batchSize)));
-                        // Khi chưa đủ 4 lần Chiêu Binh trong ngày (Nhiệm vụ 3Q Tranh Hùng: Chiêu binh 4 lần/ngày), chiêu từng đợt 1 lần để tích đủ 4/4 lượt nhanh nhất!
-                        const times = ((bot.state.dailySoldierTrainCount || 0) < 4) ? 1 : maxTimes;
-                        if (typeof addFn === "function") {
+                    let targetSoldiers = Math.min(room, maxQueue);
+
+                    if (targetSoldiers >= batchSize) {
+                        let safeCost = true;
+                        const costs = Array.isArray(upCfg.soldier_cost) ? upCfg.soldier_cost : [];
+                        for (let cIdx = 0; cIdx < costs.length; cIdx++) {
+                            const cRow = costs[cIdx];
+                            if (!cRow) continue;
+                            const cCode = Number(cRow[0]);
+                            const cPer = Number(cRow[1] || 0);
+                            if (cCode === 2 || cCode === 3) { safeCost = false; break; } // Tuyệt đối 0 KNB!
+                            if (cPer > 0 && pm && typeof pm.getItemNum === "function") {
+                                const haveRes = Number(pm.getItemNum(cCode) || 0);
+                                const canAfford = Math.floor(haveRes / cPer);
+                                if (canAfford < targetSoldiers) targetSoldiers = canAfford;
+                            }
+                        }
+                        const maxTimes = Math.floor(targetSoldiers / batchSize);
+                        // Khi chưa đủ 4 lần Chiêu Binh trong ngày (NV 3Q Tranh Hùng: Chiêu binh 4 lần/ngày), chiêu từng đợt 1 lần để tích đủ 4/4 lượt nhanh nhất!
+                        const times = ((bot.state.dailySoldierTrainCount || 0) < 4) ? Math.min(1, maxTimes) : maxTimes;
+                        if (safeCost && times >= 1 && typeof addFn === "function") {
                             addFn.call(hlClass || hlm, plot, times, 0); // _is_acc = 0 (0 KNB!)
                             bot.state.dailySoldierTrainCount = (bot.state.dailySoldierTrainCount || 0) + 1;
-                            bot.log(`🪖 [Chiêu Binh] Đặt lệnh Chiêu Binh #${bot.state.dailySoldierTrainCount} tại Trại Lính (Ô #${plot} • ${times * batchSize} lính • 0 KNB)!`);
+                            bot.log(`🪖 [Chiêu Binh] Đặt lệnh Chiêu Binh #${bot.state.dailySoldierTrainCount} tại Trại Lính (Ô #${plot} • +${(times * batchSize).toLocaleString()} lính • 0 KNB)!`);
                             didSomething = true;
                             await bot.sleep(350);
+                        }
+                    } else {
+                        // Kho quân của trại đã đầy (hasNum >= maxCap): Nếu nâng cấp được Trại Lính bằng Gỗ (0 KNB) thì nâng ngay để mở rộng sức chứa!
+                        if (bInfo.canUp && typeof upBuildFn === "function" && bot.tryDo("hl_up_barrack_" + plot, 30)) {
+                            upBuildFn.call(hlClass || hlm, plot);
+                            bot.log(`🏯 [Chiêu Binh] Nâng cấp Trại Lính (Ô #${plot}) để mở rộng sức chứa quân (0 KNB)!`);
+                            didSomething = true;
+                            await bot.sleep(300);
+                        } else if (force && bot.tryDo("hl_full_barrack_log_" + plot, 180)) {
+                            bot.log(`🪖 [Chiêu Binh] Trại Lính (Ô #${plot}) đã đầy kho quân (${hasNum.toLocaleString()}/${maxCap.toLocaleString()})!`);
                         }
                     }
                 }
@@ -19098,10 +19149,33 @@
                         klm.requestShop();
                     }
                     if (info) {
+                        // Khởi tạo mảng rương Côn Lôn & bọc an toàn setBoxItemGainMsg để mở Rương Kho Báu ngầm không bao giờ lỗi undefined.concat!
+                        if (!Array.isArray(klm.boxOpenItemDataList)) klm.boxOpenItemDataList = [];
+                        if (!Array.isArray(klm.boxBlockIndexsGain)) klm.boxBlockIndexsGain = [];
+                        if (!Array.isArray(klm.boxBlockIndexsRequest)) klm.boxBlockIndexsRequest = [];
+                        if (!klm.boxOpenData || typeof klm.boxOpenData !== "object") klm.boxOpenData = {};
+                        if (typeof klm.setBoxItemGainMsg === "function" && !klm.__QA_BOX_SAFE__) {
+                            const origSetBoxGain = klm.setBoxItemGainMsg;
+                            klm.setBoxItemGainMsg = function (msg) {
+                                if (!Array.isArray(this.boxOpenItemDataList)) this.boxOpenItemDataList = [];
+                                if (!Array.isArray(this.boxBlockIndexsGain)) this.boxBlockIndexsGain = [];
+                                if (!Array.isArray(this.boxBlockIndexsRequest)) this.boxBlockIndexsRequest = [];
+                                if (!this.boxOpenData || typeof this.boxOpenData !== "object") this.boxOpenData = {};
+                                const res = origSetBoxGain.apply(this, arguments);
+                                if (bot.state._bgSilentDepth > 0 || !bot.isManualCombatViewOpen()) {
+                                    this.boxOpenItemDataList = [];
+                                    this.boxBlockIndexsGain = [];
+                                    this.boxBlockIndexsRequest = [];
+                                }
+                                return res;
+                            };
+                            klm.__QA_BOX_SAFE__ = true;
+                        }
+
                         // Luôn giải phóng reqLock bị treo (do qua cổng tầng mới hoặc mạng trễ)
                         if (klm.reqLock) {
                             if (!bot.state.kunlunLockSince) bot.state.kunlunLockSince = Date.now();
-                            else if (Date.now() - bot.state.kunlunLockSince > 3000) {
+                            else if (Date.now() - bot.state.kunlunLockSince > 2200) {
                                 klm.reqLock = false;
                                 bot.state.kunlunLockSince = 0;
                             }
@@ -19210,15 +19284,25 @@
 
                         const curFlr = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || 1) : 1;
 
-                        // B3. Mở toàn bộ Rương Kho Báu đã lộ diện & không bị Quái canh giữ (Tốn 0 thể lực, gọi thẳng requestClick để không bật ItemGetView!)
+                        // B3. Mở toàn bộ Rương Kho Báu đã lộ diện & không bị Quái canh giữ (Tốn 0 thể lực, cập nhật _args[0]._val = 1 ngay để không kẹt lặp vô tận!)
                         const openBoxes = (typeof klm.getAllCanOpenBox === "function") ? (klm.getAllCanOpenBox() || []) : [];
-                        if (openBoxes.length > 0 && typeof klm.requestClick === "function") {
-                            const boxCell = Number(openBoxes[0]);
-                            if (boxCell > 0 && bot.tryDo("kunlun_open_box_" + curFlr + "_" + boxCell, 3)) {
-                                klm.reqLock = false;
-                                klm.requestClick(boxCell);
-                                bot.log(`🎁 [Côn Lôn] Tự động nhặt Rương Kho Báu ô #${boxCell} (Tầng ${curFlr})!`);
-                                return true;
+                        if (openBoxes.length > 0 && (typeof klm.requestClickBox === "function" || typeof klm.requestClick === "function")) {
+                            for (let bIdx = 0; bIdx < openBoxes.length; bIdx++) {
+                                const boxCell = Number(openBoxes[bIdx]);
+                                if (boxCell > 0 && bot.tryDo("kunlun_open_box_" + curFlr + "_" + boxCell, 8)) {
+                                    const waitBoxClickMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1250) - Date.now());
+                                    if (waitBoxClickMs > 0) await bot.sleep(waitBoxClickMs);
+                                    klm.reqLock = false;
+                                    bot.state.lastKunlunClickTs = Date.now();
+                                    if (typeof klm.requestClickBox === "function") klm.requestClickBox(boxCell);
+                                    else klm.requestClick(boxCell);
+                                    if (klm.cellListTable && klm.cellListTable[boxCell]) {
+                                        klm.cellListTable[boxCell]._args = [{ _val: 1 }];
+                                    }
+                                    bot.log(`🎁 [Côn Lôn] Tự động nhặt Rương Kho Báu ô #${boxCell} (Tầng ${curFlr})!`);
+                                    did = true;
+                                    await bot.sleep(450);
+                                }
                             }
                         }
 
@@ -19229,8 +19313,11 @@
                                 if (cObj && Number(cObj._type) === 2 && Array.isArray(cObj._args) && cObj._args[0] && Number(cObj._args[0]._val) === 1) {
                                     const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(Number(cKey)) : null;
                                     if (!bInfo || !bInfo.isLock) {
-                                        if (bot.tryDo("kunlun_enter_portal_" + curFlr, 4)) {
+                                        if (bot.tryDo("kunlun_enter_portal_" + curFlr, 5)) {
+                                            const waitPortalMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1250) - Date.now());
+                                            if (waitPortalMs > 0) await bot.sleep(waitPortalMs);
                                             klm.reqLock = false;
+                                            bot.state.lastKunlunClickTs = Date.now();
                                             klm.requestClick(Number(cKey));
                                             bot.log(`🌀 [Côn Lôn] Đã dọn sạch rương & hạ Boss -> Tiến lên Tầng ${curFlr + 1}!`);
                                             return true;
@@ -19280,6 +19367,14 @@
                                         await bot.sleep(100);
                                     }
                                     if (mm.HeroBagModel && !bot.ensureGameplayTeamReady(10, 1, null, null)) return did;
+                                    const minNextWarTs = Math.max(
+                                        (bot.state.lastAnyWarStartTime || 0) + 1800,
+                                        (bot.state.lastWarCloseTime || 0) + 1200,
+                                        (bot.state.lastWarError66Time || 0) + 2200
+                                    );
+                                    const waitWarMs = minNextWarTs - Date.now();
+                                    if (waitWarMs > 0) await bot.sleep(Math.min(waitWarMs, 2500));
+
                                     const startTs = Date.now();
                                     bot.state.kunlunBgFighting = true;
                                     if (typeof bot.markAutoBattle === "function") bot.markAutoBattle(10, 25000);
@@ -19344,8 +19439,11 @@
                         const flipStamina = pm ? Number((pm.getMoneyNum && pm.getMoneyNum(43)) || (pm.getItemNum && pm.getItemNum(43)) || 0) : 0;
                         // Nếu Boss trên tầng hiện tại chưa bị chặn bởi khóa và ta đã đánh thua Boss, ưu tiên Reset thay vì tốn thể lực lật các ô phụ!
                         if (!hasDefeatedUnlockedBoss && pickCell > 0 && flipStamina >= 1 && typeof klm.requestClick === "function") {
-                            if (bot.tryDo("kunlun_flip_" + curFlr + "_" + pickCell, 3)) {
+                            if (bot.tryDo("kunlun_flip_" + curFlr + "_" + pickCell, 4)) {
+                                const waitFlipMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1250) - Date.now());
+                                if (waitFlipMs > 0) await bot.sleep(waitFlipMs);
                                 klm.reqLock = false;
+                                bot.state.lastKunlunClickTs = Date.now();
                                 klm.requestClick(pickCell);
                                 bot.log(`⛏️ [Côn Lôn] Dùng 1 thể lực lật ô #${pickCell} tại Tầng ${curFlr} (Còn ${flipStamina - 1} thể lực)...`);
                                 return true;
@@ -19353,7 +19451,7 @@
                         }
 
                         // B7. TỰ ĐỘNG RESET (RS) CÔN LÔN KHƯ KHI KHÔNG ĐÁNH ĐƯỢC NỮA (FlipResetCs = 13209 — 100% 0 KNB!)
-                        // Điều kiện: Đã thua Boss tầng hiện tại (hoặc thua Quái canh đường nên không còn ô nào lật tiếp được), đã nhặt hết rương mở sẵn, và Tầng hiện tại > resetOffset (5)
+                        // Điều kiện: Đã thua Boss tầng hiện tại (hoặc thua Quái canh đường và không thể lật thêm ô), đã nhặt hết rương mở sẵn, và Tầng hiện tại > resetOffset (5)
                         const MiscCfg = gm.MiscConfiger || (safeRequire("MiscConfiger") && (safeRequire("MiscConfiger").MiscConfiger || safeRequire("MiscConfiger").default));
                         let resetOffset = 5;
                         try {
@@ -19362,14 +19460,18 @@
                                 resetOffset = Number(mData.int_val[0][0] || 5);
                             }
                         } catch (eMisc) { }
-                        const isStuckByDefeat = hasDefeatedUnlockedBoss || (hasDefeatedUnlockedMonster && pickCell === 0);
-                        if (isStuckByDefeat && curFlr > resetOffset && openBoxes.length === 0 && !(typeof klm.havePassBossBlock === "function" && klm.havePassBossBlock())) {
+                        const nowOpenBoxes = (typeof klm.getAllCanOpenBox === "function") ? (klm.getAllCanOpenBox() || []) : [];
+                        const isStuckByDefeat = hasDefeatedUnlockedBoss || (hasDefeatedUnlockedMonster && (pickCell === 0 || flipStamina < 1));
+                        if (isStuckByDefeat && curFlr > resetOffset && nowOpenBoxes.length === 0 && !(typeof klm.havePassBossBlock === "function" && klm.havePassBossBlock())) {
                             if (bot.tryDo("kunlun_auto_reset_" + curFlr, 30)) {
                                 const resetProto = (gm.FlipResetCs && gm.FlipResetCs.protocol) || 13209;
                                 klm.reqLock = false;
-                                rpc.send(resetProto, {});
+                                if (typeof klm.requestReset === "function") klm.requestReset();
+                                else rpc.send(resetProto, {});
                                 bot.state.kunlunDefeatedCells = {};
                                 bot.log(`🔄 [Côn Lôn] Không đánh qua được Quái/Boss tại Tầng ${curFlr} -> Tự động Reset (RS) Côn Lôn Khư về Tầng ${Math.max(1, curFlr - resetOffset)} để quét lại & nhận thưởng (0 KNB)!`);
+                                await bot.sleep(450);
+                                if (typeof klm.requestInfo === "function") klm.requestInfo();
                                 return true;
                             }
                         }
@@ -19414,13 +19516,6 @@
                 }
             }
 
-            const sec = (typeof cwm.getSec === "function") ? cwm.getSec() : cwm._siegeSec;
-            const canEnter = (typeof cwm.canEnterMainView === "function") ? cwm.canEnterMainView() : !!sec;
-            if (!sec || !canEnter) {
-                if (manualTrigger) bot.log("ℹ️ [Tam Quốc] Mùa giải Tam Quốc Tranh Hùng hiện chưa mở hoặc đã kết thúc!");
-                return false;
-            }
-
             const SiegeCfg = gm.SiegeCityConfiger || (safeRequire("SiegeCityConfiger") && (safeRequire("SiegeCityConfiger").SiegeCityConfiger || safeRequire("SiegeCityConfiger").default));
             const MaincityCfg = gm.MaincityConfiger || (safeRequire("MaincityConfiger") && (safeRequire("MaincityConfiger").MaincityConfiger || safeRequire("MaincityConfiger").default));
             const HelpCfg = gm.HelpConfiger || (safeRequire("HelpConfiger") && (safeRequire("HelpConfiger").HelpConfiger || safeRequire("HelpConfiger").default));
@@ -19460,7 +19555,7 @@
                 }
             } catch (eCwc) { }
 
-            // 0. Đồng bộ dữ liệu bản đồ & thông tin cá nhân Tam Quốc nếu chưa nạp (chạy ngầm không cần mở giao diện!)
+            // 0. Đồng bộ dữ liệu bản đồ & thông tin cá nhân Tam Quốc nếu chưa nạp (KHÔNG return sớm trước Bước 1..7 để luôn làm Quest, Chiêu Binh, Nâng Thế Lực & Công Nghệ!)
             let siegeInfo = (typeof cwm.getSiegeInfo === "function") ? cwm.getSiegeInfo() : cwm._siegeInfo;
             let cityMap = (typeof cwm.getCityDataMap === "function") ? cwm.getCityDataMap() : cwm._clientCityDataMap;
             let hasCityMap = cityMap && Object.keys(cityMap).length > 0;
@@ -19475,7 +19570,6 @@
                     siegeInfo = (typeof cwm.getSiegeInfo === "function") ? cwm.getSiegeInfo() : cwm._siegeInfo;
                     cityMap = (typeof cwm.getCityDataMap === "function") ? cwm.getCityDataMap() : cwm._clientCityDataMap;
                     hasCityMap = cityMap && Object.keys(cityMap).length > 0;
-                    if (!siegeInfo || !hasCityMap) return false;
                 }
             }
 
@@ -19512,6 +19606,7 @@
                 if ((cwm._haveCountryTaskRed || bot.canDo("cw_poll_country_task", 120)) && bot.tryDo("cw_req_country_task", 30)) {
                     bot.markDone("cw_poll_country_task");
                     rpc.send(15057, {}); // SiegeCountryTaskWinCs
+                    await bot.sleep(250);
                 }
                 const cTasks = window.__QA_CW_COUNTRY_TASKS__;
                 if (Array.isArray(cTasks) && typeof SiegeCfg.getSiegeCountryTaskById === "function") {
@@ -19548,8 +19643,9 @@
             // 4. Nhiệm vụ Thế Lực + Tự động Thăng Cấp Thế Lực (TaskSiegeGrade = 21 + SiegeUpgradeGradeCs = 15055/15065) & Chiến Lược (TaskFun = 11 / 260) & TaskSiege (20) & Sự Kiện Tam Quốc (cw_)
             try {
                 if (tm && typeof tm.getTaskState === "function" && (typeof tm.reqTaskComplete === "function" || typeof tm.reqGetTaskReward === "function")) {
-                    if (typeof tm.reqTaskInfo === "function" && bot.tryDo("cw_sync_tasks_rpc", 60)) {
+                    if (typeof tm.reqTaskInfo === "function" && bot.tryDo("cw_sync_tasks_rpc", 45)) {
                         try { tm.reqTaskInfo(20); tm.reqTaskInfo(21); tm.reqTaskInfo(11); } catch (e) { }
+                        await bot.sleep(250);
                     }
                     const curGrade = (typeof cwm.getSiegeGrade === "function") ? cwm.getSiegeGrade() : (cwm._grade || 1);
                     const gradeTasks = (typeof SiegeCfg.getSiegeGradeTaskByGrade === "function") ? (SiegeCfg.getSiegeGradeTaskByGrade(curGrade) || []) : [];
@@ -19665,81 +19761,11 @@
                 }
             } catch (eTasks) { }
 
-            // 5. Thu hoạch & Huấn luyện Binh Lính Tam Quốc trong Gia Viên (Bộ/Cung/Kỵ: 96, 97, 98 — _is_acc = 0, TUYỆT ĐỐI 0 KNB!)
+            // 5. Thu hoạch & Huấn luyện Binh Lính Tam Quốc trong Gia Viên (Bộ/Cung/Kỵ: 96, 97, 98 — Chiêu Binh 4 lần/ngày, _is_acc = 0, TUYỆT ĐỐI 0 KNB!)
             try {
-                if (hl && pm && MaincityCfg && bot.canDo("cw_soldier_train_check", 8)) {
+                if (typeof bot.runAutoSoldierTrainSmart === "function" && (manualTrigger || bot.canDo("cw_soldier_train_check", 8))) {
                     bot.markDone("cw_soldier_train_check");
-                    const hlClass = (hl && hl.constructor) || gm.HomeLandModel || window.HomeLandModel;
-                    const pickFn = (hlClass && hlClass.reqHostPickSoldier) || hl.reqHostPickSoldier;
-                    const addFn = (hlClass && hlClass.reqHostAddSoldier) || hl.reqHostAddSoldier;
-                    const soldierTypes = [96, 97, 98];
-
-                    for (let sIdx = 0; sIdx < soldierTypes.length; sIdx++) {
-                        const sType = soldierTypes[sIdx];
-                        let plotId = 0;
-                        if (typeof cwm.getSoldierBuildIdAndPlot === "function") {
-                            const bp = cwm.getSoldierBuildIdAndPlot(sType);
-                            if (bp && bp.plotId) plotId = bp.plotId;
-                        }
-                        if (!plotId && typeof MaincityCfg.getMainCityByGroup === "function") {
-                            const grp = MaincityCfg.getMainCityByGroup(sType);
-                            if (Array.isArray(grp) && grp[0] && grp[0].build_type) plotId = grp[0].build_type;
-                        }
-                        if (!plotId || typeof hl.getBuildingInfoByPlotId !== "function") continue;
-
-                        const bInfo = hl.getBuildingInfoByPlotId(plotId);
-                        if (!bInfo || !(bInfo.id > 0)) continue;
-
-                        const sQueue = (typeof hl.getSoldier === "function") ? hl.getSoldier(plotId) : null;
-                        if (sQueue) {
-                            const canPick = (typeof hl.checkSoldierCanGet === "function" && hl.checkSoldierCanGet(plotId))
-                                || (sQueue._e_sec > 0 && serverTime >= Number(sQueue._e_sec));
-                            if (canPick && typeof pickFn === "function" && bot.tryDo("cw_pick_sol_" + plotId, 8)) {
-                                pickFn.call(hlClass || hl, plotId);
-                                bot.log(`🪖 [Tam Quốc] Đã thu hoạch binh lính tại Trại Lính (Ô #${plotId})!`);
-                                didSomething = true;
-                            }
-                        } else if (!bInfo.Upgrading && typeof addFn === "function" && typeof MaincityCfg.getBuildingLvUpDataById === "function") {
-                            const upCfg = MaincityCfg.getBuildingLvUpDataById(bInfo.id, Math.max(1, bInfo.rawLv || 1));
-                            if (upCfg && Array.isArray(upCfg.build_soldier) && upCfg.build_soldier.length >= 5) {
-                                const maxCap = Number(upCfg.build_soldier[1] || 0);
-                                const batchSize = Math.max(1, Number(upCfg.build_soldier[2] || 1));
-                                const baseQueue = Number(upCfg.build_soldier[4] || 0);
-                                const hasNum = (typeof cwm.getHasSoldierNumByID === "function")
-                                    ? Number(cwm.getHasSoldierNumByID(sType) || 0)
-                                    : Number(pm.getItemNum(sType) || 0);
-                                const room = maxCap - hasNum;
-                                const bonusQueue = (typeof cwm.getScienceAddValueByAttr === "function") ? Number(cwm.getScienceAddValueByAttr(197) || 0) : 0;
-                                const maxQueue = baseQueue + bonusQueue;
-                                let targetSoldiers = Math.min(room, maxQueue);
-
-                                if (targetSoldiers >= batchSize) {
-                                    let safeCost = true;
-                                    const costs = Array.isArray(upCfg.soldier_cost) ? upCfg.soldier_cost : [];
-                                    for (let cIdx = 0; cIdx < costs.length; cIdx++) {
-                                        const cRow = costs[cIdx];
-                                        if (!cRow) continue;
-                                        const cCode = Number(cRow[0]);
-                                        const cPer = Number(cRow[1] || 0);
-                                        if (cCode === 1 || cCode === 2) { safeCost = false; break; } // Không bao giờ tiêu KNB!
-                                        if (cPer > 0) {
-                                            const haveRes = Number(pm.getItemNum(cCode) || 0);
-                                            const canAfford = Math.floor(haveRes / cPer);
-                                            if (canAfford < targetSoldiers) targetSoldiers = canAfford;
-                                        }
-                                    }
-                                    const maxTimes = Math.floor(targetSoldiers / batchSize);
-                                    const times = ((bot.state.dailySoldierTrainCount || 0) < 4) ? Math.min(1, maxTimes) : maxTimes;
-                                    if (safeCost && times >= 1 && bot.tryDo("cw_train_sol_" + plotId, 10)) {
-                                        addFn.call(hlClass || hl, plotId, times, 0); // _is_acc = 0 (0 KNB!)
-                                        bot.state.dailySoldierTrainCount = (bot.state.dailySoldierTrainCount || 0) + 1;
-                                        bot.log(`🪖 [Tam Quốc] Đặt huấn luyện +${(times * batchSize).toLocaleString()} lính (Loại ${sType - 95} • Lượt #${bot.state.dailySoldierTrainCount}) miễn phí!`);
-                                        didSomething = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    if (await bot.runAutoSoldierTrainSmart(!!manualTrigger)) didSomething = true;
                 }
             } catch (eSol) { }
 
@@ -19873,9 +19899,11 @@
                 }
             } catch (eSync) { }
 
-            // 8. Điều quân Xuất Chinh, Tự Động Công Thành Ngầm (reqAutoFight) & Canh Tác Ruộng (city_type === 4)
+            // 8. Điều quân Xuất Chinh, Tự Động Công Thành Ngầm (reqAutoFight) & Canh Tác Ruộng (city_type === 4) — Chỉ chạy khi bản đồ mùa giải đang mở
             try {
-                if (!CWUtils) return didSomething;
+                const secNow = (typeof cwm.getSec === "function") ? cwm.getSec() : cwm._siegeSec;
+                const canEnterNow = (typeof cwm.canEnterMainView === "function") ? cwm.canEnterMainView() : !!secNow;
+                if (!CWUtils || !secNow || !canEnterNow || !siegeInfo || !hasCityMap) return didSomething;
                 const miscCfg = (typeof SiegeCfg.getSiegeCityMisc === "function") ? SiegeCfg.getSiegeCityMisc() : null;
                 const minInitSoldier = (miscCfg && Array.isArray(miscCfg.soldier_init) && miscCfg.soldier_init[0]) ? Number(miscCfg.soldier_init[0]) : 100;
                 const maxArmyCap = (typeof cwm.getArmySoliderMaxNum === "function") ? Number(cwm.getArmySoliderMaxNum() || 3000) : 3000;
@@ -20404,6 +20432,10 @@
             // Kiểm tra mở khóa tính năng Đấu Trường (Module e_ModuleOpenDataModuleOpen.Arena = 101 / 103)
             if (!bot.isSafeModuleOpen(101) && !bot.isSafeModuleOpen(103)) return false;
 
+            if (!am._myArenaInfo && typeof am.RequestData === "function" && bot.tryDo("arena_req_data_init", 20)) {
+                am.RequestData();
+                await bot.sleep(450);
+            }
             if (typeof am.RefreshRed === "function") am.RefreshRed();
 
             const freeCount = (typeof am.GetFreeCount === "function") ? Number(am.GetFreeCount() || 0) : ((typeof am.getFreeCount === "function") ? Number(am.getFreeCount() || 0) : 0);
@@ -20429,7 +20461,7 @@
                 }
             } catch (eArenaRewards) { }
 
-            // B. Khiêu chiến đối thủ (Chỉ đánh khi có lượt miễn phí, chọn đối thủ LC thấp nhất)
+            // B. Khiêu chiến đối thủ (Chỉ đánh khi có lượt miễn phí, chọn đối thủ LC thấp nhất, đọc chuẩn LC từ RoleInfo)
             if (canChallenge) {
                 bot.markDone("arena_challenge_cycle");
 
@@ -20449,30 +20481,84 @@
                 }
 
                 if (Array.isArray(rivalList) && rivalList.length > 0) {
-                    let bestRival = rivalList[0];
+                    const RoleInfoCls = gm.RoleInfo || window.RoleInfo || (safeRequire("RoleInfo") && (safeRequire("RoleInfo").RoleInfo || safeRequire("RoleInfo").default));
+                    let bestRival = null;
                     let lowestPower = Infinity;
+                    let bestName = "Đối thủ";
+                    let bestRid = 0;
+
                     for (let i = 0; i < rivalList.length; i++) {
                         const r = rivalList[i];
                         if (!r) continue;
-                        const rPow = Number((r._role_show && (r._role_show._power || r._role_show.power)) || r._power || r.power || 0);
-                        if (rPow < lowestPower) {
-                            lowestPower = rPow;
+                        const rs = r._role_show;
+                        let rPow = Number((rs && (rs._power || rs.power)) || r._power || r.power || 0);
+                        let rName = (rs && rs._name) || r._name || "";
+                        let rRid = Number((rs && (rs._rid || rs._role_id || rs.rid)) || r._rival_rid || r._rid || r.rid || 0);
+                        if (RoleInfoCls && rs) {
+                            try {
+                                const riObj = new RoleInfoCls(rs);
+                                if (!rPow && typeof riObj.getPower === "function") rPow = Number(riObj.getPower() || 0);
+                                if (!rName && typeof riObj.getName === "function") rName = String(riObj.getName() || "");
+                                if (!rRid && typeof riObj.getRoleId === "function") rRid = Number(riObj.getRoleId() || 0);
+                            } catch (eRi) { }
+                        }
+                        if (!rPow && rs && typeof bot.extractRoleShowPower === "function") {
+                            rPow = Number(bot.extractRoleShowPower(rs) || 0);
+                        }
+                        if (!rName && rs && typeof bot.extractRoleShowName === "function") {
+                            rName = String(bot.extractRoleShowName(rs) || "");
+                        }
+                        if (!rRid || rRid <= 1) continue;
+                        if (rivalList.length > 1 && bot.state._lastArenaRid === rRid && (Date.now() - (bot.state._lastArenaTime || 0) < 6000)) {
+                            continue;
+                        }
+                        const cmpPow = rPow > 0 ? rPow : 999999999999;
+                        if (!bestRival || cmpPow < lowestPower) {
+                            lowestPower = cmpPow;
                             bestRival = r;
+                            bestName = rName || "Đối thủ";
+                            bestRid = rRid;
                         }
                     }
-                    const targetRid = (bestRival && bestRival._role_show && (bestRival._role_show._rid || bestRival._role_show._role_id || bestRival._role_show.rid)) || (bestRival && (bestRival._rival_rid || bestRival._rid || bestRival.rid)) || 0;
+
+                    if (!bestRival && rivalList[0]) {
+                        bestRival = rivalList[0];
+                        const rs0 = bestRival._role_show;
+                        bestRid = Number((rs0 && (rs0._rid || rs0._role_id || rs0.rid)) || bestRival._rival_rid || bestRival._rid || bestRival.rid || 0);
+                        if (RoleInfoCls && rs0) {
+                            try {
+                                const ri0 = new RoleInfoCls(rs0);
+                                lowestPower = Number((typeof ri0.getPower === "function" && ri0.getPower()) || 0);
+                                bestName = String((typeof ri0.getName === "function" && ri0.getName()) || "Đối thủ");
+                            } catch (e0) { }
+                        }
+                    }
+
+                    const targetRid = bestRid;
                     if (!targetRid || Number(targetRid) <= 1) return didSomething;
 
-                    const targetName = (bestRival._role_show && bestRival._role_show._name) || bestRival._name || "Đối thủ";
+                    const dispPower = (lowestPower > 0 && lowestPower < 999999999999) ? lowestPower : 0;
                     if (bot.state.isScoutLowPowerActive && typeof bot.restoreFullCombatArray === "function") {
                         await bot.restoreFullCombatArray("auto_arena");
                     }
 
+                    // Chống xung đột mã 66 (Chưa kết thúc trận trước) giữa các trận liên tiếp
+                    const minNextWarTs = Math.max(
+                        (bot.state.lastAnyWarStartTime || 0) + 1850,
+                        (bot.state.lastWarCloseTime || 0) + 1250,
+                        (bot.state.lastWarError66Time || 0) + 2250
+                    );
+                    const waitWarMs = minNextWarTs - Date.now();
+                    if (waitWarMs > 0) await bot.sleep(Math.min(waitWarMs, 2600));
+
                     const arenaType = (gm.e_GameplayDataGameplay && gm.e_GameplayDataGameplay.Arena) ? gm.e_GameplayDataGameplay.Arena : 2;
+                    const startTs = Date.now();
                     bot.state.battleInProgress = true;
-                    bot.state.lastBattleStartTime = Date.now();
+                    bot.state.lastBattleStartTime = startTs;
+                    bot.state._lastArenaRid = targetRid;
+                    bot.state._lastArenaTime = startTs;
                     if (typeof bot.markAutoBattle === "function") bot.markAutoBattle(arenaType, 15000);
-                    bot.log(`⚔️ [Đấu Trường] Còn ${freeCount} lượt miễn phí -> Khiêu chiến [${targetName}] (LC: ${bot.formatNumber ? bot.formatNumber(lowestPower) : lowestPower})!`);
+                    bot.log(`⚔️ [Đấu Trường] Còn ${freeCount} lượt miễn phí -> Khiêu chiến [${bestName}] (LC: ${dispPower > 0 ? (bot.formatNumber ? bot.formatNumber(dispPower) : dispPower) : "Mục tiêu yếu nhất"})!`);
 
                     try {
                         if (typeof fm.enter === "function") {
@@ -20493,9 +20579,16 @@
                                 rpc.send(gm.WarJumpCs.protocol, { _type: arenaType, _id: targetRid, _cli: 1, _ext: [] });
                             }
                         }
+                        // Đợi trận Đấu Trường hoàn tất (WarCloseCs / lastBattleByType[2]) trước khi trả về để vòng lặp 3 trận không bao giờ bị lỗi mã 66!
+                        for (let w = 0; w < 32; w++) {
+                            await bot.sleep(100);
+                            const lastAr = bot.state.lastBattleByType && bot.state.lastBattleByType[arenaType];
+                            if (lastAr && lastAr.time >= startTs && w >= 5) break;
+                        }
                         bot.closeBattleViews();
                         didSomething = true;
-                        await bot.sleep(600);
+                        if (typeof am.reqRival === "function") am.reqRival();
+                        await bot.sleep(650);
                         bot.closeBattleViews();
                     } finally {
                         bot.state.battleInProgress = false;
@@ -21091,7 +21184,13 @@
                 try { await bot.runAutoCountryWarSmart(true); } catch (e) { }
             }
             if (typeof bot.runAutoBossAndKunlunSmart === "function") {
-                try { await bot.runAutoBossAndKunlunSmart(); } catch (e) { }
+                try {
+                    for (let klStep = 0; klStep < 4; klStep++) {
+                        const klDid = await bot.runAutoBossAndKunlunSmart();
+                        if (!klDid) break;
+                        await bot.sleep(450);
+                    }
+                } catch (e) { }
             }
             if (typeof bot.runAutoJindiTopTeamSmart === "function") {
                 try { await bot.runAutoJindiTopTeamSmart(); } catch (e) { }
@@ -21102,12 +21201,12 @@
             if (typeof bot.runAutoGuildMineSmart === "function") {
                 try { await bot.runAutoGuildMineSmart(true); } catch (e) { }
             }
-            if (typeof bot.runAutoArenaSmart === "function") {
-                try { await bot.runAutoArenaSmart(true); } catch (e) { }
-            }
             const questSummary = await bot.ensureDaily100PointsSmart(true);
             if (typeof bot.runAutoSoldierTrainSmart === "function") {
                 try { await bot.runAutoSoldierTrainSmart(true); } catch (e) { }
+            }
+            if (typeof bot.runAutoCountryWarSmart === "function") {
+                try { await bot.runAutoCountryWarSmart(true); } catch (e) { }
             }
             await bot.sleep(450);
 
