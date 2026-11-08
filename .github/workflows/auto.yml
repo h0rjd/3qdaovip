@@ -73,6 +73,7 @@ jobs:
           fi
 
       - name: 🎮 Khởi chạy AutoBot v4.0 Final (Treo 24/7 + Điều Khiển Nút Bấm Telegram)
+        id: autobot
         env:
           JOYPLAY_EMAIL: ${{ secrets.JOYPLAY_EMAIL }}
           JOYPLAY_PASSWORD: ${{ secrets.JOYPLAY_PASSWORD }}
@@ -119,6 +120,8 @@ jobs:
           fi
           if [ -f ".bot_stopped" ]; then
             echo "🛑 Bot đã nhận lệnh Dừng Hẳn (.bot_stopped) -> Không tự động nối phiên mới."
+          elif [ "${{ steps.autobot.outcome }}" != "success" ]; then
+            echo "⚠️ Phiên trước gặp sự cố bất thường (outcome=${{ steps.autobot.outcome }}) -> Dừng tự động nối phiên để bảo vệ tài khoản và tránh loop lỗi. Vui lòng kiểm tra log!"
           else
             echo "🔄 Tự động nối tiếp phiên mới 24/7 (330 phút)..."
             gh workflow run auto.yml -f duration="330" -f server="${{ github.event.inputs.server || secrets.GAME_SERVER || 'Tam Quốc S6' }}" || gh workflow run auto.yml || true

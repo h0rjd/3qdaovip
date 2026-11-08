@@ -16,6 +16,20 @@ const path = require('path');
 const { execSync, exec } = require('child_process');
 
 // ============================================================================
+// BẢO VỆ CHỐNG SẬP TIẾN TRÌNH KHI CÓ LỖI NGOẠI LỆ BẤT ĐỒNG BỘ
+// ============================================================================
+process.on('uncaughtException', (err) => {
+    try {
+        console.error(`[Process] 🔥 [Bảo Vệ Tiến Trình] uncaughtException: ${err && err.stack ? err.stack : err}`);
+    } catch (e) {}
+});
+process.on('unhandledRejection', (reason) => {
+    try {
+        console.error(`[Process] 🔥 [Bảo Vệ Tiến Trình] unhandledRejection: ${reason && reason.stack ? reason.stack : reason}`);
+    } catch (e) {}
+});
+
+// ============================================================================
 // 1. ĐỌC CẤU HÌNH TỪ CONFIG.JSON & BIẾN MÔI TRƯỜNG
 // ============================================================================
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -590,6 +604,185 @@ async function applyTogglesToLivePage(page, changedKey = null) {
 }
 
 // ============================================================================
+// 2b. CÁC TÁC VỤ ĐIỀU KHIỂN & CHUỖI 1-CLICK TỰ ĐỘNG
+// ============================================================================
+async function executeInstantReport(sessionState, getActivePage, titleStr) {
+    try {
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
+        if (page && !page.isClosed()) {
+            try {
+                const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
+                if (sessionState && isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
+                await page.screenshot({ path: snapPath });
+            } catch (e) {}
+        }
+        const waitMinNow = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
+        const html = buildTelegramReportHtml(
+            titleStr,
+            sessionState ? sessionState.lastKnownStats : {},
+            sessionState,
+            sessionState && sessionState.isHardStopped
+                ? '🛑 <i>Bot hiện đã DỪNG HẲN toàn bộ kết nối theo lệnh điều khiển.</i>'
+                : sessionState && sessionState.isMaintenance
+                    ? '🛠️ <i>Máy chủ đang bảo trì — Bot đã ngắt toàn bộ lệnh login tránh lag.</i>'
+                    : sessionState && sessionState.isYielding
+                        ? `⏸️ <i>Bot hiện đang tạm nghỉ nhường máy (${waitMinNow} phút).</i>`
+                        : '🟢 <i>Bot đang hoạt động trực tuyến bình thường.</i>'
+        );
+        await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
+    } catch (eRep) {}
+}
+
+async function executeCountryWarTask(sessionState, getActivePage, sourceTag) {
+    try {
+        writeLog(`🏯 [${sourceTag}] Kích hoạt Tam Quốc Tranh Hùng & Chiêu Binh 4x...`);
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        if (!page || page.isClosed()) return;
+        await page.evaluate(async () => {
+            if (window.AutoBot) {
+                if (typeof window.AutoBot.runAutoSoldierTrainSmart === 'function') await window.AutoBot.runAutoSoldierTrainSmart(true);
+                if (typeof window.AutoBot.runAutoCountryWarSmart === 'function') await window.AutoBot.runAutoCountryWarSmart(true);
+            }
+        });
+        void executeInstantReport(sessionState, getActivePage, '🏯 BÁO CÁO TAM QUỐC TRANH HÙNG & CHIÊU BINH');
+    } catch (e) {
+        writeLog(`⚠️ [${sourceTag}] Lỗi Tam Quốc Tranh Hùng: ${e.message}`);
+    }
+}
+
+async function executeCaravanTask(sessionState, getActivePage, sourceTag) {
+    try {
+        writeLog(`🚚 [${sourceTag}] Kích hoạt Vận Tiêu Thương Đội...`);
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        if (!page || page.isClosed()) return;
+        await page.evaluate(async () => {
+            if (window.AutoBot && typeof window.AutoBot.runAutoCaravanSmart === 'function') {
+                await window.AutoBot.runAutoCaravanSmart();
+            }
+        });
+        void executeInstantReport(sessionState, getActivePage, '🚚 BÁO CÁO VẬN TIÊU THƯƠNG ĐỘI');
+    } catch (e) {
+        writeLog(`⚠️ [${sourceTag}] Lỗi Vận Tiêu: ${e.message}`);
+    }
+}
+
+async function executeJindiTask(sessionState, getActivePage, sourceTag) {
+    try {
+        writeLog(`👑 [${sourceTag}] Kích hoạt Cấm Địa Tổ Đội Top SV...`);
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        if (!page || page.isClosed()) return;
+        await page.evaluate(async () => {
+            if (window.AutoBot && typeof window.AutoBot.runAutoJindiTopTeamSmart === 'function') {
+                await window.AutoBot.runAutoJindiTopTeamSmart();
+            }
+        });
+        void executeInstantReport(sessionState, getActivePage, '👑 BÁO CÁO CẤM ĐIỆA TỔ ĐỘI TOP SV');
+    } catch (e) {
+        writeLog(`⚠️ [${sourceTag}] Lỗi Cấm Địa: ${e.message}`);
+    }
+}
+
+async function executeDispatchTask(sessionState, getActivePage, sourceTag) {
+    try {
+        writeLog(`🗺️ [${sourceTag}] Kích hoạt Phái Tướng Thám Hiểm...`);
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        if (!page || page.isClosed()) return;
+        await page.evaluate(async () => {
+            if (window.AutoBot && typeof window.AutoBot.runAutoDispatchSmart === 'function') {
+                await window.AutoBot.runAutoDispatchSmart(true);
+            }
+        });
+        void executeInstantReport(sessionState, getActivePage, '🗺️ BÁO CÁO PHÁI TƯỚNG THÁM HIỂM');
+    } catch (e) {
+        writeLog(`⚠️ [${sourceTag}] Lỗi Thám Hiểm: ${e.message}`);
+    }
+}
+
+async function executeArenaMineTask(sessionState, getActivePage, sourceTag) {
+    try {
+        writeLog(`⚔️ [${sourceTag}] Kích hoạt Đấu Trường & Mỏ Bang...`);
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        if (!page || page.isClosed()) return;
+        await page.evaluate(async () => {
+            if (window.AutoBot) {
+                if (typeof window.AutoBot.runAutoArenaSmart === 'function') await window.AutoBot.runAutoArenaSmart(true);
+                if (typeof window.AutoBot.runAutoGuildMineSmart === 'function') await window.AutoBot.runAutoGuildMineSmart(true);
+            }
+        });
+        void executeInstantReport(sessionState, getActivePage, '⚔️ BÁO CÁO ĐẤU TRƯỜNG & MỎ BANG');
+    } catch (e) {
+        writeLog(`⚠️ [${sourceTag}] Lỗi Đấu Trường & Mỏ: ${e.message}`);
+    }
+}
+
+async function executeOneClickDailyTask(sessionState, getActivePage, sourceTag) {
+    if (sessionState && sessionState.oneClickDailyRunning) return;
+    if (sessionState) sessionState.oneClickDailyRunning = true;
+    try {
+        writeLog(`⚡ [${sourceTag}] Kích hoạt 1-Click: Làm Hết NV Ngày (100/100) + Mua Sạch Lượt Vàng KNB + Nhận Full Quà...`);
+        const page = typeof getActivePage === 'function' ? getActivePage() : (sessionState && (sessionState.activePage || sessionState.currentPage));
+        const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
+        if (!page || page.isClosed()) {
+            const offlineHtml = buildTelegramReportHtml(
+                '⚠️ CHƯA THỂ CHẠY 1-CLICK (PHIÊN ĐANG NGHỈ NHƯỜNG MÁY / ĐANG TẢI)',
+                sessionState ? sessionState.lastKnownStats : {},
+                sessionState,
+                '⏳ <i>Hiện Bot đang tạm nghỉ nhường Điện thoại hoặc đang mở lại sảnh. Hãy bấm <b>"▶️ Chạy Lại Ngay"</b> để vào sảnh rồi bấm lại nhé!</i>'
+            );
+            await sendTelegramMessage(offlineHtml, null, sessionState);
+            return;
+        }
+
+        let resData = null;
+        try {
+            resData = await page.evaluate(async () => {
+                if (window.AutoBot && typeof window.AutoBot.runOneClickAllDailyAndGifts === 'function') {
+                    return await window.AutoBot.runOneClickAllDailyAndGifts();
+                }
+                return null;
+            });
+            const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
+            if (sessionState && isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
+            await page.screenshot({ path: snapPath });
+        } catch (eExec) {
+            writeLog(`⚠️ [${sourceTag}] Lỗi trong lúc thực thi 1-Click: ${eExec.message}`);
+        }
+
+        const noteLines = [
+            '✅ <b>Đã hoàn tất chuỗi 1-Click Toàn Diện:</b>'
+        ];
+        if (resData && resData.ok) {
+            const gDiff = Number(resData.goldDelta || 0);
+            const kDiff = Number(resData.knbDelta || 0);
+            const dScore = Number(resData.dailyScore || 0);
+            const dBoxes = Number(resData.dailyBoxesOpened || 0);
+            const wBoxes = Number(resData.weeklyBoxesOpened || 0);
+            const totTurns = Number(resData.totalGoldTurns || 0);
+            const freeTurns = Number(resData.freeGoldTurns || 0);
+            const knbTurns = Number(resData.knbGoldTurns || 0);
+            noteLines.push(`• 🎯 <b>Năng động ngày:</b> <b>${dScore}/100</b> (Đã nhận <b>${resData.dailyTasksClaimed || 0}</b> NV, mở <b>${dBoxes}</b> rương ngày${wBoxes > 0 ? `, <b>${wBoxes}</b> rương tuần` : ''})`);
+            noteLines.push(`• 💰 <b>Cây Tài Lộc:</b> Đã mua sạch <b>${totTurns} lượt</b> (Miễn phí: <b>${freeTurns}</b> • KNB: <b>${knbTurns}</b>)`);
+            noteLines.push(`• 📈 <b>Biến động ròng:</b> Vàng <b>${gDiff >= 0 ? '+' : ''}${formatNum(gDiff)}</b> | KNB <b>${kDiff >= 0 ? '+' : ''}${formatNum(kDiff)}</b>`);
+        } else {
+            noteLines.push('• Đã quét toàn bộ Nhiệm Vụ Ngày, Cây Tài Lộc (Free + KNB), Phó Bản Ngày, Cửa Hàng, Hòm Thư & Quà Phúc Lợi!');
+        }
+
+        const html = buildTelegramReportHtml(
+            '⚡ KẾT QUẢ 1-CLICK: NV NGÀY 100/100 + MUA HẾT VÀNG KNB + FULL QUÀ',
+            sessionState ? sessionState.lastKnownStats : {},
+            sessionState,
+            noteLines.join('\n')
+        );
+        await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
+    } catch (eAll) {
+        writeLog(`⚠️ [${sourceTag}] Lỗi xử lý chuỗi 1-Click: ${eAll.message}`);
+    } finally {
+        if (sessionState) sessionState.oneClickDailyRunning = false;
+    }
+}
+
+// ============================================================================
 // 3. BỘ LẮNG NGHE LỆNH ĐIỀU KHIỂN TELEGRAM & HOT-RELOAD GITHUB CONFIG
 // ============================================================================
 function startTelegramCommandPoller(sessionState, getActivePage) {
@@ -614,179 +807,13 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
         } catch (e) {}
     };
 
-    const runCountryWarTaskAsync = async (sourceTag) => {
-        try {
-            writeLog(`🏯 [${sourceTag}] Kích hoạt Tam Quốc Tranh Hùng & Chiêu Binh 4x...`);
-            const page = getActivePage();
-            if (!page || page.isClosed()) return;
-            await page.evaluate(async () => {
-                if (window.AutoBot) {
-                    if (typeof window.AutoBot.runAutoSoldierTrainSmart === 'function') await window.AutoBot.runAutoSoldierTrainSmart(true);
-                    if (typeof window.AutoBot.runAutoCountryWarSmart === 'function') await window.AutoBot.runAutoCountryWarSmart(true);
-                }
-            });
-            void runInstantReportAsync('🏯 BÁO CÁO TAM QUỐC TRANH HÙNG & CHIÊU BINH');
-        } catch (e) {
-            writeLog(`⚠️ [${sourceTag}] Lỗi Tam Quốc Tranh Hùng: ${e.message}`);
-        }
-    };
-
-    const runCaravanTaskAsync = async (sourceTag) => {
-        try {
-            writeLog(`🚚 [${sourceTag}] Kích hoạt Vận Tiêu Thương Đội...`);
-            const page = getActivePage();
-            if (!page || page.isClosed()) return;
-            await page.evaluate(async () => {
-                if (window.AutoBot && typeof window.AutoBot.runAutoCaravanSmart === 'function') {
-                    await window.AutoBot.runAutoCaravanSmart();
-                }
-            });
-            void runInstantReportAsync('🚚 BÁO CÁO VẬN TIÊU THƯƠNG ĐỘI');
-        } catch (e) {
-            writeLog(`⚠️ [${sourceTag}] Lỗi Vận Tiêu: ${e.message}`);
-        }
-    };
-
-    const runJindiTaskAsync = async (sourceTag) => {
-        try {
-            writeLog(`👑 [${sourceTag}] Kích hoạt Cấm Địa Tổ Đội Top SV...`);
-            const page = getActivePage();
-            if (!page || page.isClosed()) return;
-            await page.evaluate(async () => {
-                if (window.AutoBot && typeof window.AutoBot.runAutoJindiTopTeamSmart === 'function') {
-                    await window.AutoBot.runAutoJindiTopTeamSmart();
-                }
-            });
-            void runInstantReportAsync('👑 BÁO CÁO CẤM ĐỊA TỔ ĐỘI TOP SV');
-        } catch (e) {
-            writeLog(`⚠️ [${sourceTag}] Lỗi Cấm Địa: ${e.message}`);
-        }
-    };
-
-    const runDispatchTaskAsync = async (sourceTag) => {
-        try {
-            writeLog(`🗺️ [${sourceTag}] Kích hoạt Phái Tướng Thám Hiểm...`);
-            const page = getActivePage();
-            if (!page || page.isClosed()) return;
-            await page.evaluate(async () => {
-                if (window.AutoBot && typeof window.AutoBot.runAutoDispatchSmart === 'function') {
-                    await window.AutoBot.runAutoDispatchSmart(true);
-                }
-            });
-            void runInstantReportAsync('🗺️ BÁO CÁO PHÁI TƯỚNG THÁM HIỂM');
-        } catch (e) {
-            writeLog(`⚠️ [${sourceTag}] Lỗi Thám Hiểm: ${e.message}`);
-        }
-    };
-
-    const runArenaMineTaskAsync = async (sourceTag) => {
-        try {
-            writeLog(`⚔️ [${sourceTag}] Kích hoạt Đấu Trường & Mỏ Bang...`);
-            const page = getActivePage();
-            if (!page || page.isClosed()) return;
-            await page.evaluate(async () => {
-                if (window.AutoBot) {
-                    if (typeof window.AutoBot.runAutoArenaSmart === 'function') await window.AutoBot.runAutoArenaSmart(true);
-                    if (typeof window.AutoBot.runAutoGuildMineSmart === 'function') await window.AutoBot.runAutoGuildMineSmart(true);
-                }
-            });
-            void runInstantReportAsync('⚔️ BÁO CÁO ĐẤU TRƯỜNG & MỎ BANG');
-        } catch (e) {
-            writeLog(`⚠️ [${sourceTag}] Lỗi Đấu Trường & Mỏ: ${e.message}`);
-        }
-    };
-
-    const runOneClickDailyTaskAsync = async (sourceTag) => {
-        if (sessionState.oneClickDailyRunning) return;
-        sessionState.oneClickDailyRunning = true;
-        try {
-            writeLog(`⚡ [${sourceTag}] Kích hoạt 1-Click: Làm Hết NV Ngày (100/100) + Mua Sạch Lượt Vàng KNB + Nhận Full Quà...`);
-            const page = getActivePage();
-            const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
-            if (!page || page.isClosed()) {
-                const offlineHtml = buildTelegramReportHtml(
-                    '⚠️ CHƯA THỂ CHẠY 1-CLICK (PHIÊN ĐANG NGHỈ NHƯỜNG MÁY / ĐANG TẢI)',
-                    sessionState.lastKnownStats,
-                    sessionState,
-                    '⏳ <i>Hiện Bot đang tạm nghỉ nhường Điện thoại hoặc đang mở lại sảnh. Hãy bấm <b>"▶️ Chạy Lại Ngay"</b> để vào sảnh rồi bấm lại nhé!</i>'
-                );
-                await sendTelegramMessage(offlineHtml, null, sessionState);
-                return;
-            }
-
-            let resData = null;
-            try {
-                resData = await page.evaluate(async () => {
-                    if (window.AutoBot && typeof window.AutoBot.runOneClickAllDailyAndGifts === 'function') {
-                        return await window.AutoBot.runOneClickAllDailyAndGifts();
-                    }
-                    return null;
-                });
-                const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
-                await page.screenshot({ path: snapPath });
-            } catch (eExec) {
-                writeLog(`⚠️ [${sourceTag}] Lỗi trong lúc thực thi 1-Click: ${eExec.message}`);
-            }
-
-            const noteLines = [
-                '✅ <b>Đã hoàn tất chuỗi 1-Click Toàn Diện:</b>'
-            ];
-            if (resData && resData.ok) {
-                const gDiff = Number(resData.goldDelta || 0);
-                const kDiff = Number(resData.knbDelta || 0);
-                const dScore = Number(resData.dailyScore || 0);
-                const dBoxes = Number(resData.dailyBoxesOpened || 0);
-                const wBoxes = Number(resData.weeklyBoxesOpened || 0);
-                const totTurns = Number(resData.totalGoldTurns || 0);
-                const freeTurns = Number(resData.freeGoldTurns || 0);
-                const knbTurns = Number(resData.knbGoldTurns || 0);
-                noteLines.push(`• 🎯 <b>Năng động ngày:</b> <b>${dScore}/100</b> (Đã nhận <b>${resData.dailyTasksClaimed || 0}</b> NV, mở <b>${dBoxes}</b> rương ngày${wBoxes > 0 ? `, <b>${wBoxes}</b> rương tuần` : ''})`);
-                noteLines.push(`• 💰 <b>Cây Tài Lộc:</b> Đã mua sạch <b>${totTurns} lượt</b> (Miễn phí: <b>${freeTurns}</b> • KNB: <b>${knbTurns}</b>)`);
-                noteLines.push(`• 📈 <b>Biến động ròng:</b> Vàng <b>${gDiff >= 0 ? '+' : ''}${formatNum(gDiff)}</b> | KNB <b>${kDiff >= 0 ? '+' : ''}${formatNum(kDiff)}</b>`);
-            } else {
-                noteLines.push('• Đã quét toàn bộ Nhiệm Vụ Ngày, Cây Tài Lộc (Free + KNB), Phó Bản Ngày, Cửa Hàng, Hòm Thư & Quà Phúc Lợi!');
-            }
-
-            const html = buildTelegramReportHtml(
-                '⚡ KẾT QUẢ 1-CLICK: NV NGÀY 100/100 + MUA HẾT VÀNG KNB + FULL QUÀ',
-                sessionState.lastKnownStats,
-                sessionState,
-                noteLines.join('\n')
-            );
-            await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
-        } finally {
-            sessionState.oneClickDailyRunning = false;
-        }
-    };
-
-    const runInstantReportAsync = async (titleStr) => {
-        try {
-            const page = getActivePage();
-            const snapPath = path.join(CONFIG.screenshotDir, 'latest.png');
-            if (page && !page.isClosed()) {
-                try {
-                    const stNow = await page.evaluate(() => window.AutoBot ? window.AutoBot.updateStats() : null);
-                    if (isStatsLoaded(stNow)) sessionState.lastKnownStats = stNow;
-                    await page.screenshot({ path: snapPath });
-                } catch (e) {}
-            }
-            const waitMinNow = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
-            const html = buildTelegramReportHtml(
-                titleStr,
-                sessionState.lastKnownStats,
-                sessionState,
-                sessionState.isHardStopped
-                    ? '🛑 <i>Bot hiện đã DỪNG HẲN toàn bộ kết nối theo lệnh điều khiển.</i>'
-                    : sessionState.isMaintenance
-                        ? '🛠️ <i>Máy chủ đang bảo trì — Bot đã ngắt toàn bộ lệnh login tránh lag.</i>'
-                        : sessionState.isYielding
-                            ? `⏸️ <i>Bot hiện đang tạm nghỉ nhường máy (${waitMinNow} phút).</i>`
-                            : '🟢 <i>Bot đang hoạt động trực tuyến bình thường.</i>'
-            );
-            await sendTelegramMessage(html, fs.existsSync(snapPath) ? snapPath : null, sessionState);
-        } catch (eRep) {}
-    };
+    const runCountryWarTaskAsync = (tag) => executeCountryWarTask(sessionState, getActivePage, tag);
+    const runCaravanTaskAsync = (tag) => executeCaravanTask(sessionState, getActivePage, tag);
+    const runJindiTaskAsync = (tag) => executeJindiTask(sessionState, getActivePage, tag);
+    const runDispatchTaskAsync = (tag) => executeDispatchTask(sessionState, getActivePage, tag);
+    const runArenaMineTaskAsync = (tag) => executeArenaMineTask(sessionState, getActivePage, tag);
+    const runOneClickDailyTaskAsync = (tag) => executeOneClickDailyTask(sessionState, getActivePage, tag);
+    const runInstantReportAsync = (title) => executeInstantReport(sessionState, getActivePage, title);
 
     // Khởi tạo offset ban đầu để bỏ qua các tin nhắn cũ trước khi phiên chạy bắt đầu
     (async () => {
@@ -2228,6 +2255,15 @@ async function run() {
     let activeBrowser = null;
     let activePage = null;
 
+    // Helper functions within run() scope
+    const runOneClickDailyTaskAsync = (tag) => executeOneClickDailyTask(sessionState, () => activePage, tag);
+    const runCountryWarTaskAsync = (tag) => executeCountryWarTask(sessionState, () => activePage, tag);
+    const runCaravanTaskAsync = (tag) => executeCaravanTask(sessionState, () => activePage, tag);
+    const runJindiTaskAsync = (tag) => executeJindiTask(sessionState, () => activePage, tag);
+    const runDispatchTaskAsync = (tag) => executeDispatchTask(sessionState, () => activePage, tag);
+    const runArenaMineTaskAsync = (tag) => executeArenaMineTask(sessionState, () => activePage, tag);
+    const runInstantReportAsync = (title) => executeInstantReport(sessionState, () => activePage, title);
+
     // Khởi chạy Bảng điều khiển GUI trực quan tại http://127.0.0.1:3939
     const stopGuiServer = startLocalGuiServer(sessionState, () => activePage);
 
@@ -2334,7 +2370,9 @@ async function run() {
                 sessionState.initialDailyTriggered = true;
                 writeLog('🚀 [Khởi Động] Tự động kích hoạt chuỗi 1-Click: 100/100 NV Ngày + Minigames + Mua Vàng + Chiêu Binh + Cấm Địa sau 8 giây...');
                 setTimeout(() => {
-                    void runOneClickDailyTaskAsync('Khởi Động Tự Động');
+                    executeOneClickDailyTask(sessionState, () => activePage, 'Khởi Động Tự Động').catch(e => {
+                        writeLog('⚠️ [Khởi Động] Lỗi 1-Click tự động: ' + (e && e.message ? e.message : e));
+                    });
                 }, 8000);
             }
         }
