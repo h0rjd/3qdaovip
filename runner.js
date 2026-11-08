@@ -57,7 +57,7 @@ const CONFIG = {
         skip_battle: cfgSettings.skip_battle !== undefined ? !!cfgSettings.skip_battle : true,
         speed_hack: Number(cfgSettings.speed_hack) || 2,
         yield_on_kick: cfgSettings.yield_on_kick !== undefined ? !!cfgSettings.yield_on_kick : true,
-        yield_wait_minutes: Number(cfgSettings.yield_wait_minutes) || 5
+        yield_wait_minutes: Number(cfgSettings.yield_wait_minutes) || 10
     },
     telegram: {
         bot_token: process.env.TELEGRAM_BOT_TOKEN || cfgTelegram.bot_token || '',
@@ -90,6 +90,10 @@ const CONFIG = {
         auto_longmach: false,
         auto_skvs: true,
         auto_guild_mine: true,
+        auto_country_war: true,
+        auto_soldier_train: true,
+        auto_caravan: true,
+        auto_jindi_top_team: true,
         mod_skin: true,
         mod_headframe_title: true
     }, cfgToggles),
@@ -121,7 +125,11 @@ const TOGGLE_LABELS = {
     auto_daily_rewards: '🎁 Quà Ngày',
     auto_buy_gold: '💰 Mua Vàng KNB',
     auto_free_lottery: '🎰 Quay Free',
-    auto_split_purple_shard: '🧩 Tách Mảnh'
+    auto_split_purple_shard: '🧩 Tách Mảnh',
+    auto_country_war: '🏯 Tam Quốc',
+    auto_soldier_train: '🪖 Chiêu Binh',
+    auto_caravan: '🚚 Vận Tiêu',
+    auto_jindi_top_team: '👑 Cấm Địa'
 };
 
 if (!fs.existsSync(CONFIG.screenshotDir)) {
@@ -332,14 +340,27 @@ function buildTelegramKeyboard(sessionState) {
     return {
         inline_keyboard: [
             [
-                { text: '⚡ Dọn Sạch NV Ngày (100/100) + Mua Hết Vàng KNB + Nhận Quà', callback_data: 'action:one_click_daily' }
+                { text: '⚡ 1-Click: 100/100 NV Ngày + Minigames + Mua Vàng + Nhận Quà', callback_data: 'action:one_click_daily' }
+            ],
+            [
+                { text: '🏯 3Q Tranh Hùng & Chiêu Binh', callback_data: 'action:country_war' },
+                { text: '🚚 Vận Tiêu Thương Đội', callback_data: 'action:caravan' }
+            ],
+            [
+                { text: '👑 Cấm Địa Top SV', callback_data: 'action:jindi' },
+                { text: '🗺️ Phái Tướng Thám Hiểm', callback_data: 'action:dispatch' }
+            ],
+            [
+                { text: '⚔️ Đấu Trường & Mỏ Bang', callback_data: 'action:arena_mine' }
             ],
             [btn('auto_daily_rewards'), btn('auto_buy_gold')],
             [btn('auto_rescue_knb'), btn('auto_stage')],
+            [btn('auto_caravan'), btn('auto_country_war')],
+            [btn('auto_jindi_top_team'), btn('auto_soldier_train')],
             [btn('auto_longmach'), btn('auto_tower')],
             [btn('auto_host'), btn('auto_defjz')],
-            [btn('auto_guild_mine'), btn('auto_touhu')],
-            [btn('auto_arena'), btn('auto_rank')],
+            [btn('auto_guild_mine'), btn('auto_arena')],
+            [btn('auto_rank'), btn('auto_touhu')],
             [btn('auto_skvs'), btn('auto_free_lottery')],
             [btn('auto_feidao'), btn('auto_hongbao')],
             [btn('auto_treasure'), btn('auto_dispatch')],
@@ -348,7 +369,7 @@ function buildTelegramKeyboard(sessionState) {
                 { text: '📸 Xem Ảnh & Báo Cáo Ngay', callback_data: 'action:report_now' },
                 (isYielding || isHardStopped)
                     ? { text: '▶️ Chạy Lại Ngay (Bỏ Chờ)', callback_data: 'action:resume_now' }
-                    : { text: `⏸️ Nghỉ ${CONFIG.settings.yield_wait_minutes || 5}p Nhường Máy`, callback_data: 'action:pause_5m' }
+                    : { text: `⏸️ Nghỉ ${CONFIG.settings.yield_wait_minutes || 10}p Nhường Máy`, callback_data: 'action:pause_10m' }
             ],
             [
                 isHardStopped
@@ -593,6 +614,88 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
         } catch (e) {}
     };
 
+    const runCountryWarTaskAsync = async (sourceTag) => {
+        try {
+            writeLog(`🏯 [${sourceTag}] Kích hoạt Tam Quốc Tranh Hùng & Chiêu Binh 4x...`);
+            const page = getActivePage();
+            if (!page || page.isClosed()) return;
+            await page.evaluate(async () => {
+                if (window.AutoBot) {
+                    if (typeof window.AutoBot.runAutoSoldierTrainSmart === 'function') await window.AutoBot.runAutoSoldierTrainSmart(true);
+                    if (typeof window.AutoBot.runAutoCountryWarSmart === 'function') await window.AutoBot.runAutoCountryWarSmart(true);
+                }
+            });
+            void runInstantReportAsync('🏯 BÁO CÁO TAM QUỐC TRANH HÙNG & CHIÊU BINH');
+        } catch (e) {
+            writeLog(`⚠️ [${sourceTag}] Lỗi Tam Quốc Tranh Hùng: ${e.message}`);
+        }
+    };
+
+    const runCaravanTaskAsync = async (sourceTag) => {
+        try {
+            writeLog(`🚚 [${sourceTag}] Kích hoạt Vận Tiêu Thương Đội...`);
+            const page = getActivePage();
+            if (!page || page.isClosed()) return;
+            await page.evaluate(async () => {
+                if (window.AutoBot && typeof window.AutoBot.runAutoCaravanSmart === 'function') {
+                    await window.AutoBot.runAutoCaravanSmart();
+                }
+            });
+            void runInstantReportAsync('🚚 BÁO CÁO VẬN TIÊU THƯƠNG ĐỘI');
+        } catch (e) {
+            writeLog(`⚠️ [${sourceTag}] Lỗi Vận Tiêu: ${e.message}`);
+        }
+    };
+
+    const runJindiTaskAsync = async (sourceTag) => {
+        try {
+            writeLog(`👑 [${sourceTag}] Kích hoạt Cấm Địa Tổ Đội Top SV...`);
+            const page = getActivePage();
+            if (!page || page.isClosed()) return;
+            await page.evaluate(async () => {
+                if (window.AutoBot && typeof window.AutoBot.runAutoJindiTopTeamSmart === 'function') {
+                    await window.AutoBot.runAutoJindiTopTeamSmart();
+                }
+            });
+            void runInstantReportAsync('👑 BÁO CÁO CẤM ĐỊA TỔ ĐỘI TOP SV');
+        } catch (e) {
+            writeLog(`⚠️ [${sourceTag}] Lỗi Cấm Địa: ${e.message}`);
+        }
+    };
+
+    const runDispatchTaskAsync = async (sourceTag) => {
+        try {
+            writeLog(`🗺️ [${sourceTag}] Kích hoạt Phái Tướng Thám Hiểm...`);
+            const page = getActivePage();
+            if (!page || page.isClosed()) return;
+            await page.evaluate(async () => {
+                if (window.AutoBot && typeof window.AutoBot.runAutoDispatchSmart === 'function') {
+                    await window.AutoBot.runAutoDispatchSmart(true);
+                }
+            });
+            void runInstantReportAsync('🗺️ BÁO CÁO PHÁI TƯỚNG THÁM HIỂM');
+        } catch (e) {
+            writeLog(`⚠️ [${sourceTag}] Lỗi Thám Hiểm: ${e.message}`);
+        }
+    };
+
+    const runArenaMineTaskAsync = async (sourceTag) => {
+        try {
+            writeLog(`⚔️ [${sourceTag}] Kích hoạt Đấu Trường & Mỏ Bang...`);
+            const page = getActivePage();
+            if (!page || page.isClosed()) return;
+            await page.evaluate(async () => {
+                if (window.AutoBot) {
+                    if (typeof window.AutoBot.runAutoArenaSmart === 'function') await window.AutoBot.runAutoArenaSmart(true);
+                    if (typeof window.AutoBot.runAutoGuildMineSmart === 'function') await window.AutoBot.runAutoGuildMineSmart(true);
+                }
+            });
+            void runInstantReportAsync('⚔️ BÁO CÁO ĐẤU TRƯỜNG & MỎ BANG');
+        } catch (e) {
+            writeLog(`⚠️ [${sourceTag}] Lỗi Đấu Trường & Mỏ: ${e.message}`);
+        }
+    };
+
     const runOneClickDailyTaskAsync = async (sourceTag) => {
         if (sessionState.oneClickDailyRunning) return;
         sessionState.oneClickDailyRunning = true;
@@ -668,7 +771,7 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                     await page.screenshot({ path: snapPath });
                 } catch (e) {}
             }
-            const waitMinNow = Math.max(1, Number(CONFIG.settings.yield_wait_minutes) || 5);
+            const waitMinNow = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
             const html = buildTelegramReportHtml(
                 titleStr,
                 sessionState.lastKnownStats,
@@ -746,11 +849,26 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                                     await answerCallbackFast(cq.id, '⚡ Đang làm hết NV Ngày (100/100) + Mua sạch Vàng KNB + Nhận Full Quà...');
                                     void runOneClickDailyTaskAsync('Telegram Remote');
                                 }
+                            } else if (actionData === 'action:country_war') {
+                                await answerCallbackFast(cq.id, '🏯 Đang xuất quân Tam Quốc Tranh Hùng & Chiêu Binh 4x...');
+                                void runCountryWarTaskAsync('Telegram Remote');
+                            } else if (actionData === 'action:caravan') {
+                                await answerCallbackFast(cq.id, '🚚 Đang nhận thưởng & phái xe Vận Tiêu Thương Đội...');
+                                void runCaravanTaskAsync('Telegram Remote');
+                            } else if (actionData === 'action:jindi') {
+                                await answerCallbackFast(cq.id, '👑 Đang tìm và xin vào đội Cấm Địa Top SV...');
+                                void runJindiTaskAsync('Telegram Remote');
+                            } else if (actionData === 'action:dispatch') {
+                                await answerCallbackFast(cq.id, '🗺️ Đang nhận thưởng & phái tướng Thám Hiểm...');
+                                void runDispatchTaskAsync('Telegram Remote');
+                            } else if (actionData === 'action:arena_mine') {
+                                await answerCallbackFast(cq.id, '⚔️ Đang càn quét Đấu Trường & Thu hoạch Mỏ Bang...');
+                                void runArenaMineTaskAsync('Telegram Remote');
                             } else if (actionData === 'action:report_now') {
                                 await answerCallbackFast(cq.id, '📸 Đang chụp màn hình và gửi báo cáo mới nhất...');
                                 void runInstantReportAsync('📸 BÁO CÁO TRẠNG THÁI TỨC THÌ (THEO YÊU CẦU)');
-                            } else if (actionData === 'action:pause_5m' || actionData === 'action:pause_15m') {
-                                const waitM = Math.max(5, Number(CONFIG.settings.yield_wait_minutes) || 5);
+                            } else if (actionData === 'action:pause_10m' || actionData === 'action:pause_5m' || actionData === 'action:pause_15m') {
+                                const waitM = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
                                 sessionState.manualYieldRequested = true;
                                 await answerCallbackFast(cq.id, `⏸️ Đang tạm dừng Bot ${waitM} phút để nhường máy...`);
                             } else if (actionData === 'action:stop_bot') {
@@ -780,9 +898,19 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
                             const txt = upd.message.text.trim().toLowerCase();
 
                             if (txt === '/menu' || txt === '/settings' || txt === '/start' || txt === '/status' || txt === '/report') {
-                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v4.1');
+                                void runInstantReportAsync('🎛️ BẢNG ĐIỀU KHIỂN TRỰC TUYẾN 3Q AUTOBOT v4.2');
                             } else if (txt === '/daily' || txt === '/nhanh' || txt === '/nvngay' || txt === '/muavang') {
                                 void runOneClickDailyTaskAsync('Telegram /daily');
+                            } else if (txt === '/tamquoc' || txt === '/countrywar') {
+                                void runCountryWarTaskAsync('Telegram /tamquoc');
+                            } else if (txt === '/vantieu' || txt === '/caravan') {
+                                void runCaravanTaskAsync('Telegram /vantieu');
+                            } else if (txt === '/camdia' || txt === '/jindi') {
+                                void runJindiTaskAsync('Telegram /camdia');
+                            } else if (txt === '/thamhiem' || txt === '/dispatch') {
+                                void runDispatchTaskAsync('Telegram /thamhiem');
+                            } else if (txt === '/dautruong' || txt === '/mobang' || txt === '/arena') {
+                                void runArenaMineTaskAsync('Telegram /dautruong');
                             } else if (txt === '/pause' || txt === '/nghi') {
                                 sessionState.manualYieldRequested = true;
                             } else if (txt === '/stop' || txt === '/dung' || txt === '/tat' || txt === '/baotri') {
@@ -2288,7 +2416,7 @@ async function run() {
                 sessionState.forceResumeFromYield = false;
                 sessionState.deadSessionStreak = 0;
 
-                const waitMin = Math.max(5, Number(CONFIG.settings.yield_wait_minutes) || 5);
+                const waitMin = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
                 writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động kết nối lại...`);
 
                 // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
@@ -2521,7 +2649,7 @@ async function run() {
                     sessionState.deadSessionStreak = 0;
                     const sinceLastAuto = Date.now() - Number(sessionState.lastAutoReloginAt || 0);
                     if (CONFIG.settings.yield_on_kick) {
-                        const waitYieldM = Math.max(5, Number(CONFIG.settings.yield_wait_minutes) || 5);
+                        const waitYieldM = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
                         writeLog(`📱 [Nhường Máy] Phát hiện mất kết nối / kẹt trạng thái quá 90s (nghi do Điện thoại đang chơi) -> Tạm nghỉ ${waitYieldM} phút để nhường máy!`);
                         sessionState.kickDetectedFromLog = true;
                         sessionState.isYielding = true;

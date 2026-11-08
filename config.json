@@ -17,7 +17,7 @@
     "skip_battle": true,
     "speed_hack": 2,
     "yield_on_kick": true,
-    "yield_wait_minutes": 5,
+    "yield_wait_minutes": 10,
     "bot_stopped": false
   },
   "telegram": {
@@ -50,7 +50,11 @@
     "auto_free_lottery": true,
     "auto_longmach": true,
     "auto_skvs": true,
-    "auto_guild_mine": false,
+    "auto_guild_mine": true,
+    "auto_country_war": true,
+    "auto_soldier_train": true,
+    "auto_caravan": true,
+    "auto_jindi_top_team": true,
     "mod_skin": true,
     "mod_headframe_title": true
   },

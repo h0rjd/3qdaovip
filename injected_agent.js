@@ -18562,6 +18562,102 @@
     };
 
     // ====================================================================
+    // CHIÊU BINH 4 LẦN 1 NGÀY & THU HOẠCH BINH TRẠI LÍNH GIA VIÊN (3Q Tranh Hùng — 0 KNB)
+    // ====================================================================
+    bot.runAutoSoldierTrainSmart = async function (force) {
+        if (!bot.isReady() || bot.isDisconnected()) return false;
+        try {
+            const gm = window.G_Mapping || {};
+            const mm = window.ModelManager || gm.ModelManager;
+            const hlm = mm && mm.HomeLandModel;
+            const mcCfg = gm.MaincityConfiger || window.MaincityConfiger || (safeRequire("MaincityConfiger") && (safeRequire("MaincityConfiger").MaincityConfiger || safeRequire("MaincityConfiger").default));
+            if (!hlm || !mcCfg) return false;
+
+            let didSomething = false;
+            if (bot.state.dailySoldierTrainCount === undefined) bot.state.dailySoldierTrainCount = 0;
+
+            const hlClass = (hlm && hlm.constructor) || gm.HomeLandModel || window.HomeLandModel;
+            const pickFn = (hlClass && hlClass.reqHostPickSoldier) || hlm.reqHostPickSoldier;
+            const addFn = (hlClass && hlClass.reqHostAddSoldier) || hlm.reqHostAddSoldier;
+
+            // 1. Quét các ô công trình Trại Lính trong Gia Viên
+            const barrackPlots = [];
+            if (hlm._plotId_BuildingMap) {
+                for (let pKey in hlm._plotId_BuildingMap) {
+                    const plotId = Number(pKey);
+                    const b = (typeof hlm.getBuildingInfoByPlotId === "function") ? hlm.getBuildingInfoByPlotId(plotId) : null;
+                    if (b && b.id > 0 && typeof mcCfg.getBuildingLvUpDataById === "function") {
+                        const upCfg = mcCfg.getBuildingLvUpDataById(b.id, Math.max(1, b.rawLv || b.lv || 1));
+                        if (upCfg && Array.isArray(upCfg.build_soldier) && upCfg.build_soldier.length > 0) {
+                            barrackPlots.push({ plot: plotId, build: b, upCfg: upCfg });
+                        }
+                    }
+                }
+            }
+
+            // Fallback nếu map chưa nạp: thử các plot mặc định của nhóm binh chủng 96, 97, 98
+            if (barrackPlots.length === 0 && typeof mcCfg.getMainCityByGroup === "function") {
+                const soldierGroups = [96, 97, 98];
+                for (let gIdx = 0; gIdx < soldierGroups.length; gIdx++) {
+                    const grp = mcCfg.getMainCityByGroup(soldierGroups[gIdx]);
+                    if (grp && grp[0] && grp[0].build_type) {
+                        const plotId = Number(grp[0].build_type);
+                        const b = (typeof hlm.getBuildingInfoByPlotId === "function") ? hlm.getBuildingInfoByPlotId(plotId) : null;
+                        if (b && b.id > 0) {
+                            const upCfg = mcCfg.getBuildingLvUpDataById(b.id, Math.max(1, b.rawLv || b.lv || 1));
+                            if (upCfg) barrackPlots.push({ plot: plotId, build: b, upCfg: upCfg });
+                        }
+                    }
+                }
+            }
+
+            const serverTime = (mm.ServerTimeModel && typeof mm.ServerTimeModel.getServerTime === "function")
+                ? Number(mm.ServerTimeModel.getServerTime()) : Math.floor(Date.now() / 1000);
+
+            for (let i = 0; i < barrackPlots.length; i++) {
+                const item = barrackPlots[i];
+                const plot = item.plot;
+                const upCfg = item.upCfg;
+                const bInfo = item.build;
+
+                // 2. Thu hoạch lính đã huấn luyện xong
+                const sQueue = (typeof hlm.getSoldier === "function") ? hlm.getSoldier(plot) : null;
+                const canPick = (typeof hlm.checkSoldierCanGet === "function" && hlm.checkSoldierCanGet(plot))
+                    || (sQueue && Number(sQueue._e_sec || 0) > 0 && serverTime >= Number(sQueue._e_sec));
+
+                if (canPick && typeof pickFn === "function" && bot.tryDo("hl_pick_sol_" + plot, 6)) {
+                    pickFn.call(hlClass || hlm, plot);
+                    bot.log(`🪖 [Chiêu Binh] Thu hoạch lính đã luyện xong tại Trại Lính (Ô #${plot})!`);
+                    didSomething = true;
+                    await bot.sleep(300);
+                }
+
+                // 3. Tiến hành Chiêu Binh nếu trại đang rảnh
+                const isTraining = (typeof hlm.checkIsTaining === "function") ? hlm.checkIsTaining(plot)
+                    : (sQueue && Number(sQueue._e_sec || 0) > serverTime);
+
+                if (!isTraining && !bInfo.Upgrading && (force || bot.tryDo("hl_train_sol_" + plot, 12))) {
+                    const batchSize = Math.max(1, Number(upCfg.build_soldier[2] || 10));
+                    const maxCap = Number(upCfg.build_soldier[1] || 100);
+                    const baseQueue = Number(upCfg.build_soldier[4] || maxCap);
+                    const times = Math.max(1, Math.min(10, Math.floor(baseQueue / batchSize)));
+
+                    if (typeof addFn === "function") {
+                        addFn.call(hlClass || hlm, plot, times, 0); // _is_acc = 0 (0 KNB!)
+                        bot.state.dailySoldierTrainCount++;
+                        bot.log(`🪖 [Chiêu Binh] Đặt lệnh Chiêu Binh #${bot.state.dailySoldierTrainCount} tại Trại Lính (Ô #${plot} • ${times * batchSize} lính • 0 KNB)!`);
+                        didSomething = true;
+                        await bot.sleep(350);
+                    }
+                }
+            }
+            return didSomething;
+        } catch (eTrain) {
+            return false;
+        }
+    };
+
+    // ====================================================================
     // NHÓM 2: VẬN TIÊU THƯƠNG ĐỘI TOÀN DIỆN (Caravan — 100% 0 KNB, KHÔNG thuê lính đánh thuê tốn KNB!)
     // ====================================================================
     bot.runAutoCaravanSmart = async function () {
@@ -19747,10 +19843,10 @@
     // CẤM ĐỊA TOP SV HELPER
     // ====================================================================
     bot.camDiaSettings = {
-        minPowerRaw: "200M",
-        minPower: 200000000,
+        minPowerRaw: "0",
+        minPower: 0,
         minFloor: 1,
-        autoJoin: false
+        autoJoin: true
     };
 
     function parsePowerString(val) {
@@ -19814,7 +19910,8 @@
 
             if ((!teams || teams.length === 0) && typeof tpm.reqTeamListByType === "function" && bot.tryDo("jindi_req_list", 8)) {
                 tpm.reqTeamListByType(mpType);
-                return false;
+                await bot.sleep(600);
+                teams = (win && Array.isArray(win.teamDatas)) ? win.teamDatas : (Array.isArray(window.__QA_JINDI_CACHED_TEAMS__) ? window.__QA_JINDI_CACHED_TEAMS__ : null);
             }
             if (!teams || teams.length === 0) return false;
 
@@ -20343,9 +20440,9 @@
                     }
                 }
 
-                // 4. Nhận sạch toàn bộ nhiệm vụ hoàn thành khác (Bang hội 7/8, Mỏ 16/17, Tam Quốc 20/21/11, Thành tựu 4)
+                // 4. Nhận sạch toàn bộ nhiệm vụ hoàn thành khác (Bang hội 7/8, Mỏ 14/16/17, Tam Quốc 20/21, Homestead 12, Fun 11/18, Shichao 19, Yyzq 22, Thành tựu 4)
                 try {
-                    const extraTypes = [4, 7, 8, 11, 14, 16, 17, 20, 21];
+                    const extraTypes = [4, 7, 8, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22];
                     for (let et of extraTypes) {
                         const tList = (typeof tm.getTaskListByType === "function") ? (tm.getTaskListByType(et) || []) : [];
                         const readyList = [];
@@ -20366,7 +20463,7 @@
             // 0. Đồng bộ dữ liệu Task, Phó Bản Ngày, Cửa Hàng & Boss Bang từ máy chủ
             try {
                 if (tm && typeof tm.reqTaskInfo === "function") {
-                    const syncTypes = [2, 5, 3, 6];
+                    const syncTypes = [2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 18, 19, 20, 21, 22];
                     for (let s = 0; s < syncTypes.length; s++) tm.reqTaskInfo(syncTypes[s]);
                 }
                 if (cm && typeof cm.reqDailyDungeonList === "function") cm.reqDailyDungeonList(true);
@@ -20572,8 +20669,11 @@
                     const relProto = (gm.RelationAutoPickSendCs && gm.RelationAutoPickSendCs.protocol) || 14217;
                     rpc.send(relProto, {});
                 }
-                if (typeof bot.runAutoGuildMineSmart === "function") await bot.runAutoGuildMineSmart(true);
+                if (typeof bot.runAutoSoldierTrainSmart === "function") await bot.runAutoSoldierTrainSmart(true);
+                if (typeof bot.runAutoCaravanSmart === "function") await bot.runAutoCaravanSmart(true);
                 if (typeof bot.runAutoCountryWarSmart === "function") await bot.runAutoCountryWarSmart(true);
+                if (typeof bot.runAutoJindiTopTeamSmart === "function") await bot.runAutoJindiTopTeamSmart();
+                if (typeof bot.runAutoGuildMineSmart === "function") await bot.runAutoGuildMineSmart(true);
                 if (typeof bot.runAutoHostSmart === "function") await bot.runAutoHostSmart();
                 if (typeof bot.runAutoTouhuSmart === "function") await bot.runAutoTouhuSmart(true);
                 if (typeof bot.runAutoHeroFragmentDecompose === "function") await bot.runAutoHeroFragmentDecompose();
@@ -20661,9 +20761,31 @@
             const startGold = readMoneyNow(1);
             const startKnb = readMoneyNow(2);
 
-            if (typeof bot.runAutoGuildMineSmart === "function") await bot.runAutoGuildMineSmart(true);
-            if (typeof bot.runAutoCountryWarSmart === "function") await bot.runAutoCountryWarSmart(true);
+            if (typeof bot.runAutoSoldierTrainSmart === "function") {
+                try { await bot.runAutoSoldierTrainSmart(true); } catch (e) { }
+            }
+            if (typeof bot.runAutoCaravanSmart === "function") {
+                try { await bot.runAutoCaravanSmart(true); } catch (e) { }
+            }
+            if (typeof bot.runAutoCountryWarSmart === "function") {
+                try { await bot.runAutoCountryWarSmart(true); } catch (e) { }
+            }
+            if (typeof bot.runAutoJindiTopTeamSmart === "function") {
+                try { await bot.runAutoJindiTopTeamSmart(); } catch (e) { }
+            }
+            if (typeof bot.runAutoDispatchSmart === "function") {
+                try { await bot.runAutoDispatchSmart(true); } catch (e) { }
+            }
+            if (typeof bot.runAutoGuildMineSmart === "function") {
+                try { await bot.runAutoGuildMineSmart(true); } catch (e) { }
+            }
+            if (typeof bot.runAutoArenaSmart === "function") {
+                try { await bot.runAutoArenaSmart(true); } catch (e) { }
+            }
             const questSummary = await bot.ensureDaily100PointsSmart(true);
+            if (typeof bot.runAutoSoldierTrainSmart === "function") {
+                try { await bot.runAutoSoldierTrainSmart(true); } catch (e) { }
+            }
             await bot.sleep(450);
 
             const endGold = readMoneyNow(1);
