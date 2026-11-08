@@ -17136,6 +17136,37 @@
             const gm = window.G_Mapping || {};
             const mm = window.ModelManager || gm.ModelManager;
 
+            // 0. Chốt chặn an toàn tuyệt đối cho BinaryWriter: Không bao giờ cho phép setNumber(undefined/NaN) ghi 0 byte làm hỏng khung gói tin nhị phân!
+            try {
+                const bwMod = safeRequire("BinaryWriter");
+                const bwCls = (bwMod && (bwMod.BinaryWriter || bwMod.default || bwMod)) || gm.BinaryWriter || window.BinaryWriter;
+                const bwProto = bwCls && bwCls.prototype;
+                if (bwProto && !bwProto.__QA_SAFE_WRITER_HOOKED__) {
+                    bwProto.__QA_SAFE_WRITER_HOOKED__ = true;
+                    if (typeof bwProto.setNumber === "function") {
+                        const origSetNumber = bwProto.setNumber;
+                        bwProto.setNumber = function (val) {
+                            let num = Number(val);
+                            if (!Number.isFinite(num)) num = 0;
+                            return origSetNumber.call(this, num);
+                        };
+                    }
+                    if (typeof bwProto.setString === "function") {
+                        const origSetString = bwProto.setString;
+                        bwProto.setString = function (val) {
+                            const str = (val === undefined || val === null) ? "" : String(val);
+                            return origSetString.call(this, str);
+                        };
+                    }
+                    if (typeof bwProto.setBool === "function") {
+                        const origSetBool = bwProto.setBool;
+                        bwProto.setBool = function (val) {
+                            return origSetBool.call(this, !!val);
+                        };
+                    }
+                }
+            } catch (eBwHook) { }
+
             // 1. Hook PlayerController.prototype.show_gameReward: Chốt chặn gốc trước khi đẩy BattleResultView vào hàng đợi!
             try {
                 const pcMod = safeRequire("PlayerController");
@@ -18347,14 +18378,16 @@
             } catch (eActAll) { }
 
             // ------------------------------------------------------------------
-            // TRỤ CỘT 11: QUÉT SẠCH TOÀN BỘ NHIỆM VỤ ĐÃ HOÀN THÀNH TRONG TASKMAP (Tam Quốc 20, Thế Lực 21, Chiến Lược 11, Mỏ 16/17...)
+            // TRỤ CỘT 11: QUÉT SẠCH TOÀN BỘ NHIỆM VỤ ĐÃ HOÀN THÀNH TRONG TASKOBJ/TASKMAP (Tam Quốc 20, Thế Lực 21, Chiến Lược 11, Mỏ 16/17...)
             // ------------------------------------------------------------------
             try {
-                if (tm && tm._taskMap && typeof tm.getTaskState === "function") {
-                    for (let tKey in tm._taskMap) {
+                const taskStore = tm && (tm._taskMap || tm._taskObj);
+                if (taskStore && typeof tm.getTaskState === "function") {
+                    for (let tKey in taskStore) {
                         const tp = Number(tKey);
                         if (!tp) continue;
-                        const subMap = tm._taskMap[tKey] || {};
+                        const rawBucket = taskStore[tKey] || {};
+                        const subMap = (rawBucket && typeof rawBucket === "object" && rawBucket.accepted) ? rawBucket.accepted : rawBucket;
                         const readyList = [];
                         for (let sKey in subMap) {
                             const tid = Number(sKey);
@@ -19376,8 +19409,10 @@
                     }
 
                     // Nhiệm vụ Tam Quốc (TaskSiege = 20)
-                    if (tm._taskMap && tm._taskMap[20]) {
-                        const tMap20 = tm._taskMap[20];
+                    const tStore20 = tm._taskMap || tm._taskObj;
+                    if (tStore20 && tStore20[20]) {
+                        const raw20 = tStore20[20];
+                        const tMap20 = (raw20 && typeof raw20 === "object" && raw20.accepted) ? raw20.accepted : raw20;
                         for (let tidKey in tMap20) {
                             const tid = Number(tidKey);
                             if (tid > 0 && Number(tm.getTaskState(20, tid)) === 2 && bot.tryDo("cw_tsiege_" + tid, 15)) {
@@ -20127,97 +20162,110 @@
             // Kiểm tra mở khóa tính năng Đấu Trường (Module e_ModuleOpenDataModuleOpen.Arena = 101 / 103)
             if (!bot.isSafeModuleOpen(101) && !bot.isSafeModuleOpen(103)) return false;
 
-            // Nhận thưởng mốc trận đánh tích lũy ngày & thưởng xếp hạng trước
+            if (typeof am.RefreshRed === "function") am.RefreshRed();
+
+            const freeCount = (typeof am.GetFreeCount === "function") ? Number(am.GetFreeCount() || 0) : ((typeof am.getFreeCount === "function") ? Number(am.getFreeCount() || 0) : 0);
+            const hasFreeRed = bot.hasRed("V_ArenaFree");
+            const hasReward = (bot.hasRed("V_ArenaReward") || force) && bot.canDo("arena_get_reward", 60);
+            const canChallenge = (freeCount > 0 || hasFreeRed) && (force || bot.canDo("arena_challenge_cycle", 45));
+
+            if (!hasReward && !canChallenge) return false;
+
+            let didSomething = false;
+
+            // A. Kiểm tra nhận quà mốc điểm tích lũy lượt đánh hàng ngày (ArenaCntRewardsCs = 11720, 0 tham số)
             try {
-                const myInfo = am._myArenaInfo || (am._arenaSeasonInfo && am._arenaSeasonInfo._info);
-                const claimedCnts = (myInfo && (myInfo._cnt_rewards || myInfo.cnt_rewards)) || [];
-                const dailyCnt = Number((myInfo && myInfo._daily_cnt) || 0);
-                const cntRewardProto = (gm.ArenaCntRewardsCs && gm.ArenaCntRewardsCs.protocol) || 10710;
-                for (let cid of [1, 2, 3, 4, 5, 1001, 1002, 1003]) {
-                    const alreadyClaimed = Array.isArray(claimedCnts) ? claimedCnts.indexOf(cid) >= 0 : !!(claimedCnts && claimedCnts[cid]);
-                    if (!alreadyClaimed && rpc && typeof rpc.send === "function") {
-                        if (typeof am.setGetRewardId === "function") am.setGetRewardId(cid);
-                        rpc.send(cntRewardProto, { _id: cid });
-                        await bot.sleep(120);
+                if (hasReward) {
+                    bot.markDone("arena_get_reward");
+                    if (typeof am.reqGetReward === "function") {
+                        am.reqGetReward();
+                    } else if (gm.ArenaCntRewardsCs && gm.ArenaCntRewardsCs.protocol && rpc && typeof rpc.send === "function") {
+                        rpc.send(gm.ArenaCntRewardsCs.protocol, {});
                     }
-                }
-                const rankRewardProto = (gm.ArenaRankRewardsCs && gm.ArenaRankRewardsCs.protocol) || 10712;
-                if (rpc && typeof rpc.send === "function") {
-                    rpc.send(rankRewardProto, {});
+                    didSomething = true;
+                    await bot.sleep(300);
                 }
             } catch (eArenaRewards) { }
 
-            // Tính tổng số lượt khiêu chiến miễn phí + vé khiêu chiến trong túi (Item 1028: Vé Khiêu Chiến)
-            const freeCount = (typeof am.GetFreeCount === "function") ? Number(am.GetFreeCount() || 0) : 0;
-            const ticketCount = (typeof pm.getItemNum === "function") ? Number(pm.getItemNum(1028) || 0) : 0;
-            const totalAvailableTurns = freeCount + ticketCount;
+            // B. Khiêu chiến đối thủ (Chỉ đánh khi có lượt miễn phí, chọn đối thủ LC thấp nhất)
+            if (canChallenge) {
+                bot.markDone("arena_challenge_cycle");
 
-            if (totalAvailableTurns <= 0 && !force) return false;
+                let rivalObj = (typeof am.getRivalList === "function") ? am.getRivalList() : null;
+                let rivalList = (rivalObj && Array.isArray(rivalObj._list)) ? rivalObj._list : (Array.isArray(rivalObj) ? rivalObj : (Array.isArray(am._rivalList) ? am._rivalList : (Array.isArray(am.enemyList) ? am.enemyList : null)));
+                if (!rivalList || rivalList.length === 0) {
+                    if (typeof am.reqRival === "function") {
+                        am.reqRival();
+                    } else if (gm.ArenaModel && typeof gm.ArenaModel.reqRival === "function") {
+                        gm.ArenaModel.reqRival();
+                    } else if (gm.ArenaRivalCs && gm.ArenaRivalCs.protocol && rpc && typeof rpc.send === "function") {
+                        rpc.send(gm.ArenaRivalCs.protocol, {});
+                    }
+                    await bot.sleep(600);
+                    rivalObj = (typeof am.getRivalList === "function") ? am.getRivalList() : null;
+                    rivalList = (rivalObj && Array.isArray(rivalObj._list)) ? rivalObj._list : (Array.isArray(rivalObj) ? rivalObj : (Array.isArray(am._rivalList) ? am._rivalList : (Array.isArray(am.enemyList) ? am.enemyList : null)));
+                }
 
-            // Đồng bộ danh sách đối thủ
-            if (typeof am.getRivalList === "function") am.getRivalList();
-            if (typeof am.reqRival === "function") am.reqRival();
-            await bot.sleep(350);
+                if (Array.isArray(rivalList) && rivalList.length > 0) {
+                    let bestRival = rivalList[0];
+                    let lowestPower = Infinity;
+                    for (let i = 0; i < rivalList.length; i++) {
+                        const r = rivalList[i];
+                        if (!r) continue;
+                        const rPow = Number((r._role_show && (r._role_show._power || r._role_show.power)) || r._power || r.power || 0);
+                        if (rPow < lowestPower) {
+                            lowestPower = rPow;
+                            bestRival = r;
+                        }
+                    }
+                    const targetRid = (bestRival && bestRival._role_show && (bestRival._role_show._rid || bestRival._role_show._role_id || bestRival._role_show.rid)) || (bestRival && (bestRival._rival_rid || bestRival._rid || bestRival.rid)) || 0;
+                    if (!targetRid || Number(targetRid) <= 1) return didSomething;
 
-            let rivalList = am._rivalList || (typeof am.getRivalList === "function" && am.getRivalList()) || [];
-            if (!Array.isArray(rivalList) || rivalList.length === 0) {
-                const rivalProto = (gm.ArenaRivalCs && gm.ArenaRivalCs.protocol) || 10703;
-                if (rpc && typeof rpc.send === "function") rpc.send(rivalProto, {});
-                await bot.sleep(400);
-                rivalList = am._rivalList || [];
-            }
+                    const targetName = (bestRival._role_show && bestRival._role_show._name) || bestRival._name || "Đối thủ";
+                    if (bot.state.isScoutLowPowerActive && typeof bot.restoreFullCombatArray === "function") {
+                        await bot.restoreFullCombatArray("auto_arena");
+                    }
 
-            if (!Array.isArray(rivalList) || rivalList.length === 0) return false;
+                    const arenaType = (gm.e_GameplayDataGameplay && gm.e_GameplayDataGameplay.Arena) ? gm.e_GameplayDataGameplay.Arena : 2;
+                    bot.state.battleInProgress = true;
+                    bot.state.lastBattleStartTime = Date.now();
+                    if (typeof bot.markAutoBattle === "function") bot.markAutoBattle(arenaType, 15000);
+                    bot.log(`⚔️ [Đấu Trường] Còn ${freeCount} lượt miễn phí -> Khiêu chiến [${targetName}] (LC: ${bot.formatNumber ? bot.formatNumber(lowestPower) : lowestPower})!`);
 
-            // Tìm đối thủ có LC thấp nhất để chắc thắng 100%
-            let bestRival = null;
-            let lowestPower = Infinity;
-            for (let i = 0; i < rivalList.length; i++) {
-                const r = rivalList[i];
-                if (!r) continue;
-                const rPow = Number((r._role_show && (r._role_show._power || r._role_show.power)) || r._power || r.power || 0);
-                if (rPow < lowestPower) {
-                    lowestPower = rPow;
-                    bestRival = r;
+                    try {
+                        if (typeof fm.enter === "function") {
+                            fm.enter(
+                                arenaType,
+                                targetRid,
+                                null,
+                                false,
+                                null,
+                                true,
+                                { _role_show: bestRival._role_show, _id: 2 },
+                                true
+                            );
+                        } else if (gm.WarStartCs && gm.WarStartCs.protocol && rpc && typeof rpc.send === "function") {
+                            rpc.send(gm.WarStartCs.protocol, { _type: arenaType, _id: targetRid, _cli: 1, _ext: [] });
+                            await bot.sleep(800);
+                            if (gm.WarJumpCs && gm.WarJumpCs.protocol) {
+                                rpc.send(gm.WarJumpCs.protocol, { _type: arenaType, _id: targetRid, _cli: 1, _ext: [] });
+                            }
+                        }
+                        bot.closeBattleViews();
+                        didSomething = true;
+                        await bot.sleep(600);
+                        bot.closeBattleViews();
+                    } finally {
+                        bot.state.battleInProgress = false;
+                        bot.state.lastBattleEndTime = Date.now();
+                    }
                 }
             }
-            if (!bestRival) bestRival = rivalList[0];
-            const targetRid = (bestRival._role_show && (bestRival._role_show._rid || bestRival._role_show.rid)) || bestRival._rival_rid || bestRival._rid || bestRival.rid;
-            if (!targetRid) return false;
 
-            bot.log(`⚔️ [Đấu Trường] Khiêu chiến đối thủ [${(bestRival._role_show && bestRival._role_show._name) || "Ẩn Danh"}] (LC: ${bot.formatNumber ? bot.formatNumber(lowestPower) : lowestPower} • Lượt còn: Free ${freeCount} + Vé ${ticketCount})`);
-
-            // Vào trận với arrayType 101, skipBattle=true, skipArray=true (0 KNB)
-            let battleDone = false;
-            if (typeof fm.enter === "function") {
-                fm.enter(
-                    101,
-                    targetRid,
-                    null,
-                    false,
-                    function () { battleDone = true; },
-                    true,
-                    { _role_show: bestRival._role_show, _id: 2 },
-                    true
-                );
-            } else if (typeof fm.enterNew === "function") {
-                fm.enterNew(
-                    101,
-                    { copyId: targetRid, skipArray: true, skipBattle: true, extraParam: { _role_show: bestRival._role_show, _id: 2 } },
-                    function () { battleDone = true; }
-                );
-            }
-            await bot.sleep(500);
-
-            try {
-                const cntRewardProto = (gm.ArenaCntRewardsCs && gm.ArenaCntRewardsCs.protocol) || 10710;
-                if (rpc && typeof rpc.send === "function") {
-                    for (let cid of [1, 2, 3, 4, 5]) rpc.send(cntRewardProto, { _id: cid });
-                }
-            } catch (eC) { }
-
-            return true;
-        } catch (eArena) { }
+            return didSomething;
+        } catch (eArena) {
+            bot.state.battleInProgress = false;
+        }
         return false;
     };
 
@@ -20226,26 +20274,26 @@
     // ====================================================================
     bot.runAutoGuildMineSmart = async function (force = false) {
         if (!bot.isReady() || bot.isDisconnected() || bot.isBattling()) return false;
+        if (!force && !bot.canDo("auto_guild_mine", 20)) return false;
+        if (bot.state.mineFailUntil && Date.now() < bot.state.mineFailUntil) return false;
+        bot.markDone("auto_guild_mine");
+
         try {
             const gm = window.G_Mapping || {};
             const mm = window.ModelManager || gm.ModelManager || (typeof bot.getModelManager === "function" ? bot.getModelManager() : null);
-            const rpc = gm.RPCReq || window.RPCReq;
             const cmm = (mm && mm.CrossMineModel) || gm.CrossMineModel;
-            const pm = (mm && mm.PlayerModel) || gm.PlayerModel;
             const tm = (mm && mm.TaskModel) || gm.TaskModel;
-            const fm = (gm && gm.FubenManager && gm.FubenManager.I) || (window.FubenManager && window.FubenManager.I);
             const stm = (mm && mm.ServerTimeModel) || gm.ServerTimeModel;
-            if (!cmm || !pm || !fm) return false;
+            if (!cmm) return false;
 
             // Kiểm tra mở khóa tính năng Mỏ Bang (Module e_ModuleOpenDataModuleOpen.CrossMine = 139)
             if (!bot.isSafeModuleOpen(139)) return false;
 
-            const serverTime = (stm && typeof stm.getServerTime === "function") ? Number(stm.getServerTime() || 0) : Math.floor(Date.now() / 1000);
             let didSomething = false;
 
             // 1. Nhận sạch toàn bộ nhiệm vụ Mỏ: Type 16 (tuần), Type 17 (ngày), Type 14 (rương 5001..5005)
             try {
-                if (tm) {
+                if (tm && typeof tm.getTaskState === "function") {
                     const mineTaskTypes = [17, 16, 14];
                     for (let mt of mineTaskTypes) {
                         const tList = (typeof tm.getTaskListByType === "function") ? (tm.getTaskListByType(mt) || []) : [];
@@ -20253,72 +20301,89 @@
                         for (let i = 0; i < tList.length; i++) {
                             const raw = tList[i];
                             const tid = Number((raw && typeof raw === "object") ? (raw.id || raw._id || raw.taskId) : raw) || 0;
-                            if (tid > 0 && Number(tm.getTaskState(mt, tid)) === 2) readyList.push(tid);
+                            if (tid > 0 && Number(tm.getTaskState(mt, tid)) === 2 && bot.tryDo("mine_task_claim_" + mt + "_" + tid, 15)) {
+                                readyList.push(tid);
+                            }
                         }
                         if (readyList.length > 0) {
                             if (typeof tm.reqTaskComplete2 === "function") tm.reqTaskComplete2(mt, readyList);
-                            for (let tid of readyList) bot.claimTaskSafe(tm, mt, tid);
+                            else for (let tid of readyList) bot.claimTaskSafe(tm, mt, tid);
+                            didSomething = true;
                             await bot.sleep(150);
                         }
                     }
                 }
             } catch (eMineTasks) { }
 
-            // 2. Nhận thưởng Xếp Hạng Mỏ kỳ trước (5302, 1) và Bái Kiến Top Mỏ (5302, 2)
+            // 2. Nạp thông tin mỏ nếu chưa có
+            if (!cmm.mineInfo) {
+                if (typeof cmm.reqMineInfo === "function" && bot.tryDo("req_mine_info", 60)) {
+                    cmm.reqMineInfo();
+                }
+                return didSomething;
+            }
+
+            const mi = cmm.mineInfo;
+            const teams = mi._team || [];
+            const nowSec = (stm && typeof stm.getServerTime === "function") ? Number(stm.getServerTime() || 0) : Math.floor(Date.now() / 1000);
+            if (mi._s_sec && nowSec < mi._s_sec) return didSomething;
+            if (mi._e_sec && nowSec >= mi._e_sec) return didSomething;
+
+            const mc = window.CrossMineConfiger || (gm && gm.CrossMineConfiger);
+            const misc = (mc && typeof mc.getMineMisc === "function" ? mc.getMineMisc() : null) || { reward_min: 5 };
+            const rewardMinSec = Math.max((misc.reward_min || 5) * 60, 300) + 15;
+
+            // 3. Tự động nhận thưởng Xếp Hạng Mỏ kỳ trước (5302, _pos=1) và Bái Kiến Top Mỏ (5302, _pos=2) qua RankNewModel chuẩn
             try {
-                const rankProto = (gm.RankLastRankRewardsCs && gm.RankLastRankRewardsCs.protocol) || 10912;
-                if (rpc && typeof rpc.send === "function") {
-                    rpc.send(rankProto, { _type: 5302, _page: 1 });
-                    rpc.send(rankProto, { _type: 5302, _page: 2 });
+                const rnm = (mm && mm.RankNewModel) || (gm && gm.RankNewModel);
+                if (rnm && typeof rnm.requestRankLastRankRewards === "function") {
+                    const rMine = rnm.getRankLastRank ? rnm.getRankLastRank(5302) : null;
+                    const bitUtil = (gm && gm.BitUtil) || window.BitUtil;
+                    if (rMine && bitUtil) {
+                        if (!bitUtil.checkBit(rMine._bit, 1, 1) && bot.canDo("mine_rank_reward_claim", 60)) {
+                            bot.markDone("mine_rank_reward_claim");
+                            bot.state.suppressMineRewardUntil = Date.now() + 2000;
+                            rnm.requestRankLastRankRewards(5302, 1);
+                            bot.log("🌾 [Chiếm Mỏ] Tự động nhận thưởng Xếp Hạng Mỏ kỳ trước thành công!");
+                            didSomething = true;
+                        }
+                        const inOpen = (typeof cmm.isInOpenTime === "function") ? cmm.isInOpenTime() : true;
+                        if (inOpen && !bitUtil.checkBit(rMine._bit, 2, 1) && bot.canDo("mine_zan_reward_claim", 60)) {
+                            bot.markDone("mine_zan_reward_claim");
+                            bot.state.suppressMineRewardUntil = Date.now() + 2000;
+                            rnm.requestRankLastRankRewards(5302, 2);
+                            bot.log("🌾 [Chiếm Mỏ] Tự động bái kiến (Zan) Top Mỏ kỳ trước thành công (+Thưởng)!");
+                            didSomething = true;
+                        }
+                    }
                 }
             } catch (eMineRank) { }
 
-            // 3. Đồng bộ danh sách Đội Hình Mỏ của người chơi
-            const myTeams = (typeof cmm.getMyTeamList === "function") ? (cmm.getMyTeamList() || []) : (cmm._myTeams || []);
-            if (!Array.isArray(myTeams) || myTeams.length === 0) {
-                if (typeof cmm.reqMyTeamInfo === "function") cmm.reqMyTeamInfo();
-                await bot.sleep(300);
-            }
-
-            const currentTeams = (typeof cmm.getMyTeamList === "function") ? (cmm.getMyTeamList() || []) : (cmm._myTeams || []);
-            if (!Array.isArray(currentTeams)) return didSomething;
-
-            for (let ti = 0; ti < currentTeams.length; ti++) {
-                const team = currentTeams[ti];
-                if (!team) continue;
-                const teamIdx = Number(team._idx !== undefined ? team._idx : ti + 1);
-                const holeId = Number(team._hole || 0);
-                const occupyTime = Number(team._time || 0);
-                const elapsedSec = occupyTime > 0 ? (serverTime - occupyTime) : 0;
-
-                // TH1: Đội đang chiếm mỏ và đã đào đủ >= 300s (5 phút) -> Tự động Thu Hoạch
-                if (holeId > 0 && (elapsedSec >= 300 || force)) {
-                    if (typeof cmm.reqHarvest === "function") {
-                        cmm.reqHarvest(teamIdx);
-                        bot.log(`🌾 [Chiếm Mỏ] Đội #${teamIdx} đã đào ${Math.round(elapsedSec / 60)} phút -> Thu hoạch tài nguyên mỏ!`);
+            // 4. Thu hoạch tài nguyên các đội đang đào mỏ đủ >= 5 phút
+            for (let t of teams) {
+                if (!t || !t._idx) continue;
+                if (t._hole > 0 && t._loot_time > 0) {
+                    const elapsed = nowSec - t._loot_time;
+                    const pickKey = `mine_pick_${t._idx}`;
+                    if (elapsed >= rewardMinSec && bot.canDo(pickKey, 300)) {
+                        if (typeof cmm.reqMinePick !== "function") break;
+                        bot.markDone(pickKey);
+                        const oldLoot = t._loot_time;
+                        const minElapsed = (elapsed / 60).toFixed(1);
+                        bot.log(`🌾 [Chiếm Mỏ] Đội hình ${t._idx} đã đào được ${minElapsed} phút -> Tự động thu hoạch tài nguyên mỏ...`);
+                        bot.state.suppressMineRewardUntil = Date.now() + 1500;
+                        cmm.reqMinePick(t._idx);
                         didSomething = true;
-                        await bot.sleep(350);
+                        await bot.sleep(1500);
+                        const cur = ((cmm.mineInfo && cmm.mineInfo._team) || []).find(x => x && x._idx === t._idx);
+                        if (cur && cur._loot_time === oldLoot) {
+                            bot.state.cooldowns[pickKey] = Date.now() + 5 * 60000;
+                            bot.log(`⚠️ [Chiếm Mỏ] Đội hình ${t._idx} chưa được server xác nhận thu hoạch -> Thử lại sau 5 phút.`);
+                        } else {
+                            bot.state.cooldowns[pickKey] = Date.now() + 5 * 60000;
+                        }
+                        if (bot.state.mineFailUntil && Date.now() < bot.state.mineFailUntil) break;
                     }
-                }
-
-                // TH2: Đội đang rảnh rỗi (_hole === 0) và có lực chiến -> Tìm mỏ trống hoặc thủ vệ yếu để chiếm
-                if (holeId === 0 && Number(team._power || 0) > 0) {
-                    const roomIdx = Number(team._room || 1);
-                    try {
-                        const targetHole = (teamIdx * 10) + 1;
-                        fm.enterNew(
-                            7,
-                            {
-                                ext: [{ _type: roomIdx, _key: targetHole, _val: teamIdx }],
-                                skipArray: true,
-                                skipBattle: true
-                            },
-                            function () { }
-                        );
-                        bot.log(`⛏️ [Chiếm Mỏ] Đội #${teamIdx} rảnh rỗi -> Tự động xuất quân khai thác Mỏ #${targetHole} (Phòng ${roomIdx})!`);
-                        didSomething = true;
-                        await bot.sleep(400);
-                    } catch (eOccupy) { }
                 }
             }
 
@@ -20460,7 +20525,7 @@
                         }
                         if (readyList.length > 0) {
                             if (typeof tm.reqTaskComplete2 === "function") tm.reqTaskComplete2(et, readyList);
-                            for (let tid of readyList) bot.claimTaskSafe(tm, et, tid);
+                            else for (let tid of readyList) bot.claimTaskSafe(tm, et, tid);
                             await bot.sleep(120);
                         }
                     }
@@ -20471,7 +20536,12 @@
             try {
                 if (tm && typeof tm.reqTaskInfo === "function") {
                     const syncTypes = [2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 18, 19, 20, 21, 22];
-                    for (let s = 0; s < syncTypes.length; s++) tm.reqTaskInfo(syncTypes[s]);
+                    for (let s = 0; s < syncTypes.length; s++) {
+                        const tp = syncTypes[s];
+                        if (!tm._taskObj || !tm._taskObj[tp] || tp === 2 || tp === 5) {
+                            tm.reqTaskInfo(tp);
+                        }
+                    }
                 }
                 if (cm && typeof cm.reqDailyDungeonList === "function") cm.reqDailyDungeonList(true);
                 if (rpc && typeof rpc.send === "function") {
