@@ -114,6 +114,8 @@ const CONFIG = {
         auto_soldier_train: true,
         auto_caravan: true,
         auto_jindi_top_team: true,
+        auto_boss_kunlun: true,
+        auto_daily_3q: true,
         mod_skin: true,
         mod_headframe_title: true
     }, cfgToggles),
@@ -1022,7 +1024,7 @@ async function checkGitConfigHotReload(page, sessionState) {
                             CONFIG.settings.yield_on_kick = !!parsed.settings.yield_on_kick;
                         }
                         if (parsed.settings.yield_wait_minutes !== undefined && parsed.settings.yield_wait_minutes !== prevSettings.yield_wait_minutes) {
-                            CONFIG.settings.yield_wait_minutes = Number(parsed.settings.yield_wait_minutes) || 5;
+                            CONFIG.settings.yield_wait_minutes = Number(parsed.settings.yield_wait_minutes) || 10;
                         }
                     }
                     if (changes.length > 0) {
@@ -1360,6 +1362,9 @@ async function launchAndEnterGame(sessionState) {
         }
 
         const isTrueDeviceKick = entry.kickNow === true ||
+            m.includes('onLoginKickSc') ||
+            m.includes('evt_LoginKickSc') ||
+            m.includes('_res=0') ||
             m.includes('_res=1') ||
             m.includes('_res=2') ||
             mLower.includes('thiết bị khác') ||
@@ -2055,8 +2060,8 @@ function startLocalGuiServer(sessionState, getActivePage) {
 
                 if (act === 'pause') {
                     sessionState.manualYieldRequested = true;
-                    writeLog(`⏸️ [GUI Control] Đã yêu cầu tạm dừng ${CONFIG.settings.yield_wait_minutes || 5} phút để nhường máy!`);
-                    return sendJson(res, { ok: true, message: `Đã kích hoạt chế độ nghỉ ${CONFIG.settings.yield_wait_minutes || 5} phút nhường máy!` });
+                    writeLog(`⏸️ [GUI Control] Đã yêu cầu tạm dừng ${CONFIG.settings.yield_wait_minutes || 10} phút để nhường máy!`);
+                    return sendJson(res, { ok: true, message: `Đã kích hoạt chế độ nghỉ ${CONFIG.settings.yield_wait_minutes || 10} phút nhường máy!` });
                 }
 
                 if (act === 'resume') {
@@ -2160,7 +2165,7 @@ function startLocalGuiServer(sessionState, getActivePage) {
                 const prevAccount = `${CONFIG.email}|${CONFIG.server}`;
                 if (body.email) CONFIG.email = String(body.email).trim();
                 if (body.server) CONFIG.server = String(body.server).trim();
-                if (body.yield_wait_minutes) CONFIG.settings.yield_wait_minutes = Math.max(1, Number(body.yield_wait_minutes) || 5);
+                if (body.yield_wait_minutes) CONFIG.settings.yield_wait_minutes = Math.max(10, Number(body.yield_wait_minutes) || 10);
                 if (body.report_interval_min) CONFIG.telegram.report_interval_min = Math.max(1, Number(body.report_interval_min) || 30);
                 saveConfigToDisk();
                 writeLog(`💾 [GUI Control] Đã lưu cài đặt hệ thống (Server: ${CONFIG.server}, Nghỉ ĐT: ${CONFIG.settings.yield_wait_minutes}p, Báo cáo Tele: ${CONFIG.telegram.report_interval_min}p)`);
