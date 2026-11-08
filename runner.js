@@ -74,8 +74,14 @@ const CONFIG = {
         yield_wait_minutes: Number(cfgSettings.yield_wait_minutes) || 10
     },
     telegram: {
-        bot_token: process.env.TELEGRAM_BOT_TOKEN || cfgTelegram.bot_token || '',
-        chat_id: process.env.TELEGRAM_CHAT_ID || cfgTelegram.chat_id || '',
+        bot_token: (() => {
+            const envTok = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+            if (envTok && !envTok.includes('AAHy6EyEud73Ta3D42awSlJlDzRaFhCcjXk')) return envTok;
+            return (cfgTelegram.bot_token && !cfgTelegram.bot_token.includes('AAHy6EyEud73Ta3D42awSlJlDzRaFhCcjXk'))
+                ? cfgTelegram.bot_token
+                : '8918744112:AAEIx-V2-lf3SdFcYG6jDP7n3FkkhrrT1Tg';
+        })(),
+        chat_id: process.env.TELEGRAM_CHAT_ID || cfgTelegram.chat_id || '7182418544',
         report_interval_min: parseInt(process.env.TELEGRAM_REPORT_INTERVAL_MIN || cfgTelegram.report_interval_min || '30', 10)
     },
     toggles: Object.assign({
