@@ -1496,6 +1496,7 @@
                 }
 
                 if (bot.state.battleInProgress || bot.state.towerInProgress || bot.state.defjzInProgress) return true;
+                if (bot.state.rescueFightActive || bot.state.rescueInspectingOccupied || bot.state.wbossBgFighting || bot.state.kunlunBgFighting || bot.state.ysTowerBgFighting || bot.state.dailyCopyBgFighting) return true;
                 if (bot.state.lastBattleEndTime && now < bot.state.lastBattleEndTime) return true;
 
                 if (isBattleViewOpen) return true;
@@ -2786,7 +2787,9 @@
                     const nwSentWarClose = {};
                     nwProto.sendMessage = function (t, e, o) {
                         if (bot.state.kickedByOtherDevice || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
-                        window.__LAST_OUT_PROTO__ = t;
+                        if (t !== 10100 && t !== 10102) {
+                            window.__LAST_OUT_PROTO__ = t;
+                        }
                         const now = Date.now();
 
                         // Ghi nhận thời điểm đóng trận (WarCloseCs - 10413) tại biên WebSocket duy nhất & chỉ chặn gửi đúp cùng war_id trong 250ms
@@ -2867,12 +2870,11 @@
                         this._isCanReconnect = false;
                         this.isManualClose = true;
                         this.isReconnecting = false;
-                        const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                        if (resCode !== 3 && !isSpamKick) {
+                        if (resCode !== 3) {
                             bot.triggerEmergencyYield("Đăng nhập trùng thiết bị (onLoginKickSc _res=" + resCode + ")");
                         } else {
                             bot.state._sessionCode66Count = 0;
-                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode + (isSpamKick ? " (server rate-limit sau err_code_66)" : " (máy chủ bảo trì/hotfix)"));
+                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode + " (máy chủ bảo trì/hotfix)");
                         }
                         return;
                     };
@@ -2932,7 +2934,7 @@
                         };
                     }
 
-                    // 2. Hook onClose: Tự động khôi phục ngầm; chỉ nhường máy khi kickData._res === 1, còn rớt mạng 4 lần liên tiếp thì làm mới Token ngay!
+                    // 2. Hook onClose: Tự động khôi phục ngầm; nhường máy khi kickData._res !== 3, còn rớt mạng 4 lần liên tiếp thì làm mới Token ngay!
                     const origOnClose = nwProto.onClose;
                     nwProto.onClose = function () {
                         if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) {
@@ -2951,13 +2953,12 @@
                                 this.isManualClose = true;
                                 this.isReconnecting = false;
                                 try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
-                                const isSpamKickClose = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                                if (kickRes !== 3 && !isSpamKickClose) {
+                                if (kickRes !== 3) {
                                     bot.log("📱 [Nhường Máy] Đóng socket sau mã đăng nhập trùng (_res=" + kickRes + ") -> Nhường máy ngay!");
                                     bot.triggerEmergencyYield("onClose with kickData _res=" + kickRes + " (Điện thoại đăng nhập)");
                                 } else {
                                     bot.state._sessionCode66Count = 0;
-                                    bot.requestFreshRelogin("onClose kickData _res=" + kickRes + (isSpamKickClose ? " (server rate-limit sau err_code_66)" : ""));
+                                    bot.requestFreshRelogin("onClose kickData _res=" + kickRes);
                                 }
                                 return;
                             }
@@ -3011,8 +3012,7 @@
                         if (kickObj) {
                             const kickRes = Number(kickObj._res != null ? kickObj._res : (kickObj._code != null ? kickObj._code : 0));
                             this.kickData = null;
-                            const isSpamKickTip = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                            if (kickRes !== 3 && !isSpamKickTip) {
+                            if (kickRes !== 3) {
                                 bot.triggerEmergencyYield("showErrorTips with kickData _res=" + kickRes + " (" + tipStr + ")");
                             } else {
                                 bot.state._sessionCode66Count = 0;
@@ -3102,8 +3102,7 @@
                             if (nw && nw.kickData) {
                                 const kickRes = Number(nw.kickData._res != null ? nw.kickData._res : (nw.kickData._code != null ? nw.kickData._code : 0));
                                 nw.kickData = null;
-                                const isSpamKickLc = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                                if (kickRes !== 3 && !isSpamKickLc) {
+                                if (kickRes !== 3) {
                                     bot.triggerEmergencyYield("LoginController tip with kickData _res=" + kickRes + " (" + tipStr + ")");
                                 } else {
                                     bot.state._sessionCode66Count = 0;
@@ -3210,7 +3209,9 @@
                     const origRpcSend = rpc.send;
                     const lastProtoTimes = window.__LAST_PROTO_TIMES__ = window.__LAST_PROTO_TIMES__ || {};
                     rpc.send = function (proto, data) {
-                        window.__LAST_OUT_PROTO__ = proto;
+                        if (proto !== 10100 && proto !== 10102) {
+                            window.__LAST_OUT_PROTO__ = proto;
+                        }
                         window.__LAST_OUT_DATA__ = data;
                         const now = Date.now();
                         lastProtoTimes[proto] = now;
@@ -3228,6 +3229,12 @@
                                 bot.markAutoBattle(Number(data._type), 25000);
                             }
                         } else if (proto !== 10413 && proto !== 10100 && proto !== 10102) {
+                            if (!window.__CLOUD_HEADLESS_BOT__) {
+                                window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, now + 3000);
+                                if (bot.state.isScoutLowPowerActive && typeof bot.ensureManualFullCombatArray === "function") {
+                                    bot.ensureManualFullCombatArray("ios_manual_rpc");
+                                }
+                            }
                             if (proto === warStartProto) {
                                 const wType = Number((data && data._type) || 1);
                                 if (wType > 1) {
@@ -3253,7 +3260,9 @@
                         const origRpcSendDelay = rpc.sendDelay;
                         rpc.sendDelay = function (protoD, dataD) {
                             const nowD = Date.now();
-                            window.__LAST_OUT_PROTO__ = protoD;
+                            if (protoD !== 10100 && protoD !== 10102) {
+                                window.__LAST_OUT_PROTO__ = protoD;
+                            }
                             window.__LAST_OUT_DATA__ = dataD;
                             lastProtoTimes[protoD] = nowD;
                             if (bot.state._bgSilentDepth > 0) {
@@ -3262,6 +3271,9 @@
                             } else {
                                 bot.state._bgSilentUntil = 0;
                                 bot.state._lastManualUiActionTs = nowD;
+                                if (!window.__CLOUD_HEADLESS_BOT__) {
+                                    window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, nowD + 3000);
+                                }
                             }
                             if (protoD === 13110 && rpc.sendTimeCache) {
                                 rpc.sendTimeCache[13110] = 0;
@@ -4221,8 +4233,10 @@
                                 ErrCfg.showErroCode = function (code) {
                                     const numCode = Number(code || 0);
                                     if (numCode > 0) {
-                                        bot.state.lastServerNotice = { code: numCode, time: Date.now() };
                                         const lastOutProto = window.__LAST_OUT_PROTO__ || 0;
+                                        if (lastOutProto === 10401 || lastOutProto === 10552 || numCode === 66 || numCode === 335) {
+                                            bot.state.lastServerNotice = { code: numCode, proto: lastOutProto, time: Date.now() };
+                                        }
                                         if (lastOutProto === 13110 || lastOutProto === 13130) {
                                             try {
                                                 const trmErr = window.ModelManager && window.ModelManager.TreasureRewardModel;
@@ -6493,9 +6507,9 @@
                                     bot.log(`⚠️ [Anti-Spam] Phái Tướng báo lỗi [${code}: ${content || 'Thao tác quá nhanh'}] -> Tạm dừng phái tướng 90s để đồng bộ trạng thái.`);
                                 } else if (proto === 10544) {
                                     bot.state.manorFlowerFailCount = (bot.state.manorFlowerFailCount || 0) + 1;
-                                    const coolMin = bot.state.manorFlowerFailCount === 1 ? 15 : (bot.state.manorFlowerFailCount === 2 ? 30 : 120);
+                                    const coolMin = bot.state.manorFlowerFailCount === 1 ? 30 : 120;
                                     bot.state.manorFlowerCooldown = Date.now() + coolMin * 60000;
-                                    bot.log(`⚠️ [Anti-Spam] Thưởng Hoa Gia Viên báo lỗi [${code}: ${content || 'Thao tác quá nhanh'}] (Lần ${bot.state.manorFlowerFailCount}) -> Tạm hoãn nhận thưởng hoa ${coolMin} phút để tránh spam.`);
+                                    return;
                                 } else if (proto === 12692) {
                                     bot.state.lastBattleEndTime = Date.now() + 3500;
                                     bot.state.guildWishFailCooldown = Date.now() + 60000;
@@ -6504,12 +6518,12 @@
                                     const now = Date.now();
                                     const cool = now + 1800;
                                     bot.state.lastBattleEndTime = cool;
-                                    bot.state.lastWarError66Time = now;
                                     bot.state._mainStageReqInFlightUntil = 0;
                                     window.__LAST_WAR_FAIL_COOLDOWN__ = cool;
                                     window.__LAST_WAR_CLOSE_TIME__ = cool;
                                     if (window.__LAST_PROTO_TIMES__) window.__LAST_PROTO_TIMES__['10401_1'] = cool;
                                     if (code === 66) {
+                                        bot.state.lastWarError66Time = now;
                                         bot.state._sessionCode66Count = (bot.state._sessionCode66Count || 0) + 1;
                                         if (typeof bot.rescueUnsettledBattle === "function") {
                                             try { bot.rescueUnsettledBattle("err_code_66"); } catch (e66h) { }
@@ -7416,28 +7430,36 @@
                         }, { uuid: "__QA_CHAT_MSG_CTX__" });
 
                         // 8.1c & 8.1d (v3.8 Fix): Bắt chính xác 100% Lực Chiến thật của Kẻ Chiếm Đóng qua QueryPlayerInfoSc (11802), HeroRivalSc (10335) & HeroRivalGSc!
-                        const cacheRobberPowerSafe = function (rRid, pwr, rs) {
+                        // Kẻ cướp có thể hạ đội hình chính (_type: 1) xuống 1..4 tướng để dò nhà -> LUÔN lấy Math.max(rsPwr, arrPwr) và KHÔNG BAO GIỜ hạ LC tối đa đã biết của kẻ cướp!
+                        const cacheRobberPowerSafe = function (rRid, pwr, rs, srcTag) {
                             const numRid = Number(rRid || 0);
                             const numPwr = Number(pwr || 0);
                             if (numRid <= 0 || numPwr <= 0) return;
                             if (!window.__ROBBER_POWER_CACHE__) window.__ROBBER_POWER_CACHE__ = {};
+                            const nowTs = Date.now();
                             const prev = window.__ROBBER_POWER_CACHE__[numRid];
-                            const bestPwr = (prev && Date.now() - prev.time < 300000) ? Math.max(Number(prev.power || 0), numPwr) : numPwr;
-                            window.__ROBBER_POWER_CACHE__[numRid] = { power: bestPwr, time: Date.now(), role_show: rs || (prev && prev.role_show) || null };
+                            const bestPwr = prev ? Math.max(Number(prev.power || 0), numPwr) : numPwr;
+                            window.__ROBBER_POWER_CACHE__[numRid] = {
+                                power: bestPwr,
+                                time: nowTs,
+                                queryUpdatedAt: srcTag === "query" ? nowTs : Number((prev && prev.queryUpdatedAt) || 0),
+                                rivalUpdatedAt: srcTag === "rival" ? nowTs : Number((prev && prev.rivalUpdatedAt) || 0),
+                                role_show: rs || (prev && prev.role_show) || null
+                            };
                         };
                         const calcFormationPowerFallback = function (arr) {
                             try {
                                 if (!Array.isArray(arr) || arr.length === 0) return 0;
-                                const mmLoc = window.ModelManager || (gm && gm.ModelManager);
-                                if (mmLoc && mmLoc.BattleModel && typeof mmLoc.BattleModel.totalPowerByFormation === "function") {
-                                    const enemyPos = (gm && gm.HeroPos && gm.HeroPos.enemy && gm.HeroPos.enemy.pos) || 2;
-                                    const fp = Number(mmLoc.BattleModel.totalPowerByFormation(arr, enemyPos) || 0);
-                                    if (fp > 0) return fp;
-                                }
                                 let sum = 0;
                                 for (let i = 0; i < arr.length; i++) {
                                     const a = arr[i];
                                     if (a) sum += Number(a._power || a.power || a._fight || 0);
+                                }
+                                const mmLoc = window.ModelManager || (gm && gm.ModelManager);
+                                if (mmLoc && mmLoc.BattleModel && typeof mmLoc.BattleModel.totalPowerByFormation === "function") {
+                                    const enemyPos = (gm && gm.HeroPos && gm.HeroPos.enemy && gm.HeroPos.enemy.pos) || 2;
+                                    const fp = Number(mmLoc.BattleModel.totalPowerByFormation(arr, enemyPos) || 0);
+                                    if (fp > 0) return Math.max(fp, sum);
                                 }
                                 return sum;
                             } catch (eFp) { return 0; }
@@ -7450,9 +7472,11 @@
                                 const rs = (data._rival && data._rival._role_show) || data._role_show || null;
                                 const rRid = Number((rs && (rs.getRoleId ? rs.getRoleId() : (rs._rid || rs.rid))) || data._rid || data.rid || 0);
                                 if (rRid > 0) {
-                                    let pwr = (rs && typeof bot.getCandidatePower === "function") ? Number(bot.getCandidatePower(rs) || 0) : 0;
-                                    if (pwr <= 0) pwr = calcFormationPowerFallback(data._array || (data._rival && data._rival._array));
-                                    cacheRobberPowerSafe(rRid, pwr, rs || data);
+                                    const rsPwr = (rs && typeof bot.getCandidatePower === "function") ? Number(bot.getCandidatePower(rs) || 0) : 0;
+                                    const arr = data._array || (data._rival && data._rival._array);
+                                    const arrPwr = calcFormationPowerFallback(arr);
+                                    const pwr = Math.max(rsPwr, arrPwr);
+                                    cacheRobberPowerSafe(rRid, pwr, rs || data, "rival");
                                 }
                             } catch (errRival) { }
                         }, { uuid: "__QA_HERO_RIVAL_CTX__" });
@@ -7465,14 +7489,14 @@
                                 const rs = (data._rival && data._rival._role_show) || data._role_show || data._rival;
                                 const rRid = Number((rs && (rs.getRoleId ? rs.getRoleId() : (rs._rid || rs.rid || rs._role_id))) || data._rid || 0);
                                 if (rRid > 0) {
-                                    let pwr = (rs && typeof bot.getCandidatePower === "function") ? Number(bot.getCandidatePower(rs) || 0) : 0;
-                                    if (pwr <= 0 && data._rival && data._rival._role_show) {
-                                        pwr = Number(data._rival._role_show._power || data._rival._role_show.power || 0);
+                                    let rsPwr = (rs && typeof bot.getCandidatePower === "function") ? Number(bot.getCandidatePower(rs) || 0) : 0;
+                                    if (rsPwr <= 0 && data._rival && data._rival._role_show) {
+                                        rsPwr = Number(data._rival._role_show._power || data._rival._role_show.power || 0);
                                     }
-                                    if (pwr <= 0) {
-                                        pwr = calcFormationPowerFallback((data._rival && data._rival._array) || data._array);
-                                    }
-                                    cacheRobberPowerSafe(rRid, pwr, rs);
+                                    const arr = (data._rival && data._rival._array) || data._array;
+                                    const arrPwr = calcFormationPowerFallback(arr);
+                                    const pwr = Math.max(rsPwr, arrPwr);
+                                    cacheRobberPowerSafe(rRid, pwr, rs, "query");
                                 }
                             } catch (errQ) { }
                         }, { uuid: "__QA_QUERY_PLAYER_CTX__" });
@@ -7482,14 +7506,13 @@
                             try {
                                 const rRid = Number(rRidArg || 0);
                                 if (rRid <= 0) return;
-                                const existing = window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[rRid];
-                                if (existing && existing.power > 0 && Date.now() - existing.time < 300000) return;
                                 const mmLoc = window.ModelManager || (gm && gm.ModelManager);
                                 const hbmLoc = mmLoc && mmLoc.HeroBagModel;
                                 if (hbmLoc && typeof hbmLoc.getPlayerRivals === "function") {
-                                    const arr = hbmLoc.getPlayerRivals(rRid, rTypeArg || 106, 2) || hbmLoc.getPlayerRivals(rRid, rTypeArg || 1, 1);
-                                    const pwr = calcFormationPowerFallback(arr);
-                                    cacheRobberPowerSafe(rRid, pwr, null);
+                                    const arr106 = hbmLoc.getPlayerRivals(rRid, rTypeArg || 106, 2);
+                                    const arr1 = hbmLoc.getPlayerRivals(rRid, 1, 1);
+                                    const pwr = Math.max(calcFormationPowerFallback(arr106), calcFormationPowerFallback(arr1));
+                                    cacheRobberPowerSafe(rRid, pwr, null, "rival");
                                 }
                             } catch (ePr) { }
                         }, { uuid: "__QA_HERO_RIVALG_CTX__" });
@@ -7510,16 +7533,22 @@
                                     }
                                 } catch (eDesc) { }
 
-                                bot.state.lastServerNotice = {
-                                    code: code,
-                                    args: args,
-                                    desc: desc,
-                                    time: Date.now()
-                                };
+                                const lastOutP = window.__LAST_OUT_PROTO__ || 0;
+                                const isRevoltWindow = !!(bot.state.rescueFightActive && bot.state._revoltEnterSentTs && (Date.now() - bot.state._revoltEnterSentTs < 4000));
+                                const isRelevantToRescue = (lastOutP === 10401 || lastOutP === 10552 || code === 66 || code === 335);
+                                if (isRelevantToRescue && (isRevoltWindow || code === 66 || code === 335)) {
+                                    bot.state.lastServerNotice = {
+                                        code: code,
+                                        args: args,
+                                        desc: desc,
+                                        proto: lastOutP,
+                                        time: Date.now()
+                                    };
+                                }
                                 if (code === 66) {
                                     bot.state.lastWarError66Time = Date.now();
                                 }
-                                if (bot.state.rescueFightActive) {
+                                if (isRevoltWindow && isRelevantToRescue) {
                                     bot.log(`⚠️ [Farm KNB] Server thông báo từ chối trận [mã ${code}]${desc ? `: "${desc}"` : ""}!`);
                                 }
                             } catch (eNotice) { }
@@ -8800,13 +8829,27 @@
                                 if (evt === "evt_LoginKickSc") {
                                     const kData = args[0] || {};
                                     const kRes = Number(kData._res != null ? kData._res : (kData._code != null ? kData._code : 0));
-                                    const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                                    if (kRes !== 3 && !isSpamKick) {
-                                        bot.log("📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=" + kRes + ") -> Nhường máy 10 phút ngay!");
+                                    if (!window.__CLOUD_HEADLESS_BOT__) {
+                                        // Trên bản iOS: Khi người chơi đang mở app trực tiếp, tự động giành lại phiên kết nối trong 350ms (đẩy Cloud vào Nhường Máy 20p)!
+                                        try {
+                                            const nwIos = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                                            if (nwIos && !nwIos.isRundBg) {
+                                                nwIos.kickData = null;
+                                                nwIos._needFullRelogin = true;
+                                                nwIos._isCanReconnect = true;
+                                                nwIos.isManualClose = false;
+                                                nwIos.isReconnecting = false;
+                                                return;
+                                            }
+                                        } catch (eIosK) { }
+                                        return;
+                                    }
+                                    if (kRes !== 3) {
+                                        bot.log("📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=" + kRes + ") -> Nhường máy ngay!");
                                         bot.triggerEmergencyYield("Dispatcher evt_LoginKickSc (_res=" + kRes + ")");
                                     } else if (typeof bot.requestFreshRelogin === "function") {
                                         bot.state._sessionCode66Count = 0;
-                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes + (isSpamKick ? " (server rate-limit sau err_code_66)" : " (máy chủ bảo trì/hotfix)"));
+                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes + " (máy chủ bảo trì/hotfix)");
                                     }
                                 }
                                 const evType = (gm && gm.EventType) || window.EventType || {};
@@ -12351,6 +12394,10 @@
                         if (newGift !== undefined && newGift > prevGift) {
                             bot.state.manorFlowerFailCount = 0;
                             bot.state.manorFlowerCooldown = 0;
+                        } else {
+                            bot.state.manorFlowerFailCount = (bot.state.manorFlowerFailCount || 0) + 1;
+                            const coolMin = bot.state.manorFlowerFailCount === 1 ? 30 : 120;
+                            bot.state.manorFlowerCooldown = Date.now() + coolMin * 60000;
                         }
                     } else {
                         // Chấm đỏ hiển thị nhưng không thỏa mãn mốc cá nhân lẫn bang hội -> Tạm hoãn 30 phút tránh spam 10544
@@ -12696,11 +12743,19 @@
                     const victimPower = (typeof bot.getCandidatePower === "function") ? bot.getCandidatePower(otherHome._role_show) : 0;
                     const myFullPower = (typeof bot.getMyFullPower === "function") ? bot.getMyFullPower() : (Number(bot.stats.fullPower) || Number(bot.stats.power) || 320000000);
 
-                    if (isStrongRobberLocked(robRid, myFullPower)) {
-                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1200000;
-                        bot.state.skipRescueReason[targetRid] = "strong_robber";
-                        return false;
+                    const failEntry = bot.state.failedRescueRids && bot.state.failedRescueRids[robRid];
+                    if (failEntry) {
+                        const failTs = typeof failEntry === "object" ? Number(failEntry.time || 0) : Number(failEntry || 0);
+                        const lockedAtPow = typeof failEntry === "object" ? Number(failEntry.myPower || 0) : myFullPower;
+                        const powerGrewEnough = lockedAtPow > 0 && myFullPower > lockedAtPow * 1.08;
+                        if (!powerGrewEnough && Date.now() - failTs < 7200000) {
+                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1800000;
+                            bot.state.skipRescueReason[targetRid] = "strong_robber";
+                            return false;
+                        }
                     }
+
+                    bot.state.rescueInspectingOccupied = true;
 
                     if (typeof bot.recordScoutOutcome === "function") {
                         bot.recordScoutOutcome("occupied", targetRid, robRid, 0, victimName, robberName, sourceLabel);
@@ -12711,13 +12766,19 @@
 
                     bot.log(`⚔️ [Farm KNB • ${sourceLabel}] Phát hiện gia viên [${victimName}] (ID: ${targetRid}) đang bị cướp bởi [${robberName}]! Đang kiểm tra LC kẻ địch...`);
 
+                    const winRatioLimit = Number((bot.settings && bot.settings.rescue_max_power_ratio) || 1.03);
+                    const maxPowerThreshold = myFullPower > 0 ? (myFullPower * winRatioLimit) : 333000000;
+
                     // 1. Truy vấn chính xác LC thực của Kẻ Chiếm Đóng qua QueryPlayerInfoCs (11801), HeroRivalCs (10334) & reqPlayerRivalG:
                     let robberPower = 0;
                     const cachedRobber = window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid];
-                    if (cachedRobber && Number(cachedRobber.power || 0) > 0 && Date.now() - cachedRobber.time < 600000) {
+                    const hasFreshRivalCache = cachedRobber && Number(cachedRobber.power || 0) > 0 && (Date.now() - cachedRobber.time < 600000) &&
+                        (Number(cachedRobber.power) > maxPowerThreshold || Number(cachedRobber.rivalUpdatedAt || 0) > 0);
+                    if (hasFreshRivalCache) {
                         robberPower = Number(cachedRobber.power);
                     } else {
                         try {
+                            const rWaitStart = Date.now();
                             const pm = (window.ModelManager && window.ModelManager.PlayerModel) || (gm && gm.PlayerModel);
                             if (pm && typeof pm.reqQueryPlayer === "function") {
                                 pm.reqQueryPlayer(robRid);
@@ -12735,12 +12796,13 @@
                             if (mm && mm.HeroBagModel && typeof mm.HeroBagModel.reqPlayerRivalG === "function") {
                                 try { mm.HeroBagModel.reqPlayerRivalG(robRid, 106); } catch (eRg) { }
                             }
-                            const rWaitStart = Date.now();
                             while (Date.now() - rWaitStart < 360) {
                                 const cr = window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid];
                                 if (cr && Number(cr.power || 0) > 0) {
                                     robberPower = Number(cr.power);
-                                    break;
+                                    if (robberPower > maxPowerThreshold) break;
+                                    const bothSynced = Number(cr.rivalUpdatedAt || 0) >= rWaitStart && Number(cr.queryUpdatedAt || 0) >= rWaitStart;
+                                    if (bothSynced || (Date.now() - rWaitStart >= 220)) break;
                                 }
                                 await bot.sleep(15);
                             }
@@ -12753,16 +12815,15 @@
                     }
 
                     // 2. Lọc thắng chắc 100%: chỉ vào trận khi kẻ cướp vừa sức (<= 103% LC full 6 tướng của mình)
-                    const winRatioLimit = Number((bot.settings && bot.settings.rescue_max_power_ratio) || 1.03);
-                    const maxPowerThreshold = myFullPower > 0 ? (myFullPower * winRatioLimit) : 333000000;
                     if (robberPower > 0 && robberPower > maxPowerThreshold) {
                         bot.log(`🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [${robberName}] có LC ${bot.formatNumber(robberPower)} > ${Math.round(winRatioLimit * 100)}% LC mình (${bot.formatNumber(myFullPower)}) -> Bỏ qua ngay, không tốn trận!`);
                         if (typeof bot.recordScoutOutcome === "function") {
                             bot.recordScoutOutcome("too_strong", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
                         }
                         bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
-                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1200000;
+                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1800000;
                         bot.state.skipRescueReason[targetRid] = "robber_too_strong";
+                        bot.state.rescueInspectingOccupied = false;
                         return false;
                     }
 
@@ -12773,6 +12834,7 @@
                         }
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 900000;
                         bot.state.skipRescueReason[targetRid] = "victim_too_strong";
+                        bot.state.rescueInspectingOccupied = false;
                         return false;
                     }
 
@@ -12856,6 +12918,27 @@
 
                     await bot.sleep(sentRivalHere ? 160 : 50);
 
+                    // 3b. Kiểm tra lại bộ đệm LC kẻ cướp lần cuối sau khi gói HeroRivalSc (10335 - đội hình 6 tướng thủ nhà) vừa kịp trả về!
+                    if (robRid > 0 && window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid]) {
+                        const latestRobPow = Number(window.__ROBBER_POWER_CACHE__[robRid].power || 0);
+                        if (latestRobPow > robberPower) {
+                            robberPower = latestRobPow;
+                        }
+                    }
+                    if (robberPower > 0 && robberPower > maxPowerThreshold) {
+                        bot.log(`🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [${robberName}] có LC thực ${bot.formatNumber(robberPower)} > ${Math.round(winRatioLimit * 100)}% LC mình (${bot.formatNumber(myFullPower)}) -> Bỏ qua ngay trước khi vào trận!`);
+                        if (typeof bot.recordScoutOutcome === "function") {
+                            bot.recordScoutOutcome("too_strong", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
+                        }
+                        bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
+                        bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 1800000;
+                        bot.state.skipRescueReason[targetRid] = "robber_too_strong";
+                        bot.state.rescueFightActive = false;
+                        bot.state.rescueInspectingOccupied = false;
+                        bot.state.battleInProgress = false;
+                        return false;
+                    }
+
                     // 4. Tính giãn cách an toàn NGAY TRƯỚC LỆNH fm.enter(106) (sau khi lưu trận + đóng trận treo + đồng bộ đối thủ đã hoàn tất)
                     const lastProtoTimes = window.__LAST_PROTO_TIMES__ || {};
                     const lastAnyWarStart = Math.max(lastProtoTimes[10401] || 0, lastProtoTimes["10401_1"] || 0, lastProtoTimes["10401_106"] || 0, window.__LAST_OTHER_WAR_TIME__ || 0);
@@ -12870,6 +12953,7 @@
                     }
 
                     const revoltStartTs = Date.now();
+                    bot.state._revoltEnterSentTs = revoltStartTs;
                     bot.state.lastServerNotice = null;
                     bot.state.suppressRescueRewardUntil = Date.now() + 8000;
 
@@ -12905,6 +12989,7 @@
 
                     let battleInfo = null;
                     let serverNotice = null;
+                    let sentDirectWarStartFallback = false;
                     const waitBattleDeadline = Date.now() + 3800;
                     while (Date.now() < waitBattleDeadline) {
                         const byTypeInfo = bot.state.lastBattleByType && (bot.state.lastBattleByType[revoltType] || bot.state.lastBattleByType[106]);
@@ -12924,6 +13009,19 @@
                             serverNotice = { code: 66, desc: "Chưa kết thúc trận trước" };
                             break;
                         }
+                        if (!sentDirectWarStartFallback && (Date.now() - revoltStartTs >= 260)) {
+                            const last10401Sent = (window.__LAST_PROTO_TIMES__ && Math.max(window.__LAST_PROTO_TIMES__[10401] || 0, window.__LAST_PROTO_TIMES__["10401_106"] || 0)) || 0;
+                            if (last10401Sent < revoltStartTs) {
+                                sentDirectWarStartFallback = true;
+                                try {
+                                    const rpcFallback = gm.RPCReq || (window.G_Mapping && window.G_Mapping.RPCReq);
+                                    const wsProto = (gm.WarStartCs && gm.WarStartCs.protocol) || 10401;
+                                    if (rpcFallback) {
+                                        rpcFallback.send(wsProto, { _type: revoltType, _id: targetRid, _cli: 1, _ext: [] });
+                                    }
+                                } catch (eWsFb) { }
+                            }
+                        }
                         await bot.sleep(50);
                     }
 
@@ -12941,6 +13039,8 @@
                             }
                             const retryCnt = (bot.state.rescueAttempts[targetRid] || 0) + 1;
                             bot.state.rescueAttempts[targetRid] = retryCnt;
+                            bot.state._revoltEnterSentTs = 0;
+                            bot.state.rescueInspectingOccupied = false;
                             bot.state.rescueFightActive = false;
                             bot.state.battleInProgress = false;
                             bot.state.lastBattleEndTime = Date.now() + 1800;
@@ -12962,11 +13062,17 @@
                                 return false;
                             }
                         }
-                        const skipDuration = (errCode === 335) ? 1800000 : 180000;
-                        bot.log(`⚠️ [Farm KNB] Server từ chối giải cứu [${victimName}]: Mã lỗi [${serverNotice.code}]${serverNotice.desc ? ` - "${serverNotice.desc}"` : ""} -> Khóa bỏ qua gia viên này ${errCode === 335 ? "30 phút" : "3 phút"}.`);
+                        const isLongSkip = (errCode === 335 || errCode === 231 || errCode === 107);
+                        const skipDuration = isLongSkip ? 1800000 : 180000;
+                        bot.log(`⚠️ [Farm KNB] Server từ chối giải cứu [${victimName}]: Mã lỗi [${serverNotice.code}]${serverNotice.desc ? ` - "${serverNotice.desc}"` : ""} -> Khóa bỏ qua gia viên này ${isLongSkip ? "30 phút" : "3 phút"}.`);
                         bot.state.skipRescueHouseUntil[targetRid] = Date.now() + skipDuration;
                         bot.state.skipRescueReason[targetRid] = `server_reject_${serverNotice.code}`;
+                        if (isLongSkip && bot.state.hotCrossServerVictims && bot.state.hotCrossServerVictims[targetRid]) {
+                            delete bot.state.hotCrossServerVictims[targetRid];
+                        }
                         delete bot.state.rescueAttempts[targetRid];
+                        bot.state._revoltEnterSentTs = 0;
+                        bot.state.rescueInspectingOccupied = false;
                         bot.state.rescueFightActive = false;
                         bot.state.battleInProgress = false;
                         return false;
@@ -12980,19 +13086,25 @@
                         bot.state.rescueAttempts[targetRid] = attempts;
 
                         if (attempts >= 2) {
-                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 300000;
+                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 600000;
                             bot.state.skipRescueReason[targetRid] = "timeout_2x";
                             delete bot.state.rescueAttempts[targetRid];
-                            bot.log(`⚠️ [Farm KNB] Không thể vào trận giải cứu [${victimName}] sau 2 lần thử (server không phản hồi) -> Bỏ qua 5 phút.`);
+                            bot.log(`⚠️ [Farm KNB] Không thể vào trận giải cứu [${victimName}] sau 2 lần thử (server không phản hồi) -> Bỏ qua 10 phút.`);
                         } else {
-                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 15000;
-                            bot.state.priorityRescueQueue.push({
-                                rid: targetRid,
-                                name: victimName,
-                                source: "Thử lại lần 2"
-                            });
-                            bot.log(`⏳ [Farm KNB] Trận giải cứu [${victimName}] chưa phản hồi -> Đưa về cuối hàng đợi (thử lại sau 15s)...`);
+                            bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 2600;
+                            bot.state.skipRescueReason[targetRid] = "cooldown_retry";
+                            if (!Array.isArray(bot.state.priorityRescueQueue)) bot.state.priorityRescueQueue = [];
+                            if (!bot.state.priorityRescueQueue.some(item => Number(item && item.rid) === Number(targetRid))) {
+                                bot.state.priorityRescueQueue.unshift({
+                                    rid: targetRid,
+                                    name: victimName,
+                                    source: sourceLabel || "Thử lại lần 2"
+                                });
+                            }
+                            bot.log(`⏳ [Farm KNB] Trận giải cứu [${victimName}] chưa phản hồi -> Tự động đánh lại sau 2.5s (lần ${attempts}/2)...`);
                         }
+                        bot.state._revoltEnterSentTs = 0;
+                        bot.state.rescueInspectingOccupied = false;
                         bot.state.rescueFightActive = false;
                         bot.state.battleInProgress = false;
                         return false;
@@ -13029,6 +13141,10 @@
                         if (typeof bot.updateStats === "function") bot.updateStats();
                         didSomething = true;
                     } else {
+                        if (robRid > 0 && window.__ROBBER_POWER_CACHE__ && window.__ROBBER_POWER_CACHE__[robRid]) {
+                            const latestLossPow = Number(window.__ROBBER_POWER_CACHE__[robRid].power || 0);
+                            if (latestLossPow > robberPower) robberPower = latestLossPow;
+                        }
                         if (typeof bot.recordScoutOutcome === "function") {
                             bot.recordScoutOutcome("loss", targetRid, robRid, robberPower, victimName, robberName, sourceLabel);
                         }
@@ -13036,10 +13152,11 @@
                         const consecLoss = (robRid > 0 ? (bot.state.robberConsecLosses[robRid] || 0) : 0) + 1;
                         if (robRid > 0) bot.state.robberConsecLosses[robRid] = consecLoss;
                         const wasBeatenBefore = !!(robRid > 0 && bot.state.beatenRobberRids && bot.state.beatenRobberRids[robRid]);
-                        const isClearlyWeaker = (robberPower > 0 && myFullPower > 0 && robberPower <= myFullPower * 0.99);
+                        // Chỉ retry bù RNG nếu đối thủ thực sự ngang/thấp hơn chút xíu (82%..99% LC mình); nếu LC hiển thị < 82% mà thắng được full 6 tướng của mình thì 100% là đội hình hạ LC dò nhà!
+                        const isClearlyWeaker = (robberPower > 0 && myFullPower > 0 && robberPower >= myFullPower * 0.82 && robberPower <= myFullPower * 0.99);
                         if (!bot.state.rngLossRetries) bot.state.rngLossRetries = {};
                         const houseRngRetry = (bot.state.rngLossRetries[targetRid] || 0) + 1;
-                        if (consecLoss < 2 && houseRngRetry <= 2 && (wasBeatenBefore || isClearlyWeaker)) {
+                        if (consecLoss < 2 && houseRngRetry <= 2 && (wasBeatenBefore || isClearlyWeaker) && !(robberPower > maxPowerThreshold)) {
                             bot.state.rngLossRetries[targetRid] = houseRngRetry;
                             bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 2200;
                             bot.state.skipRescueReason[targetRid] = "cooldown_retry";
@@ -13054,16 +13171,25 @@
                             bot.log(`🎲 [Farm KNB] Thua sát nút do RNG tại [${victimName}] trước [${robberName}] (LC ${bot.formatNumber(robberPower)}) -> Tự động đánh giải cứu lại sau 2.2s để lấy +50 KNB!`);
                         } else {
                             bot.state.failedRescueRids[robRid] = { time: Date.now(), myPower: myFullPower };
-                            if (!window.__ROBBER_POWER_CACHE__ || !window.__ROBBER_POWER_CACHE__[robRid] || !(window.__ROBBER_POWER_CACHE__[robRid].power > 0)) {
-                                if (!window.__ROBBER_POWER_CACHE__) window.__ROBBER_POWER_CACHE__ = {};
-                                window.__ROBBER_POWER_CACHE__[robRid] = { power: Math.round((myFullPower || 320000000) * 1.15), time: Date.now(), role_show: null };
-                            }
+                            if (bot.state.beatenRobberRids && robRid > 0) delete bot.state.beatenRobberRids[robRid];
+                            if (!window.__ROBBER_POWER_CACHE__) window.__ROBBER_POWER_CACHE__ = {};
+                            const prevCachedObj = window.__ROBBER_POWER_CACHE__[robRid] || {};
+                            const inferredStrongPow = Math.max(Number(prevCachedObj.power || 0), robberPower || 0, Math.round((myFullPower || 320000000) * 1.15));
+                            window.__ROBBER_POWER_CACHE__[robRid] = {
+                                power: inferredStrongPow,
+                                time: Date.now(),
+                                rivalUpdatedAt: Date.now(),
+                                queryUpdatedAt: Date.now(),
+                                role_show: prevCachedObj.role_show || null
+                            };
                             bot.state.skipRescueHouseUntil[targetRid] = Date.now() + 2700000;
                             bot.state.skipRescueReason[targetRid] = "strong_robber";
-                            bot.log(`⚠️ [Farm KNB] Thua trận giải cứu [${victimName}] trước [${robberName}]! Đã khóa bỏ qua kẻ địch này 45 phút (tự mở nếu tăng LC).`);
+                            bot.log(`⚠️ [Farm KNB] Thua trận giải cứu [${victimName}] trước [${robberName}]! Đã khóa bỏ qua kẻ địch này 2 giờ (tự mở nếu tăng LC).`);
                         }
                     }
 
+                    bot.state._revoltEnterSentTs = 0;
+                    bot.state.rescueInspectingOccupied = false;
                     bot.state.rescueFightActive = false;
                     bot.state.battleInProgress = false;
                     bot.state.lastBattleEndTime = Date.now() + 500;
@@ -13487,6 +13613,8 @@
                 bot.log("Lỗi Farm KNB Gia Viên: " + (e.stack || e.toString()));
             } finally {
                 bot.state.rescueChecking = false;
+                bot.state.rescueInspectingOccupied = false;
+                bot.state._revoltEnterSentTs = 0;
                 bot.state.rescueFightActive = false;
                 bot.state.battleInProgress = false;
                 if (bot.state._deferredMainCopyPull && bot.isAutoStageOn()) {
@@ -16245,6 +16373,9 @@
                     if (!bot.isDisconnected() && bot.isReady()) {
                         bot.updateStats();
                         bot.hookGameEngine();
+                        if (bot.state.rescueFightActive || bot.state.rescueInspectingOccupied) {
+                            return;
+                        }
                         bot.checkMainCopyStall();
                         if (typeof bot.checkBattleWatchdog === "function") {
                             bot.checkBattleWatchdog();
@@ -19149,7 +19280,7 @@
             const tm = mm.TaskModel;
             const stm = mm.ServerTimeModel;
             const serverTime = (stm && typeof stm.getServerTime === "function") ? Number(stm.getServerTime()) : Math.floor(Date.now() / 1000);
-            const curPower = Number(bot.stats.power || (pm && pm.getRoleAttrByAttrId && pm.getRoleAttrByAttrId(105)) || 0);
+            const curPower = (typeof bot.getMyFullPower === "function" ? Number(bot.getMyFullPower() || 0) : 0) || Number(bot.stats.basePower || bot.stats.power || (pm && pm.getRoleAttrByAttrId && pm.getRoleAttrByAttrId(105)) || 0);
 
             // PHẦN C (ƯU TIÊN NHẬN QUÀ 0ms TRƯỚC KHI ĐÁNH TRẬN): RƯƠNG CHIẾN LỢI PHẨM & NHIỆM VỤ BANG CHIẾN (GuildWar = 133 — 0 KNB)
             try {
@@ -19180,7 +19311,7 @@
 
             // PHẦN A: BOSS THẾ GIỚI (Wboss2 — ModuleOpen = 96, Gameplay = 8)
             try {
-                if (bot.isSafeModuleOpen(96) && mm.WorldBossModel) {
+                if (bot.isSafeModuleOpen(96) && mm.WorldBossModel && !bot.state.rescueFightActive && !bot.state.rescueInspectingOccupied) {
                     const wbm = mm.WorldBossModel;
                     const wbCfgMod = safeRequire("WorldBossConfiger");
                     const wbCfg = gm.WorldBossConfiger || window.WorldBossConfiger || (wbCfgMod && (wbCfgMod.WorldBossConfiger || wbCfgMod.default));
@@ -19218,23 +19349,28 @@
                         const canFightNow = (typeof wbm.checkCanFight === "function") && wbm.checkCanFight();
                         const wbClickNextEvt = (evType && evType.battle_ClickNext) || "battle_ClickNext";
                         if (canFightNow && disp && !bot.isBattling() && !bot.isManualCombatViewOpen()) {
+                            if (!bot.state.wbossFightCountByBoss) bot.state.wbossFightCountByBoss = {};
+                            if (!bot.state.wbossCooldownUntilByBoss) bot.state.wbossCooldownUntilByBoss = {};
                             for (let i = 0; i < bList.length; i++) {
                                 const b = bList[i];
                                 if (!b || !b._boss || serverTime < Number(b._s_sec || 0)) continue;
+                                if (bot.state.wbossCooldownUntilByBoss[b._boss] && Date.now() < bot.state.wbossCooldownUntilByBoss[b._boss]) continue;
                                 const cfg = (typeof wbCfg.getBossDataById === "function") ? wbCfg.getBossDataById(b._boss) : null;
                                 if (!cfg) continue;
 
+                                const localFightCnt = Number(bot.state.wbossFightCountByBoss[b._boss] || 0);
                                 let shouldFight = false;
                                 if (Number(cfg.type) === 2) {
-                                    shouldFight = (typeof wbm.getCanFightTime === "function") && Number(wbm.getCanFightTime(b._times || 0)) > 0;
+                                    shouldFight = (typeof wbm.getCanFightTime === "function") && Number(wbm.getCanFightTime(b._times || 0)) > 0 && localFightCnt < 5;
                                 } else {
-                                    // Boss nội服 (type 1): Đánh khi chưa có lượt đánh nào (_times === 0) hoặc khi LC tăng mạnh >=15%
-                                    const unhit = Number(b._times || 0) === 0;
-                                    const powerJumped = bot.state.wbossLocalLastPower > 0 && curPower >= bot.state.wbossLocalLastPower * 1.15 && bot.canDo("wboss_local_rehit", 900);
+                                    // Boss nội服 (type 1): Đánh đúng 1 lần khi chưa có lượt đánh nào (_times === 0 & localFightCnt === 0) hoặc khi LC thực 6 tướng tăng >=15%
+                                    const unhit = Number(b._times || 0) === 0 && localFightCnt === 0;
+                                    const powerJumped = bot.state.wbossLocalLastPower > 0 && curPower >= bot.state.wbossLocalLastPower * 1.15 && bot.canDo("wboss_local_rehit", 1800);
                                     shouldFight = unhit || powerJumped;
                                 }
 
-                                if (shouldFight && bot.tryDo("wboss_fight_" + b._boss, 12)) {
+                                if (shouldFight && bot.tryDo("wboss_fight_" + b._boss, 60)) {
+                                    if (bot.state.rescueFightActive || bot.state.rescueInspectingOccupied) break;
                                     const fmInst = window.FightManager || gm.FightManager;
                                     if (fmInst && typeof fmInst.haveFight === "function" && fmInst.haveFight(8)) break;
 
@@ -19242,12 +19378,14 @@
                                         await bot.restoreFullCombatArray("wboss");
                                         await bot.sleep(100);
                                     }
+                                    if (bot.state.rescueFightActive || bot.state.rescueInspectingOccupied) break;
                                     if (mm.HeroBagModel && !bot.ensureGameplayTeamReady(6, 1, null, null)) break;
 
                                     const startTs = Date.now();
                                     bot.state.wbossBgFighting = true;
+                                    bot.state.wbossFightCountByBoss[b._boss] = localFightCnt + 1;
                                     if (typeof bot.markAutoBattle === "function") bot.markAutoBattle(8, 25000);
-                                    if (Number(cfg.type) === 1) {
+                                    if (Number(cfg.type) === 1 && curPower > 0) {
                                         bot.state.wbossLocalLastPower = curPower;
                                         bot.markDone("wboss_local_rehit");
                                     }
@@ -19261,14 +19399,29 @@
                                             skipArray: true,
                                             skipBattle: true
                                         });
+                                        let wbStartedOk = false;
                                         for (let w = 0; w < 25; w++) {
                                             await bot.sleep(70);
                                             const lastWb = bot.state.lastBattleByType && bot.state.lastBattleByType[8];
-                                            if (lastWb && lastWb.time >= startTs) break;
+                                            if (lastWb && lastWb.time >= startTs) {
+                                                wbStartedOk = true;
+                                                break;
+                                            }
                                         }
                                         bot.closeBattleViews();
-                                        bot.log(`🐉 [Boss Thế Giới] Đã khiêu chiến ngầm Boss #${b._boss}!`);
-                                        return true;
+                                        if (wbStartedOk) {
+                                            if (Number(cfg.type) !== 2) {
+                                                bot.state.wbossCooldownUntilByBoss[b._boss] = Date.now() + 900000;
+                                            }
+                                            bot.log(`🐉 [Boss Thế Giới] Đã khiêu chiến ngầm Boss #${b._boss}!`);
+                                            return true;
+                                        } else {
+                                            // Boss đã kết thúc hoạt động (mã 231) hoặc hết lượt -> Khóa 30 phút để KHÔNG lặp lại!
+                                            bot.state.wbossCooldownUntilByBoss[b._boss] = Date.now() + 1800000;
+                                            if (bot.state.lastServerNotice && !bot.state.rescueFightActive) {
+                                                bot.state.lastServerNotice = null;
+                                            }
+                                        }
                                     } finally {
                                         bot.state.wbossBgFighting = false;
                                         bot.state.lastBattleEndTime = Date.now() + 60;

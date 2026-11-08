@@ -306,6 +306,37 @@ async function pushLiveTelemetryToGitHub(telemetryObj, sessionState) {
     return false;
 }
 
+async function fetchRemoteYieldEndTime(sessionState) {
+    if (!isGitHubActions || typeof fetch !== 'function') return 0;
+    const token = process.env.GH_TOKEN || '';
+    const repo = process.env.GH_REPO || '';
+    if (!token || !repo) return 0;
+    try {
+        const getRes = await fetch(`https://api.github.com/repos/${repo}/contents/live_telemetry.json?ref=telemetry`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+                'User-Agent': '3Q-AutoBot-Telemetry/3.8'
+            },
+            signal: AbortSignal.timeout(6000)
+        });
+        if (getRes.status === 200) {
+            const getJson = await getRes.json();
+            if (sessionState && getJson && getJson.sha) {
+                sessionState._telemetryFileSha = getJson.sha;
+            }
+            if (getJson && getJson.content) {
+                const raw = Buffer.from(getJson.content, 'base64').toString('utf8');
+                const parsed = JSON.parse(raw);
+                return Number(parsed && parsed.yieldEndTime) || 0;
+            }
+        }
+    } catch (e) { }
+    return 0;
+}
+
 function saveConfigToDisk() {
     try {
         if (!isGitHubActions) {
@@ -2378,9 +2409,22 @@ async function run() {
 
     try {
         const yieldFile = path.join(__dirname, '.yield_until');
+        let initialYieldEnd = 0;
         if (fs.existsSync(yieldFile)) {
             try {
-                const yEnd = parseInt(fs.readFileSync(yieldFile, 'utf8').trim(), 10);
+                initialYieldEnd = parseInt(fs.readFileSync(yieldFile, 'utf8').trim(), 10) || 0;
+            } catch (eYFile) {}
+        }
+        if (initialYieldEnd <= Date.now() + 5000 && isGitHubActions) {
+            const remoteYieldEnd = await fetchRemoteYieldEndTime(sessionState);
+            if (remoteYieldEnd > initialYieldEnd) {
+                initialYieldEnd = remoteYieldEnd;
+                try { fs.writeFileSync(yieldFile, String(initialYieldEnd), 'utf8'); } catch (eW) {}
+            }
+        }
+        if (initialYieldEnd > Date.now() + 5000) {
+            try {
+                const yEnd = initialYieldEnd;
                 const remainingMs = yEnd - Date.now();
                 if (remainingMs > 5000) {
                     const remM = Math.ceil(remainingMs / 60000);
@@ -2400,6 +2444,7 @@ async function run() {
                     sessionState.isYielding = false;
                     sessionState.yieldEndTime = 0;
                     sessionState.forceResumeFromYield = false;
+                    sessionState.lastResumeFromYieldAt = Date.now();
                     if (Date.now() >= yEnd || yForced || sessionState.stopRequested) {
                         try { fs.unlinkSync(yieldFile); } catch (e) {}
                     }
@@ -2510,13 +2555,15 @@ async function run() {
                 sessionState.forceResumeFromYield = false;
                 sessionState.deadSessionStreak = 0;
 
-                const baseWaitMin = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
-                if (!isManual && sessionState.lastResumeFromYieldAt && (Date.now() - sessionState.lastResumeFromYieldAt < 8 * 60 * 1000)) {
+                const baseWaitMin = isManual
+                    ? Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10)
+                    : Math.max(20, Number(CONFIG.settings.yield_wait_minutes) || 20);
+                if (!isManual && sessionState.lastResumeFromYieldAt && (Date.now() - sessionState.lastResumeFromYieldAt < 35 * 60 * 1000)) {
                     sessionState.consecutiveYieldCount = (sessionState.consecutiveYieldCount || 1) + 1;
                 } else {
                     sessionState.consecutiveYieldCount = 1;
                 }
-                const waitMin = isManual ? baseWaitMin : Math.min(30, baseWaitMin + (sessionState.consecutiveYieldCount - 1) * 5);
+                const waitMin = isManual ? baseWaitMin : Math.min(35, baseWaitMin + (sessionState.consecutiveYieldCount - 1) * 10);
                 writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động kết nối lại...`);
 
                 // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
@@ -2566,6 +2613,38 @@ async function run() {
                 const waitEnd = Date.now() + (waitMin * 60 * 1000);
                 sessionState.yieldEndTime = waitEnd;
                 try { fs.writeFileSync(yieldFile, String(waitEnd), 'utf8'); } catch (e) {}
+                if (isGitHubActions && process.env.GH_TOKEN && process.env.GH_REPO) {
+                    try {
+                        const vnYield = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+                        const telStYield = sessionState.lastKnownStats || {};
+                        const elapsedYieldMin = Math.max(0.1, (Date.now() - sessionState.startTime) / 60000);
+                        await pushLiveTelemetryToGitHub({
+                            schemaVersion: '3.8',
+                            runNumber: Number(process.env.GH_RUN_NUMBER || 0),
+                            runId: Number(process.env.GH_RUN_ID || 0),
+                            updatedAtIso: new Date().toISOString(),
+                            updatedAtVn: vnYield,
+                            uptimeMin: Number(elapsedYieldMin.toFixed(2)),
+                            server: CONFIG.server,
+                            isLobbyHealthy: false,
+                            isYielding: true,
+                            yieldEndTime: waitEnd,
+                            roleName: telStYield.roleName || null,
+                            level: Number(telStYield.level || 0),
+                            stage: Number(telStYield.stage || 0),
+                            towerFloor: Number(telStYield.towerFloor || 0),
+                            basePower: Number(telStYield.basePower || 0),
+                            currentPower: Number(telStYield.power || 0),
+                            initialJade: sessionState.initialJade,
+                            jade: Number(telStYield.jade || 0),
+                            totalRescued: sessionState.baseRescuedCount || 0,
+                            totalRescuedKnb: sessionState.baseRescuedKnb || 0,
+                            totalScanned: sessionState.baseInspectedHomes || 0,
+                            toggles: CONFIG.toggles,
+                            recentLogs: RECENT_LOGS.slice(-35)
+                        }, sessionState);
+                    } catch (ePushY) {}
+                }
 
                 writeLog(`⏳ [Nhường Máy] Đang chờ ${waitMin} phút (hoặc bấm "▶️ Chạy Lại Ngay" / "🛑 Dừng Hẳn Bot" trên GUI / Telegram)...`);
                 let lastCountdownLog = Date.now();
@@ -2602,10 +2681,13 @@ async function run() {
                 }
 
                 writeLog(`🔄 [Nhường Máy] ${wasForcedResume ? "Nhận lệnh Chạy Lại Ngay" : "Đã hết " + waitMin + " phút nhường máy"}! Đang đăng nhập lại mới 100%...`);
+                sessionState.lastResumeFromYieldAt = Date.now();
 
                 const resumed = await safeLaunchAndEnterGame(sessionState, 4);
+                if (sessionState.kickDetectedFromLog || sessionState.manualYieldRequested) {
+                    continue;
+                }
                 if (resumed && resumed.browser && resumed.inGame === true) {
-                    sessionState.lastResumeFromYieldAt = Date.now();
                     activeBrowser = resumed.browser;
                     activePage = resumed.page;
                     sessionState.activeBrowser = activeBrowser;
