@@ -1317,10 +1317,18 @@ async function launchAndEnterGame(sessionState) {
             return;
         }
 
-        const isHotfixKickLog = m.includes('_res=3');
+        const isRoutineNetworkDrop = m.includes('_res=0') || m.includes('_res=3') || m.includes('mất phiên mạng') || m.includes('hết hạn phiên');
+        if (isRoutineNetworkDrop) {
+            if (!sessionState.isYielding && !sessionState.kickDetectedFromLog) {
+                sessionState.freshReloginRequested = true;
+                sessionState.freshReloginReason = m || 'hết hạn phiên / rớt mạng';
+            }
+            return;
+        }
+
         const isTrueDeviceKick = entry.kickNow === true ||
-            m.includes('[Nhường Máy] Khẩn cấp') ||
-            (!isHotfixKickLog && (m.includes('LoginKickSc') || m.includes('onLoginKickSc') || m.includes('evt_LoginKickSc'))) ||
+            m.includes('_res=1') ||
+            m.includes('_res=2') ||
             mLower.includes('thiết bị khác') ||
             mLower.includes('nơi khác') ||
             mLower.includes('trùng lặp đăng nhập') ||
@@ -2320,6 +2328,15 @@ async function run() {
             activePage = session.page;
             sessionState.activeBrowser = activeBrowser;
             sessionState.activePage = activePage;
+
+            // Tự động kích hoạt chuỗi 1-Click: 100/100 NV Ngày + Minigames + Mua Vàng + Chiêu Binh + Cấm Địa sau khi vào game 8 giây
+            if (!sessionState.initialDailyTriggered) {
+                sessionState.initialDailyTriggered = true;
+                writeLog('🚀 [Khởi Động] Tự động kích hoạt chuỗi 1-Click: 100/100 NV Ngày + Minigames + Mua Vàng + Chiêu Binh + Cấm Địa sau 8 giây...');
+                setTimeout(() => {
+                    void runOneClickDailyTaskAsync('Khởi Động Tự Động');
+                }, 8000);
+            }
         }
 
         if (sessionState.stopRequested || sessionState.maintenanceDetected) {

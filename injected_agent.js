@@ -2811,11 +2811,11 @@
                         try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
                         try { if (this._wsClient && typeof this._wsClient.close === "function") this._wsClient.close(); } catch (e) { }
                         const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                        if (resCode !== 3 && !isSpamKick) {
+                        if ((resCode === 1 || resCode === 2) && !isSpamKick) {
                             bot.triggerEmergencyYield("Đăng nhập trùng thiết bị (onLoginKickSc _res=" + resCode + ")");
                         } else {
                             bot.state._sessionCode66Count = 0;
-                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode + (isSpamKick ? " (server rate-limit sau err_code_66)" : ""));
+                            bot.requestFreshRelogin("onLoginKickSc _res=" + resCode + (isSpamKick ? " (server rate-limit sau err_code_66)" : " (mất phiên mạng)"));
                         }
                         return;
                     };
@@ -8669,12 +8669,12 @@
                                     const kData = args[0] || {};
                                     const kRes = Number(kData._res != null ? kData._res : (kData._code != null ? kData._code : 0));
                                     const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
-                                    if (kRes !== 3 && !isSpamKick) {
+                                    if ((kRes === 1 || kRes === 2) && !isSpamKick) {
                                         bot.log("📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=" + kRes + ") -> Nhường máy ngay!");
                                         bot.triggerEmergencyYield("Dispatcher evt_LoginKickSc (_res=" + kRes + ")");
                                     } else if (typeof bot.requestFreshRelogin === "function") {
                                         bot.state._sessionCode66Count = 0;
-                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes + (isSpamKick ? " (server rate-limit sau err_code_66)" : ""));
+                                        bot.requestFreshRelogin("evt_LoginKickSc _res=" + kRes + (isSpamKick ? " (server rate-limit sau err_code_66)" : " (mất phiên mạng)"));
                                     }
                                 }
                                 const evType = (gm && gm.EventType) || window.EventType || {};
