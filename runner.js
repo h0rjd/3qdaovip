@@ -2406,22 +2406,10 @@ async function run() {
                 continue;
             }
 
-            // Xử lý yêu cầu khởi động lại cửa sổ trình duyệt từ GUI hoặc làm mới Token tức thì khi rớt mạng 4 lần / hết hạn phiên.
-            // ĐẶC BIỆT: Nếu vừa mới tự động làm mới phiên trong vòng 180s mà lại tiếp tục bị văng (dấu hiệu Điện thoại đang giữ phiên ngầm không gửi LoginKickSc) -> Tự chuyển sang Nhường Máy 5 phút, tuyệt đối không đá lại Điện thoại sau 1-2p!
+            // BẢO VỆ CHỐNG NHƯỜNG MÁY NHẦM: Tuyệt đối KHÔNG BAO GIỜ ép Nhường Máy trên các lý do mất phiên mạng, rớt socket (_res=0, _res=3, socket drop).
+            // Nhường Máy chỉ kích hoạt khi THỰC SỰ có thiết bị khác (Điện thoại/PC) đăng nhập (isTrueDeviceKick: _res=1, _res=2, hoặc popup trùng phiên).
             let hasImmediateKick = !!(sessionState.kickDetectedFromLog && CONFIG.settings.yield_on_kick) || !!sessionState.manualYieldRequested;
-            if (!hasImmediateKick && sessionState.freshReloginRequested && !sessionState.restartBrowserRequested && CONFIG.settings.yield_on_kick) {
-                const reasonNow = String(sessionState.freshReloginReason || '');
-                const isNotHotfixOrSpam = !reasonNow.includes('_res=3') && !reasonNow.includes('err_code_66');
-                const sinceLastAutoRelogin = Date.now() - Number(sessionState.lastAutoReloginAt || 0);
-                if (isNotHotfixOrSpam && sessionState.lastAutoReloginAt && sinceLastAutoRelogin < 180000) {
-                    writeLog(`📱 [Nhường Máy] Phát hiện mất phiên lần thứ 2 liên tiếp sau ${Math.round(sinceLastAutoRelogin / 1000)}s (${reasonNow}) -> Có thiết bị đang online, kích hoạt Nhường Máy ${CONFIG.settings.yield_wait_minutes || 5} phút!`);
-                    sessionState.freshReloginRequested = false;
-                    sessionState.freshReloginReason = '';
-                    sessionState.kickDetectedFromLog = true;
-                    sessionState.isYielding = true;
-                    hasImmediateKick = true;
-                }
-            }
+
             if (!hasImmediateKick && (sessionState.restartBrowserRequested || sessionState.freshReloginRequested)) {
                 const isFreshToken = !!sessionState.freshReloginRequested && !sessionState.restartBrowserRequested;
                 const freshReason = sessionState.freshReloginReason || 'hết hạn phiên / rớt mạng';
@@ -2430,7 +2418,7 @@ async function run() {
                 sessionState.freshReloginReason = '';
                 if (isFreshToken) sessionState.lastAutoReloginAt = Date.now();
                 writeLog(isFreshToken
-                    ? `🔄 [Watchdog] Làm mới phiên đăng nhập tức thì (${freshReason}) -> Kết nối lại ngay...`
+                    ? `🔄 [Watchdog] Làm mới phiên đăng nhập tức thì (${freshReason}) -> Kết nối lại ngay (không nhường máy)...`
                     : "[GUI] Đang khởi tạo lại cửa sổ trình duyệt theo yêu cầu...");
                 if (sessionState.lastKnownStats) {
                     sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
@@ -2708,16 +2696,8 @@ async function run() {
                 }
                 if (sessionState.deadSessionStreak >= 9) {
                     sessionState.deadSessionStreak = 0;
-                    const sinceLastAuto = Date.now() - Number(sessionState.lastAutoReloginAt || 0);
-                    if (CONFIG.settings.yield_on_kick) {
-                        const waitYieldM = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
-                        writeLog(`📱 [Nhường Máy] Phát hiện mất kết nối / kẹt trạng thái quá 90s (nghi do Điện thoại đang chơi) -> Tạm nghỉ ${waitYieldM} phút để nhường máy!`);
-                        sessionState.kickDetectedFromLog = true;
-                        sessionState.isYielding = true;
-                        continue;
-                    }
                     sessionState.lastAutoReloginAt = Date.now();
-                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 90s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100%!`);
+                    writeLog(`🔄 [Watchdog] Phát hiện kẹt trạng thái "Đang tải..." / mất kết nối quá 90s -> Đóng trình duyệt và tự động đăng nhập lại sạch 100% (không nhường máy)...`);
                     if (sessionState.lastKnownStats) {
                         sessionState.baseRescuedCount += Number(sessionState.lastKnownStats.rescuedCount || 0);
                         sessionState.baseRescuedKnb += Number(sessionState.lastKnownStats.rescuedKnbTotal || 0);
