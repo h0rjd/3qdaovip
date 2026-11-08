@@ -18,11 +18,11 @@
     "speed_hack": 2,
     "yield_on_kick": true,
     "yield_wait_minutes": 10,
-    "bot_stopped": true
+    "bot_stopped": false
   },
   "telegram": {
-    "bot_token": "",
-    "chat_id": "",
+    "bot_token": "8918744112:AAEIx-V2-lf3SdFcYG6jDP7n3FkkhrrT1Tg",
+    "chat_id": "7182418544",
     "report_interval_min": 30
   },
   "toggles": {

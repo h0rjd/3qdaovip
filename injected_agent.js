@@ -897,6 +897,48 @@
                    s.includes("异地登录");
         },
 
+        disarmNetworkCompletely: function () {
+            try {
+                const gm = window.G_Mapping;
+                const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                if (!nw) return;
+                nw.isManualClose = true;
+                nw._isCanReconnect = false;
+                nw.isReconnecting = false;
+                nw._needFullRelogin = false;
+                nw.reconnect = function () { };
+                nw.connect = function () { };
+                nw.initWebSocket = function () { };
+                nw.sendMessage = function () { };
+                try { if (nw.heartBeat && typeof nw.heartBeat.stop === "function") nw.heartBeat.stop(); } catch (eHb) { }
+                try {
+                    if (nw._wsClient) {
+                        const wsc = nw._wsClient;
+                        wsc.callbacks = {};
+                        wsc.reconnect = function () { };
+                        wsc.connect = function () { };
+                        if (typeof wsc.cleanup === "function") {
+                            try { wsc.cleanup(); } catch (eCl) { }
+                        }
+                        if (wsc.ws) {
+                            try {
+                                wsc.ws.onclose = null;
+                                wsc.ws.onerror = null;
+                                wsc.ws.onmessage = null;
+                                wsc.ws.onopen = null;
+                                wsc.ws.close();
+                            } catch (eWs) { }
+                            wsc.ws = null;
+                        }
+                        if (typeof wsc.close === "function") {
+                            try { wsc.close(); } catch (eC) { }
+                        }
+                    }
+                } catch (eWsc) { }
+                try { if (nw.socket && typeof nw.socket.close === "function") nw.socket.close(); } catch (eSock) { }
+            } catch (eDisarm) { }
+        },
+
         requestFreshRelogin: function (reason) {
             if (bot.state.kickedByOtherDevice || window.__BOT_YIELDING__ || bot.state.needFreshRelogin) return;
             bot.state.needFreshRelogin = true;
@@ -911,18 +953,7 @@
                 try { clearTimeout(bot.state._reconnectTimer); } catch (e) { }
                 bot.state._reconnectTimer = null;
             }
-            try {
-                const gm = window.G_Mapping;
-                const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
-                if (nw) {
-                    nw.isManualClose = true;
-                    nw._isCanReconnect = false;
-                    nw.isReconnecting = false;
-                    if (nw.heartBeat && typeof nw.heartBeat.stop === "function") nw.heartBeat.stop();
-                    if (nw.socket && typeof nw.socket.close === "function") nw.socket.close();
-                    if (nw._wsClient && typeof nw._wsClient.close === "function") nw._wsClient.close();
-                }
-            } catch (e) { }
+            bot.disarmNetworkCompletely();
             if (typeof window.pyOnBotLog === "function") {
                 try {
                     window.pyOnBotLog({
@@ -956,19 +987,8 @@
                 bot.state._reconnectTimer = null;
             }
 
-            // 2. Cắt đứt kết nối mạng ngay lập tức để giải phóng hoàn toàn socket máy chủ cho điện thoại
-            try {
-                const gm = window.G_Mapping;
-                const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
-                if (nw) {
-                    nw.isManualClose = true;
-                    nw._isCanReconnect = false;
-                    nw.isReconnecting = false;
-                    if (nw.heartBeat && typeof nw.heartBeat.stop === 'function') nw.heartBeat.stop();
-                    if (nw.socket && typeof nw.socket.close === 'function') nw.socket.close();
-                    if (nw._wsClient && typeof nw._wsClient.close === 'function') nw._wsClient.close();
-                }
-            } catch (e) { }
+            // 2. Vô hiệu hóa hoàn toàn WebSocket & callbacks trước khi đóng để TUYỆT ĐỐI KHÔNG tự reconnect đá ngược Điện thoại!
+            bot.disarmNetworkCompletely();
 
             // 3. Gửi callback khẩn cấp ra runner.js để đóng cửa sổ Chromium lập tức (<50ms)
             if (typeof window.pyOnBotLog === 'function') {
@@ -2803,7 +2823,40 @@
                 if (nwProto && nwProto !== Object.prototype && !Object.prototype.hasOwnProperty.call(nwProto, "__QA_KICK_GUARD__")) {
                     nwProto.__QA_KICK_GUARD__ = true;
 
-                    // 1. Hook onLoginKickSc: Mọi gói LoginKickSc (10103) từ máy chủ ngoại trừ _res === 3 (Hotfix/Bảo trì Desc.24) và rate-limit sau err_code_66 đều là đăng nhập thiết bị khác -> Nhường máy 10 phút ngay!
+                    // 0. Hook reconnect / connect / initWebSocket: Chặn đứng mọi kết nối lại khi đang Nhường Máy để KHÔNG BAO GIỜ đá ngược Điện thoại!
+                    const origNwReconnect = nwProto.reconnect;
+                    if (origNwReconnect) {
+                        nwProto.reconnect = function () {
+                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__ || this.kickData) {
+                                this._isCanReconnect = false;
+                                this.isReconnecting = false;
+                                return;
+                            }
+                            return origNwReconnect.apply(this, arguments);
+                        };
+                    }
+                    const origNwConnect = nwProto.connect;
+                    if (origNwConnect) {
+                        nwProto.connect = function () {
+                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__ || this.kickData) {
+                                this._isCanReconnect = false;
+                                this.isReconnecting = false;
+                                return;
+                            }
+                            return origNwConnect.apply(this, arguments);
+                        };
+                    }
+                    const origNwInitWs = nwProto.initWebSocket;
+                    if (origNwInitWs) {
+                        nwProto.initWebSocket = function () {
+                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__ || this.kickData) {
+                                return;
+                            }
+                            return origNwInitWs.apply(this, arguments);
+                        };
+                    }
+
+                    // 1. Hook onLoginKickSc: Mọi gói LoginKickSc (10103) từ máy chủ ngoại trừ _res === 3 (Hotfix/Bảo trì Desc.24) và rate-limit sau err_code_66 đều là đăng nhập thiết bị khác -> Nhường máy ngay!
                     const origKick = nwProto.onLoginKickSc;
                     nwProto.onLoginKickSc = function (event, data) {
                         const payload = (data && data._res != null) ? data : ((event && event._res != null) ? event : (event || data || {}));
@@ -2814,8 +2867,6 @@
                         this._isCanReconnect = false;
                         this.isManualClose = true;
                         this.isReconnecting = false;
-                        try { if (this.heartBeat && typeof this.heartBeat.stop === "function") this.heartBeat.stop(); } catch (e) { }
-                        try { if (this._wsClient && typeof this._wsClient.close === "function") this._wsClient.close(); } catch (e) { }
                         const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
                         if (resCode !== 3 && !isSpamKick) {
                             bot.triggerEmergencyYield("Đăng nhập trùng thiết bị (onLoginKickSc _res=" + resCode + ")");
@@ -2933,7 +2984,7 @@
                     const origMaxReconnect = nwProto.onMaxReconnect;
                     if (origMaxReconnect) {
                         nwProto.onMaxReconnect = function () {
-                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin) return;
+                            if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__ || this.kickData) return;
                             if (bot.state.hasLoggedInOnce) {
                                 if ((this._reconnectFailStreak || 0) >= 3) {
                                     bot.requestFreshRelogin("onMaxReconnect sau chuỗi rớt mạng");
@@ -2951,11 +3002,24 @@
                         };
                     }
 
-                    // 3. Hook showErrorTips: Phân biệt chính xác đăng nhập thiết bị khác vs thông báo rớt mạng thường quy (Desc.23: "Mạng bị ngắt, vui lòng đăng nhập lại.")
+                    // 3. Hook showErrorTips: Kiểm tra this.kickData TRƯỚC TIÊN (vì onClose gốc dùng Desc.23 "Mạng bị ngắt, vui lòng đăng nhập lại." cho _res=1 kick!)
                     const origShowErrorTips = nwProto.showErrorTips;
                     nwProto.showErrorTips = function (tip) {
                         const tipStr = String(tip || "");
                         const tipLower = tipStr.toLowerCase();
+                        const kickObj = this.kickData;
+                        if (kickObj) {
+                            const kickRes = Number(kickObj._res != null ? kickObj._res : (kickObj._code != null ? kickObj._code : 0));
+                            this.kickData = null;
+                            const isSpamKickTip = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
+                            if (kickRes !== 3 && !isSpamKickTip) {
+                                bot.triggerEmergencyYield("showErrorTips with kickData _res=" + kickRes + " (" + tipStr + ")");
+                            } else {
+                                bot.state._sessionCode66Count = 0;
+                                bot.requestFreshRelogin("showErrorTips kickData _res=" + kickRes);
+                            }
+                            return;
+                        }
                         if (bot.isTrueDuplicateDeviceKickTip(tipStr)) {
                             bot.triggerEmergencyYield("showErrorTips: " + tipStr);
                             return;
@@ -2978,6 +3042,24 @@
                         this.isReconnecting = false;
                         bot.scheduleSafeReconnect(this, "error_tips", 2000);
                     };
+                }
+                // Đồng bộ lại callbacks đã bind sẵn trong nwInst._wsClient (vốn được khởi tạo ở LoginView trước khi tiêm injected_agent.js!)
+                const nwInst = (NetWorkClass && NetWorkClass.Ins) || (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                if (nwInst && nwInst._wsClient && nwInst._wsClient.callbacks && !nwInst._wsClient.__QA_BOUND_HOOKS__) {
+                    nwInst._wsClient.__QA_BOUND_HOOKS__ = true;
+                    if (typeof nwInst.onClose === "function") nwInst._wsClient.callbacks.onClose = nwInst.onClose.bind(nwInst);
+                    if (typeof nwInst.onMaxReconnect === "function") nwInst._wsClient.callbacks.onMaxReconnect = nwInst.onMaxReconnect.bind(nwInst);
+                }
+                if (nwInst) {
+                    const dispKick = (gm && gm.Dispatcher) || window.Dispatcher;
+                    const kickMap = dispKick && dispKick._typeMap && dispKick._typeMap["evt_LoginKickSc"];
+                    if (Array.isArray(kickMap) && typeof nwInst.onLoginKickSc === "function") {
+                        for (let ki = 0; ki < kickMap.length; ki++) {
+                            if (kickMap[ki] && kickMap[ki].thisObj === nwInst) {
+                                kickMap[ki].listener = nwInst.onLoginKickSc;
+                            }
+                        }
+                    }
                 }
 
                 // 4. Hook LoginController & LoginUtil: Ngăn chặn Scheduler.unscheduleAll(), LoadingView đè giao diện và ModelManager.clear()
@@ -3016,13 +3098,25 @@
                             }
                             const tipStr = String(tip || "");
                             const tipLower = tipStr.toLowerCase();
+                            const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                            if (nw && nw.kickData) {
+                                const kickRes = Number(nw.kickData._res != null ? nw.kickData._res : (nw.kickData._code != null ? nw.kickData._code : 0));
+                                nw.kickData = null;
+                                const isSpamKickLc = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
+                                if (kickRes !== 3 && !isSpamKickLc) {
+                                    bot.triggerEmergencyYield("LoginController tip with kickData _res=" + kickRes + " (" + tipStr + ")");
+                                } else {
+                                    bot.state._sessionCode66Count = 0;
+                                    bot.requestFreshRelogin("LoginController tip kickData _res=" + kickRes);
+                                }
+                                return;
+                            }
                             if (bot.isTrueDuplicateDeviceKickTip(tipStr)) {
                                 bot.triggerEmergencyYield("LoginController tip: " + tipStr);
                                 return;
                             }
                             if (bot.state.kickedByOtherDevice || bot.state.needFreshRelogin || window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__) return;
                             bot.state._loginTipInterceptCount = (bot.state._loginTipInterceptCount || 0) + 1;
-                            const nw = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
                             if (tipLower.includes("có nội dung mới") || bot.state._loginTipInterceptCount >= 3 || (nw && (nw._reconnectFailStreak || 0) >= 3)) {
                                 bot.requestFreshRelogin("LoginController tip (" + bot.state._loginTipInterceptCount + "x): " + tipStr);
                                 return;
@@ -3074,6 +3168,17 @@
                             }
                             const txtRaw = String((opt && (opt.text || opt.content || opt.title)) || "");
                             const txt = txtRaw.toLowerCase();
+                            const nwAlert = (gm && gm.NetWork && gm.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                            if (nwAlert && nwAlert.kickData) {
+                                const kickRes = Number(nwAlert.kickData._res != null ? nwAlert.kickData._res : (nwAlert.kickData._code != null ? nwAlert.kickData._code : 0));
+                                nwAlert.kickData = null;
+                                if (kickRes !== 3) {
+                                    bot.triggerEmergencyYield("AlertUtil with kickData _res=" + kickRes + " (" + txtRaw + ")");
+                                } else {
+                                    bot.requestFreshRelogin("AlertUtil kickData _res=" + kickRes);
+                                }
+                                return [null, ""];
+                            }
                             if (bot.isTrueDuplicateDeviceKickTip(txtRaw)) {
                                 bot.triggerEmergencyYield("AlertUtil kick popup: " + txtRaw);
                                 return [null, ""];
@@ -6430,6 +6535,27 @@
                                     // Gói HeroSetArrayCs (10332) đổi đội hình dò nhà quá nhanh -> đánh dấu reject để giữ chuẩn thống kê tầng & KHÔNG khóa chiến đấu 3.5s!
                                     window.__LAST_10332_REJECT_TS__ = Date.now();
                                     window.__LAST_10332_SENT_TS__ = Date.now();
+                                    return;
+                                } else if (proto === 13408 || proto === 13410 || proto === 13400 || proto === 13404 || proto === 13406) {
+                                    // Gói Côn Lôn Khư (FlipClickCs=13408 / FlipResetCs=13410) báo thao tác nhanh -> giãn nhịp ngầm Côn Lôn 8s, giải phóng reqLock, KHÔNG spam log!
+                                    bot.state.lastKunlunClickTs = Date.now() + 3500;
+                                    bot.state.kunlunBoardWaitUntil = Math.max(bot.state.kunlunBoardWaitUntil || 0, Date.now() + 8000);
+                                    try {
+                                        const mmKl = window.ModelManager || (window.G_Mapping && window.G_Mapping.ModelManager);
+                                        if (mmKl && mmKl.KunlunModel) {
+                                            mmKl.KunlunModel.reqLock = false;
+                                            mmKl.KunlunModel.boxBlockIndexsRequest = [];
+                                            mmKl.KunlunModel.boxBlockIndexsGain = [];
+                                        }
+                                    } catch (eKl4) { }
+                                    return;
+                                } else if (proto === 11710 || proto === 11714 || proto === 11720 || proto === 10513 || proto === 10515 || proto === 15065 || proto === 11010 || proto === 11012 || proto === 11014 || proto === 11016) {
+                                    // Gói Đấu Trường / Chiêu Binh / Tam Quốc / Nhận Nhiệm Vụ báo thao tác nhanh -> giãn nhịp ngầm, KHÔNG khóa chiến đấu & KHÔNG spam log!
+                                    if (proto === 11710 || proto === 11714 || proto === 11720) {
+                                        bot.state.arenaFreeExhaustedUntil = Math.max(bot.state.arenaFreeExhaustedUntil || 0, Date.now() + 60000);
+                                    } else if (proto === 11010 || proto === 11012 || proto === 11014 || proto === 11016) {
+                                        bot.state.taskClaimCoolUntil = Date.now() + 25000;
+                                    }
                                     return;
                                 } else if (proto === 10550 || proto === 10552 || proto === 10305 || proto === 10334 || proto === 11801 || proto === 10901 || proto === 10903 || proto === 10905 || proto === 12411 || proto === 10560 || proto === 10562 || proto === 15300 || proto === 14713) {
                                     // Gói dò danh sách Gia Viên / BXH / Phúc lợi / Hoa KHÔNG phải trận đánh -> chỉ giãn nhịp nhẹ 340ms cho 10550, KHÔNG khóa chiến đấu 3.5s!
@@ -18661,9 +18787,11 @@
     // ====================================================================
     bot.runAutoSoldierTrainSmart = async function (force) {
         if (!bot.isReady() || bot.isDisconnected()) return false;
+        if (!force && bot.state.soldierNextReadyAt && Date.now() < bot.state.soldierNextReadyAt) return false;
         try {
             const gm = window.G_Mapping || {};
             const mm = window.ModelManager || gm.ModelManager;
+            const rpc = gm.RPCReq || window.RPCReq;
             const hlm = mm && mm.HomeLandModel;
             const cwm = mm && mm.CountryWarModel;
             const pm = mm && mm.PlayerModel;
@@ -18674,6 +18802,7 @@
             if (bot.state.dailySoldierTrainCount === undefined) bot.state.dailySoldierTrainCount = 0;
 
             const hlClass = (hlm && hlm.constructor) || gm.HomeLandModel || window.HomeLandModel;
+            const reqHostInfoFn = (hlClass && hlClass.reqHostInfo) || hlm.reqHostInfo;
             const pickFn = (hlClass && hlClass.reqHostPickSoldier) || hlm.reqHostPickSoldier;
             const addFn = (hlClass && hlClass.reqHostAddSoldier) || hlm.reqHostAddSoldier;
             const upBuildFn = (hlClass && hlClass.reqBuildLvUp) || hlm.reqBuildLvUp;
@@ -18694,35 +18823,48 @@
                 }
             };
 
-            if (hlm._plotId_BuildingMap) {
-                if (typeof hlm._plotId_BuildingMap.forEach === "function") {
-                    hlm._plotId_BuildingMap.forEach(function (_val, pKey) {
-                        tryPushBarrackPlot(pKey);
-                    });
-                } else {
-                    for (let pKey in hlm._plotId_BuildingMap) {
-                        tryPushBarrackPlot(pKey);
+            const scanAllBarracks = function () {
+                if (hlm._plotId_BuildingMap) {
+                    if (typeof hlm._plotId_BuildingMap.forEach === "function") {
+                        hlm._plotId_BuildingMap.forEach(function (_val, pKey) {
+                            tryPushBarrackPlot(pKey);
+                        });
+                    } else {
+                        for (let pKey in hlm._plotId_BuildingMap) {
+                            tryPushBarrackPlot(pKey);
+                        }
                     }
                 }
-            }
 
-            const soldierGroups = [96, 97, 98];
-            for (let gIdx = 0; gIdx < soldierGroups.length; gIdx++) {
-                const sGrp = soldierGroups[gIdx];
-                if (cwm && typeof cwm.getSoldierBuildIdAndPlot === "function") {
-                    const bp = cwm.getSoldierBuildIdAndPlot(sGrp);
-                    if (bp && bp.plotId) tryPushBarrackPlot(bp.plotId);
-                }
-                if (typeof mcCfg.getMainCityByGroup === "function") {
-                    const grp = mcCfg.getMainCityByGroup(sGrp);
-                    if (Array.isArray(grp) && grp[0] && grp[0].build_type) {
-                        tryPushBarrackPlot(grp[0].build_type);
+                const soldierGroups = [96, 97, 98];
+                for (let gIdx = 0; gIdx < soldierGroups.length; gIdx++) {
+                    const sGrp = soldierGroups[gIdx];
+                    if (cwm && typeof cwm.getSoldierBuildIdAndPlot === "function") {
+                        const bp = cwm.getSoldierBuildIdAndPlot(sGrp);
+                        if (bp && bp.plotId) tryPushBarrackPlot(bp.plotId);
+                    }
+                    if (typeof mcCfg.getMainCityByGroup === "function") {
+                        const grp = mcCfg.getMainCityByGroup(sGrp);
+                        if (Array.isArray(grp) && grp[0] && grp[0].build_type) {
+                            tryPushBarrackPlot(grp[0].build_type);
+                        }
                     }
                 }
+            };
+
+            scanAllBarracks();
+            if (barrackPlots.length === 0 && bot.tryDo("hl_req_host_info_train", 25)) {
+                if (typeof reqHostInfoFn === "function") reqHostInfoFn.call(hlClass || hlm);
+                else if (rpc && typeof rpc.send === "function") rpc.send(10501, {});
+                await bot.sleep(450);
+                scanAllBarracks();
             }
 
             const serverTime = (mm.ServerTimeModel && typeof mm.ServerTimeModel.getServerTime === "function")
                 ? Number(mm.ServerTimeModel.getServerTime()) : Math.floor(Date.now() / 1000);
+
+            let busyCount = 0;
+            let minBusyLeftSec = Infinity;
 
             for (let i = 0; i < barrackPlots.length; i++) {
                 const item = barrackPlots[i];
@@ -18739,7 +18881,7 @@
                     pickFn.call(hlClass || hlm, plot);
                     bot.log(`🪖 [Chiêu Binh] Thu hoạch lính đã luyện xong tại Trại Lính (Ô #${plot})!`);
                     didSomething = true;
-                    await bot.sleep(320);
+                    await bot.sleep(380);
                 }
 
                 // 3. Tiến hành Chiêu Binh nếu trại đang rảnh (0 KNB: _is_acc = 0)
@@ -18748,10 +18890,9 @@
                     : !!(sQueueAfter && Number(sQueueAfter._e_sec || 0) > serverTime);
 
                 if (isTraining) {
-                    if (force && bot.tryDo("hl_train_busy_log_" + plot, 120)) {
-                        const leftSec = Math.max(0, Number((sQueueAfter && sQueueAfter._e_sec) || 0) - serverTime);
-                        bot.log(`🪖 [Chiêu Binh] Trại Lính (Ô #${plot}) đang luyện quân (còn ${Math.ceil(leftSec / 60)}p -> tự thu hoạch khi xong)!`);
-                    }
+                    busyCount++;
+                    const leftSec = Math.max(5, Number((sQueueAfter && sQueueAfter._e_sec) || 0) - serverTime);
+                    if (leftSec < minBusyLeftSec) minBusyLeftSec = leftSec;
                     continue;
                 }
 
@@ -18792,7 +18933,7 @@
                             bot.state.dailySoldierTrainCount = (bot.state.dailySoldierTrainCount || 0) + 1;
                             bot.log(`🪖 [Chiêu Binh] Đặt lệnh Chiêu Binh #${bot.state.dailySoldierTrainCount} tại Trại Lính (Ô #${plot} • +${(times * batchSize).toLocaleString()} lính • 0 KNB)!`);
                             didSomething = true;
-                            await bot.sleep(350);
+                            await bot.sleep(380);
                         }
                     } else {
                         // Kho quân của trại đã đầy (hasNum >= maxCap): Nếu nâng cấp được Trại Lính bằng Gỗ (0 KNB) thì nâng ngay để mở rộng sức chứa!
@@ -18801,10 +18942,18 @@
                             bot.log(`🏯 [Chiêu Binh] Nâng cấp Trại Lính (Ô #${plot}) để mở rộng sức chứa quân (0 KNB)!`);
                             didSomething = true;
                             await bot.sleep(300);
-                        } else if (force && bot.tryDo("hl_full_barrack_log_" + plot, 180)) {
+                        } else if (force && bot.tryDo("hl_full_barrack_log_" + plot, 300)) {
                             bot.log(`🪖 [Chiêu Binh] Trại Lính (Ô #${plot}) đã đầy kho quân (${hasNum.toLocaleString()}/${maxCap.toLocaleString()})!`);
                         }
                     }
+                }
+            }
+
+            if (!didSomething && busyCount > 0 && busyCount === barrackPlots.length && minBusyLeftSec < Infinity) {
+                const waitSec = Math.min(1800, Math.max(15, minBusyLeftSec + 2));
+                bot.state.soldierNextReadyAt = Date.now() + waitSec * 1000;
+                if (bot.tryDo("hl_all_training_est_log", Math.max(300, waitSec))) {
+                    bot.log(`⏳ [Chiêu Binh] Cả ${busyCount} Trại Lính đang luyện quân (đã đặt ${bot.state.dailySoldierTrainCount || 0}/4 lượt) -> Ước tính chờ ${Math.ceil(minBusyLeftSec / 60)} phút thu hoạch đợt tiếp theo!`);
                 }
             }
             return didSomething;
@@ -19134,351 +19283,460 @@
             }
 
             // PHẦN B: CÔN LÔN KHƯ (KunlunModel — ModuleOpen.Flip = 121, Gameplay.Flip = 10, TidFlipPower = 43)
-            try {
-                if (bot.isSafeModuleOpen(121) && mm.KunlunModel) {
-                    const klm = mm.KunlunModel;
-                    let info = (typeof klm.getFilpInfo === "function") ? klm.getFilpInfo() : klm.info;
-                    if (!info) {
-                        if (typeof klm.requestInfo === "function" && bot.tryDo("kunlun_req_init", 20)) {
-                            klm.requestInfo();
-                            if (typeof klm.requestShop === "function") klm.requestShop();
-                            await bot.sleep(450);
-                            info = (typeof klm.getFilpInfo === "function") ? klm.getFilpInfo() : klm.info;
-                        }
-                    } else if (typeof klm.requestShop === "function" && bot.tryDo("kunlun_req_shop_sync", 90)) {
-                        klm.requestShop();
-                    }
-                    if (info) {
-                        // Khởi tạo mảng rương Côn Lôn & bọc an toàn setBoxItemGainMsg để mở Rương Kho Báu ngầm không bao giờ lỗi undefined.concat!
-                        if (!Array.isArray(klm.boxOpenItemDataList)) klm.boxOpenItemDataList = [];
-                        if (!Array.isArray(klm.boxBlockIndexsGain)) klm.boxBlockIndexsGain = [];
-                        if (!Array.isArray(klm.boxBlockIndexsRequest)) klm.boxBlockIndexsRequest = [];
-                        if (!klm.boxOpenData || typeof klm.boxOpenData !== "object") klm.boxOpenData = {};
-                        if (typeof klm.setBoxItemGainMsg === "function" && !klm.__QA_BOX_SAFE__) {
-                            const origSetBoxGain = klm.setBoxItemGainMsg;
-                            klm.setBoxItemGainMsg = function (msg) {
-                                if (!Array.isArray(this.boxOpenItemDataList)) this.boxOpenItemDataList = [];
-                                if (!Array.isArray(this.boxBlockIndexsGain)) this.boxBlockIndexsGain = [];
-                                if (!Array.isArray(this.boxBlockIndexsRequest)) this.boxBlockIndexsRequest = [];
-                                if (!this.boxOpenData || typeof this.boxOpenData !== "object") this.boxOpenData = {};
-                                const res = origSetBoxGain.apply(this, arguments);
-                                if (bot.state._bgSilentDepth > 0 || !bot.isManualCombatViewOpen()) {
-                                    this.boxOpenItemDataList = [];
-                                    this.boxBlockIndexsGain = [];
+            if (!bot.state._kunlunBusy) {
+                bot.state._kunlunBusy = true;
+                try {
+                    if (bot.isSafeModuleOpen(121) && mm.KunlunModel) {
+                        const klm = mm.KunlunModel;
+                        // Bọc setFilpInfoSc & setFlipReset 1 lần để giải phóng reqLock và xóa mảng rương chờ mỗi khi đổi tầng / reset
+                        if (!klm.__QA_LOCK_SAFE__) {
+                            if (typeof klm.setFilpInfoSc === "function") {
+                                const origSetInfo = klm.setFilpInfoSc;
+                                klm.setFilpInfoSc = function (msg) {
+                                    this.reqLock = false;
                                     this.boxBlockIndexsRequest = [];
-                                }
-                                return res;
-                            };
-                            klm.__QA_BOX_SAFE__ = true;
+                                    this.boxBlockIndexsGain = [];
+                                    bot.state.kunlunBoardWaitUntil = 0;
+                                    return origSetInfo.apply(this, arguments);
+                                };
+                            }
+                            if (typeof klm.setFlipReset === "function") {
+                                const origSetReset = klm.setFlipReset;
+                                klm.setFlipReset = function (msg) {
+                                    this.reqLock = false;
+                                    this.boxBlockIndexsRequest = [];
+                                    this.boxBlockIndexsGain = [];
+                                    bot.state.kunlunBoardWaitUntil = 0;
+                                    bot.state.kunlunDefeatedCells = {};
+                                    return origSetReset.apply(this, arguments);
+                                };
+                            }
+                            klm.__QA_LOCK_SAFE__ = true;
                         }
 
-                        // Luôn giải phóng reqLock bị treo (do qua cổng tầng mới hoặc mạng trễ)
-                        if (klm.reqLock) {
-                            if (!bot.state.kunlunLockSince) bot.state.kunlunLockSince = Date.now();
-                            else if (Date.now() - bot.state.kunlunLockSince > 2200) {
-                                klm.reqLock = false;
+                        let info = (typeof klm.getFilpInfo === "function") ? klm.getFilpInfo() : klm.info;
+                        if (!info) {
+                            if (typeof klm.requestInfo === "function" && bot.tryDo("kunlun_req_init", 20)) {
+                                klm.requestInfo();
+                                if (typeof klm.requestShop === "function") klm.requestShop();
+                                await bot.sleep(450);
+                                info = (typeof klm.getFilpInfo === "function") ? klm.getFilpInfo() : klm.info;
+                            }
+                        } else if (typeof klm.requestShop === "function" && bot.tryDo("kunlun_req_shop_sync", 90)) {
+                            klm.requestShop();
+                        }
+                        if (info) {
+                            // Khởi tạo mảng rương Côn Lôn & bọc an toàn setBoxItemGainMsg để mở Rương Kho Báu ngầm không bao giờ lỗi undefined.concat!
+                            if (!Array.isArray(klm.boxOpenItemDataList)) klm.boxOpenItemDataList = [];
+                            if (!Array.isArray(klm.boxBlockIndexsGain)) klm.boxBlockIndexsGain = [];
+                            if (!Array.isArray(klm.boxBlockIndexsRequest)) klm.boxBlockIndexsRequest = [];
+                            if (!klm.boxOpenData || typeof klm.boxOpenData !== "object") klm.boxOpenData = {};
+                            if (typeof klm.setBoxItemGainMsg === "function" && !klm.__QA_BOX_SAFE__) {
+                                const origSetBoxGain = klm.setBoxItemGainMsg;
+                                klm.setBoxItemGainMsg = function (msg) {
+                                    if (!Array.isArray(this.boxOpenItemDataList)) this.boxOpenItemDataList = [];
+                                    if (!Array.isArray(this.boxBlockIndexsGain)) this.boxBlockIndexsGain = [];
+                                    if (!Array.isArray(this.boxBlockIndexsRequest)) this.boxBlockIndexsRequest = [];
+                                    if (!this.boxOpenData || typeof this.boxOpenData !== "object") this.boxOpenData = {};
+                                    const res = origSetBoxGain.apply(this, arguments);
+                                    if (bot.state._bgSilentDepth > 0 || !bot.isManualCombatViewOpen()) {
+                                        this.boxOpenItemDataList = [];
+                                        this.boxBlockIndexsGain = [];
+                                        this.boxBlockIndexsRequest = [];
+                                    }
+                                    return res;
+                                };
+                                klm.__QA_BOX_SAFE__ = true;
+                            }
+
+                            // Luôn giải phóng reqLock bị treo (do qua cổng tầng mới hoặc mạng trễ)
+                            if (klm.reqLock) {
+                                if (!bot.state.kunlunLockSince) bot.state.kunlunLockSince = Date.now();
+                                else if (Date.now() - bot.state.kunlunLockSince > 2200) {
+                                    klm.reqLock = false;
+                                    bot.state.kunlunLockSince = 0;
+                                }
+                            } else {
                                 bot.state.kunlunLockSince = 0;
                             }
-                        } else {
-                            bot.state.kunlunLockSince = 0;
-                        }
 
-                        // B1. Nhận thưởng Treo Máy Côn Lôn định kỳ (FlipGetGainsCs = 13207) & Rương Cốt Truyện / Vượt Tầng (FlipPlotRewardsCs = 13211)
-                        const maxFlr = (typeof klm.getFlipMaxFloor === "function") ? Number(klm.getFlipMaxFloor() || 0) : 0;
-                        const hangSec = (typeof klm.getHangStartSec === "function") ? Number(klm.getHangStartSec() || 0) : 0;
-                        const gainsProto = (gm.FlipGetGainsCs && gm.FlipGetGainsCs.protocol) || 13207;
-                        if (maxFlr > 0 && hangSec > 0 && (serverTime - hangSec) >= 900 && gainsProto && bot.tryDo("kunlun_hook_gains", 90)) {
-                            rpc.send(gainsProto, {});
-                            bot.log(`⛰️ [Côn Lôn] Đã thu hoạch rương Treo Máy Côn Lôn Khư (Tầng ${maxFlr})!`);
-                            did = true;
-                        }
-                        const hasPlotRed = (typeof klm.checkPlotRedPoint === "function" && klm.checkPlotRedPoint())
-                            || (typeof klm.getCanGetPlotRewards === "function" && Array.isArray(klm.getCanGetPlotRewards()) && klm.getCanGetPlotRewards().length > 0);
-                        if (hasPlotRed && bot.tryDo("kunlun_plot_rewards", 30)) {
-                            const plotProto = (gm.FlipPlotRewardsCs && gm.FlipPlotRewardsCs.protocol) || (gm.FlipGainBoxCs && gm.FlipGainBoxCs.protocol) || 13211;
-                            if (typeof klm.requestPlotRewards === "function") klm.requestPlotRewards();
-                            else if (typeof klm.reqGainBox === "function") klm.reqGainBox();
-                            else rpc.send(plotProto, {});
-                            bot.log(`⛰️ [Côn Lôn] Nhận thưởng Rương Vượt Tầng / Cốt Truyện Côn Lôn Khư!`);
-                            did = true;
-                        }
+                            // B1. Nhận thưởng Treo Máy Côn Lôn định kỳ (FlipGetGainsCs = 13404) & Rương Cốt Truyện / Vượt Tầng (FlipPlotRewardsCs = 13406)
+                            const maxFlr = (typeof klm.getFlipMaxFloor === "function") ? Number(klm.getFlipMaxFloor() || 0) : 0;
+                            const hangSec = (typeof klm.getHangStartSec === "function") ? Number(klm.getHangStartSec() || 0) : 0;
+                            const gainsProto = (gm.FlipGetGainsCs && gm.FlipGetGainsCs.protocol) || 13404;
+                            if (maxFlr > 0 && hangSec > 0 && (serverTime - hangSec) >= 900 && gainsProto && bot.tryDo("kunlun_hook_gains", 90)) {
+                                if (typeof klm.requestGainBox === "function") klm.requestGainBox();
+                                else rpc.send(gainsProto, {});
+                                bot.log(`⛰️ [Côn Lôn] Đã thu hoạch rương Treo Máy Côn Lôn Khư (Tầng ${maxFlr})!`);
+                                did = true;
+                            }
+                            const hasPlotRed = (typeof klm.checkPlotRedPoint === "function" && klm.checkPlotRedPoint())
+                                || (typeof klm.getCanGetPlotRewards === "function" && Array.isArray(klm.getCanGetPlotRewards()) && klm.getCanGetPlotRewards().length > 0);
+                            if (hasPlotRed && bot.tryDo("kunlun_plot_rewards", 30)) {
+                                const plotProto = (gm.FlipPlotRewardsCs && gm.FlipPlotRewardsCs.protocol) || (gm.FlipGainBoxCs && gm.FlipGainBoxCs.protocol) || 13406;
+                                if (typeof klm.requestPlotRewards === "function") klm.requestPlotRewards();
+                                else if (typeof klm.reqGainBox === "function") klm.reqGainBox();
+                                else rpc.send(plotProto, {});
+                                bot.log(`⛰️ [Côn Lôn] Nhận thưởng Rương Vượt Tầng / Cốt Truyện Côn Lôn Khư!`);
+                                did = true;
+                            }
 
-                        // B1b. Nhận Quà Miễn Phí Mỗi Ngày trong Tiệm Côn Lôn (ShopFlip = 13, price <= 0 — 100% 0 KNB!)
-                        try {
-                            const sm = mm.ShopModel;
-                            if (sm && typeof sm.getGoodsListByType === "function" && typeof sm.reqShopBuy === "function" && bot.tryDo("kunlun_free_shop_check", 30)) {
-                                const goodsWrap = sm.getGoodsListByType(13);
-                                const gList = Array.isArray(goodsWrap) ? (Array.isArray(goodsWrap[0]) ? goodsWrap[0] : goodsWrap) : [];
-                                for (let gi = 0; gi < gList.length; gi++) {
-                                    const gItem = gList[gi];
-                                    const gCfg = gItem && gItem.cfg;
-                                    if (!gCfg || !gCfg.id) continue;
-                                    const pArr = Array.isArray(gCfg.price) && Array.isArray(gCfg.price[0]) ? gCfg.price[0] : null;
-                                    const priceVal = pArr ? Number(pArr[1] || 0) : 999999;
-                                    const bought = Number(gItem.num || 0);
-                                    const limitNum = Number(gCfg.limit_num || 1);
-                                    if (priceVal <= 0 && (limitNum <= 0 || bought < limitNum) && bot.tryDo("kunlun_free_shop_buy_" + gCfg.id, 120)) {
-                                        sm.reqShopBuy(gCfg.id, 1);
-                                        bot.log(`🎁 [Côn Lôn] Đã nhận Gói Quà Ngày Miễn Phí trong Tiệm Côn Lôn (#${gCfg.id} • 0 KNB)!`);
-                                        did = true;
-                                    }
-                                }
-                            }
-                        } catch (eKlShop) { }
-
-                        // B2. Nhận thưởng Nhiệm vụ Tuần / Thành Tựu / Mục Tiêu Côn Lôn & Rương Mốc Năng Động Tuần Côn Lôn (0 KNB)
-                        if (tm && typeof tm.getTaskState === "function" && bot.tryDo("kunlun_tasks_check", 20)) {
-                            if (typeof tm.reqTaskInfo === "function" && bot.tryDo("kunlun_sync_task_info", 60)) {
-                                try { tm.reqTaskInfo(11); tm.reqTaskInfo(13); } catch (e) { }
-                            }
-                            const tags = [8, 9, 19];
-                            if (typeof tm.getFunTaskListByTag === "function") {
-                                for (let t = 0; t < tags.length; t++) {
-                                    const tIds = tm.getFunTaskListByTag(tags[t]) || [];
-                                    for (let k = 0; k < tIds.length; k++) {
-                                        const tid = Number(tIds[k] || 0);
-                                        if (tid > 0 && Number(tm.getTaskState(11, tid)) === 2) {
-                                            if (bot.claimTaskSafe(tm, 11, tid)) {
-                                                bot.log(`⛰️ [Côn Lôn] Nhận thưởng Nhiệm Vụ Côn Lôn #${tid}!`);
-                                                did = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if (typeof tm.getTaskListByType === "function") {
-                                const wTasks = tm.getTaskListByType(13) || []; // TaskFlipWeekly = 13
-                                for (let k = 0; k < wTasks.length; k++) {
-                                    const tid = Number((wTasks[k] && wTasks[k].id) || wTasks[k] || 0);
-                                    if (tid > 0 && Number(tm.getTaskState(13, tid)) === 2) {
-                                        if (bot.claimTaskSafe(tm, 13, tid)) {
-                                            bot.log(`⛰️ [Côn Lôn] Nhận thưởng Nhiệm Vụ Tuần Côn Lôn #${tid}!`);
+                            // B1b. Nhận Quà Miễn Phí Mỗi Ngày trong Tiệm Côn Lôn (ShopFlip = 13, price <= 0 — 100% 0 KNB!)
+                            try {
+                                const sm = mm.ShopModel;
+                                if (sm && typeof sm.getGoodsListByType === "function" && typeof sm.reqShopBuy === "function" && bot.tryDo("kunlun_free_shop_check", 30)) {
+                                    const goodsWrap = sm.getGoodsListByType(13);
+                                    const gList = Array.isArray(goodsWrap) ? (Array.isArray(goodsWrap[0]) ? goodsWrap[0] : goodsWrap) : [];
+                                    for (let gi = 0; gi < gList.length; gi++) {
+                                        const gItem = gList[gi];
+                                        const gCfg = gItem && gItem.cfg;
+                                        if (!gCfg || !gCfg.id) continue;
+                                        const pArr = Array.isArray(gCfg.price) && Array.isArray(gCfg.price[0]) ? gCfg.price[0] : null;
+                                        const priceVal = pArr ? Number(pArr[1] || 0) : 999999;
+                                        const bought = Number(gItem.num || 0);
+                                        const limitNum = Number(gCfg.limit_num || 1);
+                                        if (priceVal <= 0 && (limitNum <= 0 || bought < limitNum) && bot.tryDo("kunlun_free_shop_buy_" + gCfg.id, 120)) {
+                                            sm.reqShopBuy(gCfg.id, 1);
+                                            bot.log(`🎁 [Côn Lôn] Đã nhận Gói Quà Ngày Miễn Phí trong Tiệm Côn Lôn (#${gCfg.id} • 0 KNB)!`);
                                             did = true;
                                         }
                                     }
                                 }
-                            }
-                            // Rương Mốc Tiến Độ Tuần Côn Lôn (TaskConfiger.getTaskActiveCfgArray(4), TaskFlipWeekly = 13)
-                            try {
-                                const TaskCfg = gm.TaskConfiger || (safeRequire("TaskConfiger") && (safeRequire("TaskConfiger").TaskConfiger || safeRequire("TaskConfiger").default));
-                                if (TaskCfg && typeof TaskCfg.getTaskActiveCfgArray === "function") {
-                                    const actBoxes = TaskCfg.getTaskActiveCfgArray(4) || [];
-                                    for (let bi = 0; bi < actBoxes.length; bi++) {
-                                        const bCfg = actBoxes[bi];
-                                        if (!bCfg || !bCfg.id) continue;
-                                        const isDone = (typeof tm.isCompleted === "function" && tm.isCompleted(13, bCfg.id)) || Number(tm.getTaskState(13, bCfg.id)) === 3;
-                                        if (isDone) continue;
-                                        const td = (typeof tm.getTaskData === "function") ? tm.getTaskData(13, bCfg.id) : null;
-                                        const curProg = Array.isArray(td) ? Number(td[0] || 0) : 0;
-                                        const needProg = (Array.isArray(bCfg.task) && bCfg.task.length >= 4) ? Number(bCfg.task[3] || 0) : 999999;
-                                        if ((curProg >= needProg || Number(tm.getTaskState(13, bCfg.id)) === 2) && bot.tryDo("kunlun_wbox_" + bCfg.id, 30)) {
-                                            if (bot.claimTaskSafe(tm, 13, bCfg.id)) {
-                                                bot.log(`🎁 [Côn Lôn] Mở Rương Tiến Độ Tuần Côn Lôn #${bCfg.id}!`);
+                            } catch (eKlShop) { }
+
+                            // B2. Nhận thưởng Nhiệm vụ Tuần / Thành Tựu / Mục Tiêu Côn Lôn & Rương Mốc Năng Động Tuần Côn Lôn (0 KNB)
+                            if (tm && typeof tm.getTaskState === "function" && bot.tryDo("kunlun_tasks_check", 20)) {
+                                if (typeof tm.reqTaskInfo === "function" && bot.tryDo("kunlun_sync_task_info", 60)) {
+                                    try { tm.reqTaskInfo(11); tm.reqTaskInfo(13); } catch (e) { }
+                                }
+                                const tags = [8, 9, 19];
+                                if (typeof tm.getFunTaskListByTag === "function") {
+                                    for (let t = 0; t < tags.length; t++) {
+                                        const tIds = tm.getFunTaskListByTag(tags[t]) || [];
+                                        for (let k = 0; k < tIds.length; k++) {
+                                            const tid = Number(tIds[k] || 0);
+                                            if (tid > 0 && Number(tm.getTaskState(11, tid)) === 2) {
+                                                if (bot.claimTaskSafe(tm, 11, tid)) {
+                                                    bot.log(`⛰️ [Côn Lôn] Nhận thưởng Nhiệm Vụ Côn Lôn #${tid}!`);
+                                                    did = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (typeof tm.getTaskListByType === "function") {
+                                    const wTasks = tm.getTaskListByType(13) || []; // TaskFlipWeekly = 13
+                                    for (let k = 0; k < wTasks.length; k++) {
+                                        const tid = Number((wTasks[k] && wTasks[k].id) || wTasks[k] || 0);
+                                        if (tid > 0 && Number(tm.getTaskState(13, tid)) === 2) {
+                                            if (bot.claimTaskSafe(tm, 13, tid)) {
+                                                bot.log(`⛰️ [Côn Lôn] Nhận thưởng Nhiệm Vụ Tuần Côn Lôn #${tid}!`);
                                                 did = true;
                                             }
                                         }
                                     }
                                 }
-                            } catch (eKlBox) { }
-                        }
+                                // Rương Mốc Tiến Độ Tuần Côn Lôn (TaskConfiger.getTaskActiveCfgArray(4), TaskFlipWeekly = 13)
+                                try {
+                                    const TaskCfg = gm.TaskConfiger || (safeRequire("TaskConfiger") && (safeRequire("TaskConfiger").TaskConfiger || safeRequire("TaskConfiger").default));
+                                    if (TaskCfg && typeof TaskCfg.getTaskActiveCfgArray === "function") {
+                                        const actBoxes = TaskCfg.getTaskActiveCfgArray(4) || [];
+                                        for (let bi = 0; bi < actBoxes.length; bi++) {
+                                            const bCfg = actBoxes[bi];
+                                            if (!bCfg || !bCfg.id) continue;
+                                            const isDone = (typeof tm.isCompleted === "function" && tm.isCompleted(13, bCfg.id)) || Number(tm.getTaskState(13, bCfg.id)) === 3;
+                                            if (isDone) continue;
+                                            const td = (typeof tm.getTaskData === "function") ? tm.getTaskData(13, bCfg.id) : null;
+                                            const curProg = Array.isArray(td) ? Number(td[0] || 0) : 0;
+                                            const needProg = (Array.isArray(bCfg.task) && bCfg.task.length >= 4) ? Number(bCfg.task[3] || 0) : 999999;
+                                            if ((curProg >= needProg || Number(tm.getTaskState(13, bCfg.id)) === 2) && bot.tryDo("kunlun_wbox_" + bCfg.id, 30)) {
+                                                if (bot.claimTaskSafe(tm, 13, bCfg.id)) {
+                                                    bot.log(`🎁 [Côn Lôn] Mở Rương Tiến Độ Tuần Côn Lôn #${bCfg.id}!`);
+                                                    did = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (eKlBox) { }
+                            }
 
-                        const curFlr = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || 1) : 1;
+                            const curFlr = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || 1) : 1;
+                            const flipStaminaNow = pm ? Number((pm.getMoneyNum && pm.getMoneyNum(43)) || (pm.getItemNum && pm.getItemNum(43)) || 0) : 0;
 
-                        // B3. Mở toàn bộ Rương Kho Báu đã lộ diện & không bị Quái canh giữ (Tốn 0 thể lực, cập nhật _args[0]._val = 1 ngay để không kẹt lặp vô tận!)
-                        const openBoxes = (typeof klm.getAllCanOpenBox === "function") ? (klm.getAllCanOpenBox() || []) : [];
-                        if (openBoxes.length > 0 && (typeof klm.requestClickBox === "function" || typeof klm.requestClick === "function")) {
-                            for (let bIdx = 0; bIdx < openBoxes.length; bIdx++) {
-                                const boxCell = Number(openBoxes[bIdx]);
-                                if (boxCell > 0 && bot.tryDo("kunlun_open_box_" + curFlr + "_" + boxCell, 8)) {
-                                    const waitBoxClickMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1250) - Date.now());
-                                    if (waitBoxClickMs > 0) await bot.sleep(waitBoxClickMs);
-                                    klm.reqLock = false;
-                                    bot.state.lastKunlunClickTs = Date.now();
-                                    if (typeof klm.requestClickBox === "function") klm.requestClickBox(boxCell);
-                                    else klm.requestClick(boxCell);
+                            // Nếu đang trong thời gian ước tính chờ hồi thể lực tại tầng hiện tại và chưa có thể lực mới -> bỏ qua thao tác bản đồ, không spam!
+                            if (bot.state.kunlunBoardWaitUntil && Date.now() < bot.state.kunlunBoardWaitUntil && bot.state.kunlunBoardWaitFloor === curFlr && flipStaminaNow < 1) {
+                                return did;
+                            }
+
+                            if (!bot.state.kunlunCellAttempts) bot.state.kunlunCellAttempts = {};
+                            if (!bot.state.kunlunSkipCellUntil) bot.state.kunlunSkipCellUntil = {};
+
+                            // B3. Mở Rương Kho Báu đã lộ diện & không bị Quái canh giữ (TUYỆT ĐỐI dùng requestClick từng ô với nhịp >=1.5s, KHÔNG dùng requestClickBox gây double-send mã 4!)
+                            const rawOpenBoxes = (typeof klm.getAllCanOpenBox === "function") ? (klm.getAllCanOpenBox() || []) : [];
+                            const openBoxes = [];
+                            for (let bIdx = 0; bIdx < rawOpenBoxes.length; bIdx++) {
+                                const boxCell = Number(rawOpenBoxes[bIdx]);
+                                if (!boxCell) continue;
+                                const cellKey = curFlr + "_" + boxCell;
+                                if (bot.state.kunlunSkipCellUntil[cellKey] && Date.now() < bot.state.kunlunSkipCellUntil[cellKey]) {
                                     if (klm.cellListTable && klm.cellListTable[boxCell]) {
                                         klm.cellListTable[boxCell]._args = [{ _val: 1 }];
                                     }
-                                    bot.log(`🎁 [Côn Lôn] Tự động nhặt Rương Kho Báu ô #${boxCell} (Tầng ${curFlr})!`);
-                                    did = true;
-                                    await bot.sleep(450);
-                                }
-                            }
-                        }
-
-                        // B4. Qua cổng sang tầng kế tiếp nếu Boss đã hạ gục & đã nhặt hết rương trên bản đồ!
-                        if ((typeof klm.haveNoOpenBox !== "function" || !klm.haveNoOpenBox()) && typeof klm.havePassBossBlock === "function" && klm.havePassBossBlock() && klm.cellListTable) {
-                            for (let cKey in klm.cellListTable) {
-                                const cObj = klm.cellListTable[cKey];
-                                if (cObj && Number(cObj._type) === 2 && Array.isArray(cObj._args) && cObj._args[0] && Number(cObj._args[0]._val) === 1) {
-                                    const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(Number(cKey)) : null;
-                                    if (!bInfo || !bInfo.isLock) {
-                                        if (bot.tryDo("kunlun_enter_portal_" + curFlr, 5)) {
-                                            const waitPortalMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1250) - Date.now());
-                                            if (waitPortalMs > 0) await bot.sleep(waitPortalMs);
-                                            klm.reqLock = false;
-                                            bot.state.lastKunlunClickTs = Date.now();
-                                            klm.requestClick(Number(cKey));
-                                            bot.log(`🌀 [Côn Lôn] Đã dọn sạch rương & hạ Boss -> Tiến lên Tầng ${curFlr + 1}!`);
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // B5. Đánh Quái / Boss đã mở trên bản đồ (Tốn 0 thể lực, ưu tiên Quái canh rương trước -> Boss sau + Defeat Guard)
-                        if (!bot.state.kunlunDefeatedCells) bot.state.kunlunDefeatedCells = {};
-                        let hasDefeatedUnlockedBoss = false;
-                        let hasDefeatedUnlockedMonster = false;
-                        const klClickNextEvt = (evType && evType.battle_ClickNext) || "battle_ClickNext";
-                        if (klm.cellListTable && disp && !bot.isBattling() && !bot.isManualCombatViewOpen()) {
-                            let targetMonster = null;
-                            for (let cKey in klm.cellListTable) {
-                                const cObj = klm.cellListTable[cKey];
-                                if (!cObj || (Number(cObj._type) !== 1 && Number(cObj._type) !== 2)) continue;
-                                const passed = Array.isArray(cObj._args) && cObj._args[0] && Number(cObj._args[0]._val) === 1;
-                                if (passed) continue;
-                                const cellNum = Number(cObj._cell || cKey);
-                                const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(cellNum) : null;
-                                if (bInfo && bInfo.isLock) continue;
-
-                                const guardKey = curFlr + "_" + cellNum;
-                                const prevFailPow = Number(bot.state.kunlunDefeatedCells[guardKey] || 0);
-                                if (prevFailPow > 0 && !(curPower >= prevFailPow * 1.03)) {
-                                    if (Number(cObj._type) === 2) hasDefeatedUnlockedBoss = true;
-                                    else hasDefeatedUnlockedMonster = true;
                                     continue;
                                 }
-
-                                const dungeonId = (Array.isArray(cObj._args) && cObj._args[1]) ? Number(cObj._args[1]._val || 0) : 0;
-                                if (!dungeonId) continue;
-
-                                if (!targetMonster || (Number(cObj._type) === 1 && Number(targetMonster.type) === 2)) {
-                                    targetMonster = { cell: cellNum, type: Number(cObj._type), dungeonId: dungeonId, guardKey: guardKey };
-                                }
+                                openBoxes.push(boxCell);
                             }
 
-                            if (targetMonster && bot.tryDo("kunlun_fight_" + targetMonster.guardKey, 6)) {
-                                const fmInst = window.FightManager || gm.FightManager;
-                                if (!(fmInst && typeof fmInst.haveFight === "function" && fmInst.haveFight(10))) {
-                                    if (bot.state.isScoutLowPowerActive && typeof bot.restoreFullCombatArray === "function") {
-                                        await bot.restoreFullCombatArray("kunlun");
-                                        await bot.sleep(100);
+                            if (openBoxes.length > 0 && typeof klm.requestClick === "function") {
+                                klm.boxBlockIndexsRequest = [];
+                                klm.boxBlockIndexsGain = [];
+                                let openedInPass = 0;
+                                for (let bIdx = 0; bIdx < openBoxes.length && openedInPass < 2; bIdx++) {
+                                    const boxCell = Number(openBoxes[bIdx]);
+                                    const cellKey = curFlr + "_" + boxCell;
+                                    const att = Number(bot.state.kunlunCellAttempts[cellKey] || 0);
+                                    if (att >= 2) {
+                                        bot.state.kunlunSkipCellUntil[cellKey] = Date.now() + 600000;
+                                        if (klm.cellListTable && klm.cellListTable[boxCell]) {
+                                            klm.cellListTable[boxCell]._args = [{ _val: 1 }];
+                                        }
+                                        continue;
                                     }
-                                    if (mm.HeroBagModel && !bot.ensureGameplayTeamReady(10, 1, null, null)) return did;
-                                    const minNextWarTs = Math.max(
-                                        (bot.state.lastAnyWarStartTime || 0) + 1800,
-                                        (bot.state.lastWarCloseTime || 0) + 1200,
-                                        (bot.state.lastWarError66Time || 0) + 2200
-                                    );
-                                    const waitWarMs = minNextWarTs - Date.now();
-                                    if (waitWarMs > 0) await bot.sleep(Math.min(waitWarMs, 2500));
+                                    if (bot.tryDo("kunlun_open_box_" + cellKey, 15)) {
+                                        const waitBoxClickMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1550) - Date.now());
+                                        if (waitBoxClickMs > 0) await bot.sleep(waitBoxClickMs);
+                                        klm.reqLock = false;
+                                        klm.boxBlockIndexsRequest = [];
+                                        klm.boxBlockIndexsGain = [];
+                                        bot.state.lastKunlunClickTs = Date.now();
+                                        bot.state.kunlunCellAttempts[cellKey] = att + 1;
+                                        klm.requestClick(boxCell);
+                                        if (klm.cellListTable && klm.cellListTable[boxCell]) {
+                                            klm.cellListTable[boxCell]._args = [{ _val: 1 }];
+                                        }
+                                        bot.log(`🎁 [Côn Lôn] Tự động nhặt Rương Kho Báu ô #${boxCell} (Tầng ${curFlr})!`);
+                                        did = true;
+                                        openedInPass++;
+                                        await bot.sleep(1550);
+                                    }
+                                }
+                                if (openedInPass > 0) return true;
+                            }
 
-                                    const startTs = Date.now();
-                                    bot.state.kunlunBgFighting = true;
-                                    if (typeof bot.markAutoBattle === "function") bot.markAutoBattle(10, 25000);
-                                    klm.reqLock = false;
-                                    klm.clickCell = targetMonster.cell;
-                                    try {
-                                        bot.closeBattleViews();
-                                        disp.dispatchEvent(klClickNextEvt, function () { }, {
-                                            arrayType: 10,
-                                            copyId: targetMonster.cell,
-                                            dungeon_id: targetMonster.dungeonId,
-                                            extraParam: { floor: curFlr, isBoss: targetMonster.type === 2 },
-                                            skipArray: true,
-                                            skipBattle: true
-                                        });
-                                        for (let w = 0; w < 55; w++) {
-                                            await bot.sleep(80);
-                                            const afterNow = klm.cellListTable && klm.cellListTable[targetMonster.cell];
-                                            const flrNow = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || curFlr) : curFlr;
-                                            if (flrNow > curFlr || (afterNow && Array.isArray(afterNow._args) && afterNow._args[0] && Number(afterNow._args[0]._val) === 1)) {
-                                                break;
+                            // B4. Qua cổng sang tầng kế tiếp nếu Boss đã hạ gục & đã nhặt hết rương trên bản đồ!
+                            if ((typeof klm.haveNoOpenBox !== "function" || !klm.haveNoOpenBox()) && typeof klm.havePassBossBlock === "function" && klm.havePassBossBlock() && klm.cellListTable) {
+                                for (let cKey in klm.cellListTable) {
+                                    const cObj = klm.cellListTable[cKey];
+                                    if (cObj && Number(cObj._type) === 2 && Array.isArray(cObj._args) && cObj._args[0] && Number(cObj._args[0]._val) === 1) {
+                                        const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(Number(cKey)) : null;
+                                        if (!bInfo || !bInfo.isLock) {
+                                            if (bot.tryDo("kunlun_enter_portal_" + curFlr, 8)) {
+                                                const waitPortalMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1550) - Date.now());
+                                                if (waitPortalMs > 0) await bot.sleep(waitPortalMs);
+                                                klm.reqLock = false;
+                                                klm.boxBlockIndexsRequest = [];
+                                                bot.state.lastKunlunClickTs = Date.now();
+                                                klm.requestClick(Number(cKey));
+                                                bot.log(`🌀 [Côn Lôn] Đã dọn sạch rương & hạ Boss -> Tiến lên Tầng ${curFlr + 1}!`);
+                                                await bot.sleep(650);
+                                                if (typeof klm.requestInfo === "function") klm.requestInfo();
+                                                return true;
                                             }
-                                            const lastKl = bot.state.lastBattleByType && bot.state.lastBattleByType[10];
-                                            if (lastKl && lastKl.time >= startTs && w >= 6) break;
                                         }
-                                        bot.closeBattleViews();
-
-                                        const afterCell = klm.cellListTable && klm.cellListTable[targetMonster.cell];
-                                        const newFlrCheck = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || curFlr) : curFlr;
-                                        const isNowPassed = (newFlrCheck > curFlr) || (afterCell && Array.isArray(afterCell._args) && afterCell._args[0] && Number(afterCell._args[0]._val) === 1);
-                                        if (isNowPassed) {
-                                            delete bot.state.kunlunDefeatedCells[targetMonster.guardKey];
-                                            bot.log(`⛰️ [Côn Lôn] Hạ gục ${targetMonster.type === 2 ? "Thủ Lĩnh Tầng" : "Quái Canh Gác"} ô #${targetMonster.cell} (Tầng ${curFlr})!`);
-                                            return true;
-                                        } else {
-                                            bot.state.kunlunDefeatedCells[targetMonster.guardKey] = curPower || 1;
-                                            if (targetMonster.type === 2) hasDefeatedUnlockedBoss = true;
-                                            else hasDefeatedUnlockedMonster = true;
-                                            bot.log(`🛑 [Defeat Guard] Tạm né ${targetMonster.type === 2 ? "Boss" : "quái"} Côn Lôn ô #${targetMonster.cell} Tầng ${curFlr} (không đánh thắng).`);
-                                        }
-                                    } finally {
-                                        bot.state.kunlunBgFighting = false;
-                                        bot.state.lastBattleEndTime = Date.now() + 60;
                                     }
                                 }
                             }
-                        }
 
-                        // B6. Lật ô gạch mới bằng Thể Lực Côn Lôn miễn phí (TidFlipPower = 43 — 0 KNB, KHÔNG mua thể lực!)
-                        let pickCell = 0;
-                        for (let r = 1; r <= 6 && !pickCell; r++) {
-                            for (let c = 1; c <= 6; c++) {
-                                const code = 10 * r + c;
-                                if (klm.cellListTable && klm.cellListTable[code] != null) continue;
-                                const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(code) : null;
-                                if (bInfo && !bInfo.isLock) {
-                                    pickCell = code;
-                                    break;
+                            // B5. Đánh Quái / Boss đã mở trên bản đồ (Tốn 0 thể lực, ưu tiên Quái canh rương trước -> Boss sau + Defeat Guard)
+                            if (!bot.state.kunlunDefeatedCells) bot.state.kunlunDefeatedCells = {};
+                            let hasDefeatedUnlockedBoss = false;
+                            let hasDefeatedUnlockedMonster = false;
+                            let hasFightableMonster = false;
+                            const klClickNextEvt = (evType && evType.battle_ClickNext) || "battle_ClickNext";
+                            if (klm.cellListTable && disp && !bot.isBattling() && !bot.isManualCombatViewOpen()) {
+                                let targetMonster = null;
+                                for (let cKey in klm.cellListTable) {
+                                    const cObj = klm.cellListTable[cKey];
+                                    if (!cObj || (Number(cObj._type) !== 1 && Number(cObj._type) !== 2)) continue;
+                                    const passed = Array.isArray(cObj._args) && cObj._args[0] && Number(cObj._args[0]._val) === 1;
+                                    if (passed) continue;
+                                    const cellNum = Number(cObj._cell || cKey);
+                                    const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(cellNum) : null;
+                                    if (bInfo && bInfo.isLock) continue;
+
+                                    const guardKey = curFlr + "_" + cellNum;
+                                    const prevFailPow = Number(bot.state.kunlunDefeatedCells[guardKey] || 0);
+                                    if (prevFailPow > 0 && !(curPower >= prevFailPow * 1.03)) {
+                                        if (Number(cObj._type) === 2) hasDefeatedUnlockedBoss = true;
+                                        else hasDefeatedUnlockedMonster = true;
+                                        continue;
+                                    }
+
+                                    const dungeonId = (Array.isArray(cObj._args) && cObj._args[1]) ? Number(cObj._args[1]._val || 0) : 0;
+                                    if (!dungeonId) continue;
+                                    hasFightableMonster = true;
+
+                                    if (!targetMonster || (Number(cObj._type) === 1 && Number(targetMonster.type) === 2)) {
+                                        targetMonster = { cell: cellNum, type: Number(cObj._type), dungeonId: dungeonId, guardKey: guardKey };
+                                    }
+                                }
+
+                                if (targetMonster && bot.tryDo("kunlun_fight_" + targetMonster.guardKey, 6)) {
+                                    const fmInst = window.FightManager || gm.FightManager;
+                                    if (!(fmInst && typeof fmInst.haveFight === "function" && fmInst.haveFight(10))) {
+                                        if (bot.state.isScoutLowPowerActive && typeof bot.restoreFullCombatArray === "function") {
+                                            await bot.restoreFullCombatArray("kunlun");
+                                            await bot.sleep(100);
+                                        }
+                                        if (mm.HeroBagModel && !bot.ensureGameplayTeamReady(10, 1, null, null)) return did;
+                                        const minNextWarTs = Math.max(
+                                            (bot.state.lastAnyWarStartTime || 0) + 1800,
+                                            (bot.state.lastWarCloseTime || 0) + 1200,
+                                            (bot.state.lastWarError66Time || 0) + 2200
+                                        );
+                                        const waitWarMs = minNextWarTs - Date.now();
+                                        if (waitWarMs > 0) await bot.sleep(Math.min(waitWarMs, 2500));
+
+                                        const startTs = Date.now();
+                                        bot.state.kunlunBgFighting = true;
+                                        if (typeof bot.markAutoBattle === "function") bot.markAutoBattle(10, 25000);
+                                        klm.reqLock = false;
+                                        klm.clickCell = targetMonster.cell;
+                                        try {
+                                            bot.closeBattleViews();
+                                            disp.dispatchEvent(klClickNextEvt, function () { }, {
+                                                arrayType: 10,
+                                                copyId: targetMonster.cell,
+                                                dungeon_id: targetMonster.dungeonId,
+                                                extraParam: { floor: curFlr, isBoss: targetMonster.type === 2 },
+                                                skipArray: true,
+                                                skipBattle: true
+                                            });
+                                            for (let w = 0; w < 55; w++) {
+                                                await bot.sleep(80);
+                                                const afterNow = klm.cellListTable && klm.cellListTable[targetMonster.cell];
+                                                const flrNow = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || curFlr) : curFlr;
+                                                if (flrNow > curFlr || (afterNow && Array.isArray(afterNow._args) && afterNow._args[0] && Number(afterNow._args[0]._val) === 1)) {
+                                                    break;
+                                                }
+                                                const lastKl = bot.state.lastBattleByType && bot.state.lastBattleByType[10];
+                                                if (lastKl && lastKl.time >= startTs && w >= 6) break;
+                                            }
+                                            bot.closeBattleViews();
+
+                                            const afterCell = klm.cellListTable && klm.cellListTable[targetMonster.cell];
+                                            const newFlrCheck = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || curFlr) : curFlr;
+                                            const isNowPassed = (newFlrCheck > curFlr) || (afterCell && Array.isArray(afterCell._args) && afterCell._args[0] && Number(afterCell._args[0]._val) === 1);
+                                            if (isNowPassed) {
+                                                delete bot.state.kunlunDefeatedCells[targetMonster.guardKey];
+                                                bot.log(`⛰️ [Côn Lôn] Hạ gục ${targetMonster.type === 2 ? "Thủ Lĩnh Tầng" : "Quái Canh Gác"} ô #${targetMonster.cell} (Tầng ${curFlr})!`);
+                                                return true;
+                                            } else {
+                                                bot.state.kunlunDefeatedCells[targetMonster.guardKey] = curPower || 1;
+                                                if (targetMonster.type === 2) hasDefeatedUnlockedBoss = true;
+                                                else hasDefeatedUnlockedMonster = true;
+                                                bot.log(`🛑 [Defeat Guard] Tạm né ${targetMonster.type === 2 ? "Boss" : "quái"} Côn Lôn ô #${targetMonster.cell} Tầng ${curFlr} (không đánh thắng).`);
+                                            }
+                                        } finally {
+                                            bot.state.kunlunBgFighting = false;
+                                            bot.state.lastBattleEndTime = Date.now() + 60;
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        const flipStamina = pm ? Number((pm.getMoneyNum && pm.getMoneyNum(43)) || (pm.getItemNum && pm.getItemNum(43)) || 0) : 0;
-                        // Nếu Boss trên tầng hiện tại chưa bị chặn bởi khóa và ta đã đánh thua Boss, ưu tiên Reset thay vì tốn thể lực lật các ô phụ!
-                        if (!hasDefeatedUnlockedBoss && pickCell > 0 && flipStamina >= 1 && typeof klm.requestClick === "function") {
-                            if (bot.tryDo("kunlun_flip_" + curFlr + "_" + pickCell, 4)) {
-                                const waitFlipMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1250) - Date.now());
-                                if (waitFlipMs > 0) await bot.sleep(waitFlipMs);
-                                klm.reqLock = false;
-                                bot.state.lastKunlunClickTs = Date.now();
-                                klm.requestClick(pickCell);
-                                bot.log(`⛏️ [Côn Lôn] Dùng 1 thể lực lật ô #${pickCell} tại Tầng ${curFlr} (Còn ${flipStamina - 1} thể lực)...`);
-                                return true;
-                            }
-                        }
 
-                        // B7. TỰ ĐỘNG RESET (RS) CÔN LÔN KHƯ KHI KHÔNG ĐÁNH ĐƯỢC NỮA (FlipResetCs = 13209 — 100% 0 KNB!)
-                        // Điều kiện: Đã thua Boss tầng hiện tại (hoặc thua Quái canh đường và không thể lật thêm ô), đã nhặt hết rương mở sẵn, và Tầng hiện tại > resetOffset (5)
-                        const MiscCfg = gm.MiscConfiger || (safeRequire("MiscConfiger") && (safeRequire("MiscConfiger").MiscConfiger || safeRequire("MiscConfiger").default));
-                        let resetOffset = 5;
-                        try {
-                            const mData = MiscCfg && typeof MiscCfg.getMiscDataById === "function" ? MiscCfg.getMiscDataById("flip_reset") : null;
-                            if (mData && Array.isArray(mData.int_val) && Array.isArray(mData.int_val[0])) {
-                                resetOffset = Number(mData.int_val[0][0] || 5);
+                            // B6. Lật ô gạch mới bằng Thể Lực Côn Lôn miễn phí (TidFlipPower = 43 — 0 KNB, KHÔNG mua thể lực!)
+                            let pickCell = 0;
+                            for (let r = 1; r <= 6 && !pickCell; r++) {
+                                for (let c = 1; c <= 6; c++) {
+                                    const code = 10 * r + c;
+                                    if (klm.cellListTable && klm.cellListTable[code] != null) continue;
+                                    const flipKey = curFlr + "_flip_" + code;
+                                    if (bot.state.kunlunSkipCellUntil[flipKey] && Date.now() < bot.state.kunlunSkipCellUntil[flipKey]) continue;
+                                    const bInfo = (typeof klm.getKunlunBlockDataByBlockIndex === "function") ? klm.getKunlunBlockDataByBlockIndex(code) : null;
+                                    if (bInfo && !bInfo.isLock) {
+                                        pickCell = code;
+                                        break;
+                                    }
+                                }
                             }
-                        } catch (eMisc) { }
-                        const nowOpenBoxes = (typeof klm.getAllCanOpenBox === "function") ? (klm.getAllCanOpenBox() || []) : [];
-                        const isStuckByDefeat = hasDefeatedUnlockedBoss || (hasDefeatedUnlockedMonster && (pickCell === 0 || flipStamina < 1));
-                        if (isStuckByDefeat && curFlr > resetOffset && nowOpenBoxes.length === 0 && !(typeof klm.havePassBossBlock === "function" && klm.havePassBossBlock())) {
-                            if (bot.tryDo("kunlun_auto_reset_" + curFlr, 30)) {
-                                const resetProto = (gm.FlipResetCs && gm.FlipResetCs.protocol) || 13209;
-                                klm.reqLock = false;
-                                if (typeof klm.requestReset === "function") klm.requestReset();
-                                else rpc.send(resetProto, {});
-                                bot.state.kunlunDefeatedCells = {};
-                                bot.log(`🔄 [Côn Lôn] Không đánh qua được Quái/Boss tại Tầng ${curFlr} -> Tự động Reset (RS) Côn Lôn Khư về Tầng ${Math.max(1, curFlr - resetOffset)} để quét lại & nhận thưởng (0 KNB)!`);
-                                await bot.sleep(450);
-                                if (typeof klm.requestInfo === "function") klm.requestInfo();
-                                return true;
+                            const flipStamina = pm ? Number((pm.getMoneyNum && pm.getMoneyNum(43)) || (pm.getItemNum && pm.getItemNum(43)) || 0) : 0;
+                            // Nếu Boss trên tầng hiện tại chưa bị chặn bởi khóa và ta đã đánh thua Boss, ưu tiên Reset thay vì tốn thể lực lật các ô phụ!
+                            if (!hasDefeatedUnlockedBoss && pickCell > 0 && flipStamina >= 1 && typeof klm.requestClick === "function") {
+                                const flipKey = curFlr + "_flip_" + pickCell;
+                                const fAtt = Number(bot.state.kunlunCellAttempts[flipKey] || 0);
+                                if (fAtt >= 2) {
+                                    bot.state.kunlunSkipCellUntil[flipKey] = Date.now() + 600000;
+                                } else if (bot.tryDo("kunlun_flip_" + curFlr + "_" + pickCell, 6)) {
+                                    const waitFlipMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1550) - Date.now());
+                                    if (waitFlipMs > 0) await bot.sleep(waitFlipMs);
+                                    klm.reqLock = false;
+                                    klm.boxBlockIndexsRequest = [];
+                                    bot.state.lastKunlunClickTs = Date.now();
+                                    bot.state.kunlunCellAttempts[flipKey] = fAtt + 1;
+                                    klm.requestClick(pickCell);
+                                    bot.log(`⛏️ [Côn Lôn] Dùng 1 thể lực lật ô #${pickCell} tại Tầng ${curFlr} (Còn ${flipStamina - 1} thể lực)...`);
+                                    await bot.sleep(1550);
+                                    return true;
+                                }
+                            }
+
+                            // B7. TỰ ĐỘNG RESET (RS) CÔN LÔN KHƯ KHI KHÔNG ĐÁNH ĐƯỢC NỮA (FlipResetCs = 13410 — 100% 0 KNB!)
+                            const MiscCfg = gm.MiscConfiger || (safeRequire("MiscConfiger") && (safeRequire("MiscConfiger").MiscConfiger || safeRequire("MiscConfiger").default));
+                            let resetOffset = 5;
+                            try {
+                                const mData = MiscCfg && typeof MiscCfg.getMiscDataById === "function" ? MiscCfg.getMiscDataById("flip_reset") : null;
+                                if (mData && Array.isArray(mData.int_val) && Array.isArray(mData.int_val[0])) {
+                                    resetOffset = Number(mData.int_val[0][0] || 5);
+                                }
+                            } catch (eMisc) { }
+                            const isStuckByDefeat = hasDefeatedUnlockedBoss || (hasDefeatedUnlockedMonster && (pickCell === 0 || flipStamina < 1));
+                            if (isStuckByDefeat && curFlr > resetOffset && openBoxes.length === 0 &&
+                                bot.state.kunlunResetExhaustedFloor !== curFlr &&
+                                !(typeof klm.havePassBossBlock === "function" && klm.havePassBossBlock())) {
+                                if (bot.tryDo("kunlun_auto_reset_" + curFlr, 60)) {
+                                    const waitResetMs = Math.max(0, ((bot.state.lastKunlunClickTs || 0) + 1550) - Date.now());
+                                    if (waitResetMs > 0) await bot.sleep(waitResetMs);
+                                    const resetProto = (gm.FlipResetCs && gm.FlipResetCs.protocol) || 13410;
+                                    klm.reqLock = false;
+                                    bot.state.lastKunlunClickTs = Date.now();
+                                    if (typeof klm.requestReset === "function") klm.requestReset();
+                                    else rpc.send(resetProto, {});
+                                    await bot.sleep(650);
+                                    if (typeof klm.requestInfo === "function") klm.requestInfo();
+                                    await bot.sleep(450);
+                                    const flrAfterReset = (typeof klm.getFlipCurFloor === "function") ? Number(klm.getFlipCurFloor() || curFlr) : curFlr;
+                                    if (flrAfterReset !== curFlr) {
+                                        bot.state.kunlunDefeatedCells = {};
+                                        bot.state.kunlunResetExhaustedFloor = 0;
+                                        bot.log(`🔄 [Côn Lôn] Không đánh qua được Quái/Boss tại Tầng ${curFlr} -> Đã Reset (RS) Côn Lôn Khư về Tầng ${flrAfterReset} để quét lại & nhận thưởng (0 KNB)!`);
+                                        return true;
+                                    } else {
+                                        bot.state.kunlunResetExhaustedFloor = curFlr;
+                                        bot.state.kunlunBoardWaitUntil = Date.now() + 1800 * 1000;
+                                        bot.state.kunlunBoardWaitFloor = curFlr;
+                                        bot.log(`⏳ [Côn Lôn] Tầng ${curFlr} đã hết lượt Reset trong ngày hoặc chưa đủ điều kiện RS -> Tạm nghỉ 30 phút chờ tăng LC (không spam)!`);
+                                    }
+                                }
+                            }
+
+                            // B8. ƯỚC TÍNH CHỜ HỒI THỂ LỰC KHI ĐÃ HẾT LƯỢT / HẾT Ô MỞ SẴN (KHÔNG CỐ SPAM!)
+                            if (openBoxes.length === 0 && !hasFightableMonster && (flipStamina < 1 || pickCell === 0 || hasDefeatedUnlockedBoss)) {
+                                const recSec = (typeof klm.getRecoverSec === "function") ? Number(klm.getRecoverSec() || 0) : 0;
+                                const waitSec = (recSec > serverTime) ? Math.min(1800, Math.max(300, recSec - serverTime)) : 900;
+                                bot.state.kunlunBoardWaitUntil = Date.now() + waitSec * 1000;
+                                bot.state.kunlunBoardWaitFloor = curFlr;
+                                if (bot.tryDo("kunlun_wait_est_log_" + curFlr, Math.max(600, waitSec))) {
+                                    bot.log(`⏳ [Côn Lôn] Đã dọn sạch rương & hết thể lực lật ô tại Tầng ${curFlr} -> Ước tính tạm nghỉ ${Math.ceil(waitSec / 60)} phút chờ hồi thể lực (không spam)!`);
+                                }
                             }
                         }
                     }
+                } catch (eKl) {
+                    bot.state.kunlunBgFighting = false;
+                } finally {
+                    bot.state._kunlunBusy = false;
                 }
-            } catch (eKl) {
-                bot.state.kunlunBgFighting = false;
             }
         } catch (eBossAll) { }
         return did;
@@ -20420,11 +20678,13 @@
     // ====================================================================
     bot.runAutoArenaSmart = async function (force = false) {
         if (!bot.isReady() || bot.isDisconnected() || bot.isBattling()) return false;
+        if (!force && bot.state.arenaFreeExhaustedUntil && Date.now() < bot.state.arenaFreeExhaustedUntil) return false;
         try {
             const gm = window.G_Mapping || {};
             const mm = window.ModelManager || gm.ModelManager || (typeof bot.getModelManager === "function" ? bot.getModelManager() : null);
             const rpc = gm.RPCReq || window.RPCReq;
             const am = (mm && mm.ArenaModel) || gm.ArenaModel;
+            const amCls = (am && am.constructor) || gm.ArenaModel || window.ArenaModel;
             const pm = (mm && mm.PlayerModel) || gm.PlayerModel;
             const fm = (gm && gm.FubenManager && gm.FubenManager.I) || (window.FubenManager && window.FubenManager.I);
             if (!am || !pm || !fm) return false;
@@ -20432,18 +20692,39 @@
             // Kiểm tra mở khóa tính năng Đấu Trường (Module e_ModuleOpenDataModuleOpen.Arena = 101 / 103)
             if (!bot.isSafeModuleOpen(101) && !bot.isSafeModuleOpen(103)) return false;
 
-            if (!am._myArenaInfo && typeof am.RequestData === "function" && bot.tryDo("arena_req_data_init", 20)) {
-                am.RequestData();
-                await bot.sleep(450);
+            const reqArenaData = function () {
+                if (typeof am.RequestData === "function") am.RequestData();
+                else if (amCls && typeof amCls.RequestData === "function") amCls.RequestData();
+                else if (rpc && typeof rpc.send === "function") rpc.send((gm.ArenaInfoCs && gm.ArenaInfoCs.protocol) || 11710, {});
+            };
+            const reqArenaRival = function () {
+                if (typeof am.reqRival === "function") am.reqRival();
+                else if (amCls && typeof amCls.reqRival === "function") amCls.reqRival();
+                else if (rpc && typeof rpc.send === "function") rpc.send((gm.ArenaRivalCs && gm.ArenaRivalCs.protocol) || 11714, {});
+            };
+            const reqArenaReward = function () {
+                if (typeof am.reqGetReward === "function") am.reqGetReward();
+                else if (amCls && typeof amCls.reqGetReward === "function") amCls.reqGetReward();
+                else if (rpc && typeof rpc.send === "function") rpc.send((gm.ArenaCntRewardsCs && gm.ArenaCntRewardsCs.protocol) || 11720, {});
+            };
+
+            if (!am._myArenaInfo && bot.tryDo("arena_req_data_init", 15)) {
+                reqArenaData();
+                reqArenaRival();
+                await bot.sleep(850);
+            }
+            if (!am._myArenaInfo) return false;
+
+            if (bot.state.arenaLocalDailyCnt !== undefined && Number(am._myArenaInfo._daily_cnt || 0) < bot.state.arenaLocalDailyCnt) {
+                am._myArenaInfo._daily_cnt = bot.state.arenaLocalDailyCnt;
             }
             if (typeof am.RefreshRed === "function") am.RefreshRed();
 
             const freeCount = (typeof am.GetFreeCount === "function") ? Number(am.GetFreeCount() || 0) : ((typeof am.getFreeCount === "function") ? Number(am.getFreeCount() || 0) : 0);
-            const hasFreeRed = bot.hasRed("V_ArenaFree");
-            const hasReward = (bot.hasRed("V_ArenaReward") || force) && bot.canDo("arena_get_reward", 60);
-            const canChallenge = (freeCount > 0 || hasFreeRed) && (force || bot.canDo("arena_challenge_cycle", 45));
-
-            if (!hasReward && !canChallenge) return false;
+            const dailyCnt = Number(am._myArenaInfo._daily_cnt || 0);
+            const cntRewards = Number(am._myArenaInfo._cnt_rewards || 0);
+            const hasReward = (cntRewards < 5 && dailyCnt > cntRewards) && bot.canDo("arena_get_reward", 30);
+            const canChallenge = (freeCount > 0) && (force || bot.canDo("arena_challenge_cycle", 35));
 
             let didSomething = false;
 
@@ -20451,15 +20732,21 @@
             try {
                 if (hasReward) {
                     bot.markDone("arena_get_reward");
-                    if (typeof am.reqGetReward === "function") {
-                        am.reqGetReward();
-                    } else if (gm.ArenaCntRewardsCs && gm.ArenaCntRewardsCs.protocol && rpc && typeof rpc.send === "function") {
-                        rpc.send(gm.ArenaCntRewardsCs.protocol, {});
-                    }
+                    reqArenaReward();
+                    am._myArenaInfo._cnt_rewards = cntRewards + 1;
                     didSomething = true;
                     await bot.sleep(300);
                 }
             } catch (eArenaRewards) { }
+
+            if (freeCount <= 0) {
+                bot.state.arenaFreeExhaustedUntil = Date.now() + 1800 * 1000;
+                if (bot.tryDo("arena_exhausted_est_log", 1800)) {
+                    bot.log(`⏳ [Đấu Trường] Đã hoàn thành hết lượt khiêu chiến miễn phí hôm nay (Đã đánh ${dailyCnt} trận) -> Ước tính tạm nghỉ chờ qua ngày mới (không spam)!`);
+                }
+                return didSomething;
+            }
+            if (!canChallenge) return didSomething;
 
             // B. Khiêu chiến đối thủ (Chỉ đánh khi có lượt miễn phí, chọn đối thủ LC thấp nhất, đọc chuẩn LC từ RoleInfo)
             if (canChallenge) {
@@ -20468,14 +20755,8 @@
                 let rivalObj = (typeof am.getRivalList === "function") ? am.getRivalList() : null;
                 let rivalList = (rivalObj && Array.isArray(rivalObj._list)) ? rivalObj._list : (Array.isArray(rivalObj) ? rivalObj : (Array.isArray(am._rivalList) ? am._rivalList : (Array.isArray(am.enemyList) ? am.enemyList : null)));
                 if (!rivalList || rivalList.length === 0) {
-                    if (typeof am.reqRival === "function") {
-                        am.reqRival();
-                    } else if (gm.ArenaModel && typeof gm.ArenaModel.reqRival === "function") {
-                        gm.ArenaModel.reqRival();
-                    } else if (gm.ArenaRivalCs && gm.ArenaRivalCs.protocol && rpc && typeof rpc.send === "function") {
-                        rpc.send(gm.ArenaRivalCs.protocol, {});
-                    }
-                    await bot.sleep(600);
+                    reqArenaRival();
+                    await bot.sleep(650);
                     rivalObj = (typeof am.getRivalList === "function") ? am.getRivalList() : null;
                     rivalList = (rivalObj && Array.isArray(rivalObj._list)) ? rivalObj._list : (Array.isArray(rivalObj) ? rivalObj : (Array.isArray(am._rivalList) ? am._rivalList : (Array.isArray(am.enemyList) ? am.enemyList : null)));
                 }
@@ -20587,7 +20868,18 @@
                         }
                         bot.closeBattleViews();
                         didSomething = true;
-                        if (typeof am.reqRival === "function") am.reqRival();
+                        // Cập nhật ngay số lượt đã dùng trong ngày (_daily_cnt) để tránh đọc sai lượt Free khi đánh ngầm!
+                        if (am._myArenaInfo) {
+                            am._myArenaInfo._daily_cnt = Number(am._myArenaInfo._daily_cnt || 0) + 1;
+                            bot.state.arenaLocalDailyCnt = am._myArenaInfo._daily_cnt;
+                        }
+                        if (typeof am.RefreshRed === "function") am.RefreshRed();
+                        reqArenaData();
+                        reqArenaRival();
+                        if (am._myArenaInfo && Number(am._myArenaInfo._cnt_rewards || 0) < 5 && Number(am._myArenaInfo._daily_cnt || 0) > Number(am._myArenaInfo._cnt_rewards || 0)) {
+                            reqArenaReward();
+                            am._myArenaInfo._cnt_rewards = Number(am._myArenaInfo._cnt_rewards || 0) + 1;
+                        }
                         await bot.sleep(650);
                         bot.closeBattleViews();
                     } finally {

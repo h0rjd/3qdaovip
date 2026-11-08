@@ -336,8 +336,6 @@ function saveConfigToDisk() {
                 });
             }
             rawConfig.telegram = Object.assign(rawConfig.telegram || {}, {
-                bot_token: "",
-                chat_id: "",
                 report_interval_min: CONFIG.telegram.report_interval_min
             });
         }
@@ -1376,10 +1374,22 @@ async function launchAndEnterGame(sessionState) {
         if (isTrueDeviceKick && !sessionState.isYielding && !sessionState.closingBrowserForYield) {
             sessionState.kickDetectedFromLog = true;
             sessionState.isYielding = true;
-            const br = sessionState.activeBrowser || sessionState.currentBrowser;
-            if (br && !sessionState.closingBrowserForYield) {
+            const br = sessionState.activeBrowser || sessionState.currentBrowser || browser;
+            if (!sessionState.closingBrowserForYield) {
                 sessionState.closingBrowserForYield = true;
-                writeLog(`📱 [Nhường Máy] Nhận tín hiệu KICK thiết bị khác từ game -> Đóng Chromium ngay lập tức để giải phóng kết nối cho Điện thoại!`);
+                writeLog(`📱 [Nhường Máy] Nhận tín hiệu KICK thiết bị khác từ game -> Ngắt tiến trình Chromium ngay lập tức (0ms) để giải phóng kết nối cho Điện thoại!`);
+                try {
+                    const proc = (br && typeof br.process === 'function') ? br.process() : null;
+                    if (proc && typeof proc.kill === 'function') {
+                        proc.kill('SIGKILL');
+                    }
+                } catch (eKillProc) {}
+                if (isGitHubActions || process.platform === 'linux') {
+                    try {
+                        const { execSync } = require('child_process');
+                        execSync('pkill -9 -f chrome || pkill -9 -f chromium || true');
+                    } catch (ePkill) {}
+                }
                 (async () => {
                     try {
                         if (br) await br.close();
@@ -1658,6 +1668,36 @@ async function launchAndEnterGame(sessionState) {
 
                     const mm = safeReq("ModelManager");
                     const vm = safeReq("ViewManager");
+                    const nwEarly = (window.G_Mapping && window.G_Mapping.NetWork && window.G_Mapping.NetWork.Ins) || (window.NetWork && window.NetWork.Ins);
+                    if (nwEarly && !nwEarly.__EARLY_KICK_WATCH__) {
+                        nwEarly.__EARLY_KICK_WATCH__ = true;
+                        const dispEarly = (window.G_Mapping && window.G_Mapping.Dispatcher) || window.Dispatcher;
+                        if (dispEarly && typeof dispEarly.addEventListener === "function") {
+                            dispEarly.addEventListener("evt_LoginKickSc", function (evt, d) {
+                                const p = (d && d._res != null) ? d : (evt || {});
+                                const rc = Number(p._res != null ? p._res : 0);
+                                if (rc !== 3) {
+                                    nwEarly.isManualClose = true;
+                                    nwEarly._isCanReconnect = false;
+                                    nwEarly.reconnect = function () { };
+                                    if (nwEarly._wsClient) {
+                                        nwEarly._wsClient.callbacks = {};
+                                        if (nwEarly._wsClient.ws) {
+                                            try { nwEarly._wsClient.ws.onclose = null; nwEarly._wsClient.ws.close(); } catch (eWs) {}
+                                        }
+                                    }
+                                    if (typeof window.pyOnBotLog === "function") {
+                                        window.pyOnBotLog({ kickNow: true, msg: "📱 [Nhường Máy] Early LoginKickSc _res=" + rc });
+                                    }
+                                }
+                            }, nwEarly);
+                        }
+                    }
+                    if (nwEarly && nwEarly.kickData && Number(nwEarly.kickData._res || 0) !== 3) {
+                        if (typeof window.pyOnBotLog === "function") {
+                            window.pyOnBotLog({ kickNow: true, msg: "📱 [Nhường Máy] Early kickData _res=" + Number(nwEarly.kickData._res || 0) });
+                        }
+                    }
                     const pm = mm && mm.PlayerModel ? mm.PlayerModel : null;
                     const rInfo = pm ? (typeof pm.getRoleInfo === "function" ? pm.getRoleInfo() : pm.roleInfo) : null;
 
@@ -2470,7 +2510,13 @@ async function run() {
                 sessionState.forceResumeFromYield = false;
                 sessionState.deadSessionStreak = 0;
 
-                const waitMin = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
+                const baseWaitMin = Math.max(10, Number(CONFIG.settings.yield_wait_minutes) || 10);
+                if (!isManual && sessionState.lastResumeFromYieldAt && (Date.now() - sessionState.lastResumeFromYieldAt < 8 * 60 * 1000)) {
+                    sessionState.consecutiveYieldCount = (sessionState.consecutiveYieldCount || 1) + 1;
+                } else {
+                    sessionState.consecutiveYieldCount = 1;
+                }
+                const waitMin = isManual ? baseWaitMin : Math.min(30, baseWaitMin + (sessionState.consecutiveYieldCount - 1) * 5);
                 writeLog(`📱 [Nhường Máy] ${isManual ? 'Nhận lệnh tạm dừng từ người dùng' : 'Phát hiện tài khoản đăng nhập từ Điện thoại/PC'}! Đóng trình duyệt ngay, tạm dừng ${waitMin} phút rồi tự động kết nối lại...`);
 
                 // Lưu cộng dồn chỉ số Farm KNB trước khi đóng trình duyệt (reset bộ đếm phiên cũ tránh cộng trùng)
@@ -2484,6 +2530,16 @@ async function run() {
                     sessionState.lastKnownStats.totalRescueScanned = 0;
                 }
 
+                try {
+                    const proc = (activeBrowser && typeof activeBrowser.process === 'function') ? activeBrowser.process() : null;
+                    if (proc && typeof proc.kill === 'function') proc.kill('SIGKILL');
+                } catch (eKillActive) {}
+                if (isGitHubActions || process.platform === 'linux') {
+                    try {
+                        const { execSync } = require('child_process');
+                        execSync('pkill -9 -f chrome || pkill -9 -f chromium || true');
+                    } catch (ePkill) {}
+                }
                 try {
                     if (activeBrowser) await activeBrowser.close();
                 } catch (eClose) {}
@@ -2549,6 +2605,7 @@ async function run() {
 
                 const resumed = await safeLaunchAndEnterGame(sessionState, 4);
                 if (resumed && resumed.browser && resumed.inGame === true) {
+                    sessionState.lastResumeFromYieldAt = Date.now();
                     activeBrowser = resumed.browser;
                     activePage = resumed.page;
                     sessionState.activeBrowser = activeBrowser;
