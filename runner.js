@@ -1350,7 +1350,7 @@ async function launchAndEnterGame(sessionState) {
             return;
         }
 
-        const isRoutineNetworkDrop = m.includes('_res=0') || m.includes('_res=3') || m.includes('mất phiên mạng') || m.includes('hết hạn phiên');
+        const isRoutineNetworkDrop = m.includes('_res=3') || m.includes('mất phiên mạng') || m.includes('hết hạn phiên');
         if (isRoutineNetworkDrop) {
             if (!sessionState.isYielding && !sessionState.kickDetectedFromLog) {
                 sessionState.freshReloginRequested = true;

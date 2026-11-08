@@ -2802,6 +2802,10 @@
                     nwProto.onLoginKickSc = function (event, data) {
                         const payload = (data && data._res != null) ? data : ((event && event._res != null) ? event : (event || data || {}));
                         const resCode = Number(payload._res != null ? payload._res : (payload._code != null ? payload._code : 0));
+                        if (resCode === 0) {
+                            // Server gửi _res === 0 là phản hồi bình thường / không có lỗi / không phải kick
+                            return;
+                        }
                         bot.log(`🛡️ [Anti-Kick] Nhận gói LoginKickSc từ máy chủ: ${JSON.stringify(payload)}`);
 
                         this.kickData = payload;
@@ -8668,6 +8672,9 @@
                                 if (evt === "evt_LoginKickSc") {
                                     const kData = args[0] || {};
                                     const kRes = Number(kData._res != null ? kData._res : (kData._code != null ? kData._code : 0));
+                                    if (kRes === 0) {
+                                        return;
+                                    }
                                     const isSpamKick = typeof bot.isRateLimitKickAfterCode66 === "function" && bot.isRateLimitKickAfterCode66();
                                     if ((kRes === 1 || kRes === 2) && !isSpamKick) {
                                         bot.log("📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=" + kRes + ") -> Nhường máy ngay!");
