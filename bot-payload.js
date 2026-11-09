@@ -3228,6 +3228,9 @@
                             if (proto === warStartProto && data && Number(data._type) > 1 && typeof bot.markAutoBattle === "function") {
                                 bot.markAutoBattle(Number(data._type), 25000);
                             }
+                            if (bot.mcpAgent && typeof bot.mcpAgent.onOutgoingRpc === "function") {
+                                try { bot.mcpAgent.onOutgoingRpc(proto, data, "AUTO_BOT"); } catch (eMcp) { }
+                            }
                         } else if (proto !== 10413 && proto !== 10100 && proto !== 10102) {
                             if (!window.__CLOUD_HEADLESS_BOT__) {
                                 window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, now + 3000);
@@ -3247,6 +3250,9 @@
                             } else {
                                 bot.state._bgSilentUntil = 0;
                                 bot.state._lastManualUiActionTs = now;
+                            }
+                            if (bot.mcpAgent && typeof bot.mcpAgent.onOutgoingRpc === "function") {
+                                try { bot.mcpAgent.onOutgoingRpc(proto, data, "MANUAL_PLAYER"); } catch (eMcp) { }
                             }
                         }
 
@@ -3268,11 +3274,17 @@
                             if (bot.state._bgSilentDepth > 0) {
                                 bot.state._lastBgRpcSentTs = nowD;
                                 bot.state._bgSilentUntil = Math.max(bot.state._bgSilentUntil || 0, nowD + 900);
+                                if (bot.mcpAgent && typeof bot.mcpAgent.onOutgoingRpc === "function") {
+                                    try { bot.mcpAgent.onOutgoingRpc(protoD, dataD, "AUTO_BOT"); } catch (eMcpD) { }
+                                }
                             } else {
                                 bot.state._bgSilentUntil = 0;
                                 bot.state._lastManualUiActionTs = nowD;
                                 if (!window.__CLOUD_HEADLESS_BOT__) {
                                     window.__USER_TOUCH_YIELD_UNTIL__ = Math.max(window.__USER_TOUCH_YIELD_UNTIL__ || 0, nowD + 3000);
+                                }
+                                if (protoD !== 10413 && protoD !== 10100 && protoD !== 10102 && bot.mcpAgent && typeof bot.mcpAgent.onOutgoingRpc === "function") {
+                                    try { bot.mcpAgent.onOutgoingRpc(protoD, dataD, "MANUAL_PLAYER"); } catch (eMcpD) { }
                                 }
                             }
                             if (protoD === 13110 && rpc.sendTimeCache) {
@@ -6563,12 +6575,14 @@
                                         }
                                     } catch (eKl4) { }
                                     return;
-                                } else if (proto === 11710 || proto === 11714 || proto === 11720 || proto === 10513 || proto === 10515 || proto === 15065 || proto === 11010 || proto === 11012 || proto === 11014 || proto === 11016) {
-                                    // Gói Đấu Trường / Chiêu Binh / Tam Quốc / Nhận Nhiệm Vụ báo thao tác nhanh -> giãn nhịp ngầm, KHÔNG khóa chiến đấu & KHÔNG spam log!
+                                } else if (proto === 11710 || proto === 11714 || proto === 11720 || proto === 10513 || proto === 10515 || proto === 10518 || proto === 15010 || proto === 15012 || proto === 15065 || proto === 14515 || proto === 14517 || proto === 11010 || proto === 11012 || proto === 11014 || proto === 11016) {
+                                    // Gói Đấu Trường / Chiêu Binh / Gia Viên / Tam Quốc / Cấm Địa / Nhận Nhiệm Vụ báo thao tác nhanh -> giãn nhịp ngầm, KHÔNG khóa chiến đấu & KHÔNG spam log!
                                     if (proto === 11710 || proto === 11714 || proto === 11720) {
                                         bot.state.arenaFreeExhaustedUntil = Math.max(bot.state.arenaFreeExhaustedUntil || 0, Date.now() + 60000);
                                     } else if (proto === 11010 || proto === 11012 || proto === 11014 || proto === 11016) {
                                         bot.state.taskClaimCoolUntil = Date.now() + 25000;
+                                    } else if (proto === 14515 || proto === 14517) {
+                                        bot.state.jindiCoolUntil = Date.now() + 90000;
                                     }
                                     return;
                                 } else if (proto === 10550 || proto === 10552 || proto === 10305 || proto === 10334 || proto === 11801 || proto === 10901 || proto === 10903 || proto === 10905 || proto === 12411 || proto === 10560 || proto === 10562 || proto === 15300 || proto === 14713) {
@@ -9603,12 +9617,121 @@
                     : (hbm._heroProtoArray[1] && hbm._heroProtoArray[1][1]);
 
                 let allOwned = [];
+                const seenOwnedIds = {};
+                const pushOwnedHero = (item) => {
+                    if (!item) return;
+                    const hid = Number((item.getId && item.getId()) || (item.getHeroBaseId && item.getHeroBaseId()) || item._id || item.id || item.baseId || 0);
+                    if (hid > 0 && !seenOwnedIds[hid]) {
+                        seenOwnedIds[hid] = true;
+                        const fullItem = (typeof hbm.getHeroDataItemByHeroBaseId === "function" && !item.getPower)
+                            ? (hbm.getHeroDataItemByHeroBaseId(hid) || item)
+                            : item;
+                        allOwned.push(fullItem);
+                    }
+                };
                 try {
-                    allOwned = (typeof hbm.getAllSortHeroInfo === "function")
-                        ? (hbm.getAllSortHeroInfo() || [])
-                        : (hbm._heroDataItemList || []);
-                } catch (eOwn) { }
-                const expectedFullCount = Math.min(6, Math.max(1, allOwned.length || 6));
+                    const list1 = (typeof hbm.getAllSortHeroInfo === "function") ? (hbm.getAllSortHeroInfo() || []) : [];
+                    if (Array.isArray(list1)) list1.forEach(pushOwnedHero);
+                } catch (eOwn1) { }
+                try {
+                    const arrInfo = (typeof hbm.getSortHeroInfoByArrayNew === "function") ? hbm.getSortHeroInfoByArrayNew(1, 1) : null;
+                    if (arrInfo) {
+                        if (Array.isArray(arrInfo.ArrayHero)) arrInfo.ArrayHero.forEach(pushOwnedHero);
+                        if (Array.isArray(arrInfo.UnArrayHero)) arrInfo.UnArrayHero.forEach(pushOwnedHero);
+                        if (Array.isArray(arrInfo.AllHero)) arrInfo.AllHero.forEach(pushOwnedHero);
+                    }
+                } catch (eOwn2) { }
+                try {
+                    const candLists = [
+                        hbm._heroDataItemList,
+                        hbm._heroDataList,
+                        hbm._heroList,
+                        hbm.heroList,
+                        (typeof hbm.getHaveHeroDataList === "function") ? hbm.getHaveHeroDataList() : null,
+                        (typeof hbm.getHeroBagList === "function") ? hbm.getHeroBagList() : null
+                    ];
+                    for (let li = 0; li < candLists.length; li++) {
+                        const cl = candLists[li];
+                        if (Array.isArray(cl)) cl.forEach(pushOwnedHero);
+                    }
+                    const hbmKeys = Object.keys(hbm);
+                    for (let ki = 0; ki < hbmKeys.length; ki++) {
+                        const val = hbm[hbmKeys[ki]];
+                        if (!val || typeof val !== "object") continue;
+                        if (val instanceof Map) {
+                            val.forEach(v => pushOwnedHero(v));
+                        } else if (Array.isArray(val)) {
+                            for (let vi = 0; vi < Math.min(val.length, 300); vi++) pushOwnedHero(val[vi]);
+                        }
+                    }
+                } catch (eOwn3) { }
+                let bestBackupHeroes = [];
+                let bestBackupPets = [];
+                try {
+                    const checkProtoObj = (pObj) => {
+                        if (!pObj || !Array.isArray(pObj._array)) return;
+                        const bHeroes = [];
+                        const bPets = [];
+                        for (let bi = 0; bi < pObj._array.length; bi++) {
+                            const ent = pObj._array[bi];
+                            if (!ent || !ent._id) continue;
+                            const bIdx = Number(ent._idx || 0);
+                            const bId = Number(ent._id || 0);
+                            if (bIdx >= elfIdxStart) {
+                                bPets.push({ _idx: bIdx, _id: bId });
+                            } else if (bIdx > 0 && bId > 0) {
+                                bHeroes.push({ _idx: bIdx, _id: bId });
+                                pushOwnedHero({ _id: bId });
+                            }
+                        }
+                        if (bHeroes.length > bestBackupHeroes.length) {
+                            bestBackupHeroes = bHeroes;
+                            if (bPets.length > 0) bestBackupPets = bPets;
+                        }
+                    };
+                    if (hbm._heroProtoArray && typeof hbm._heroProtoArray === "object") {
+                        const tKeys = Object.keys(hbm._heroProtoArray);
+                        for (let ti = 0; ti < tKeys.length; ti++) {
+                            const subObj = hbm._heroProtoArray[tKeys[ti]];
+                            if (!subObj || typeof subObj !== "object") continue;
+                            if (Array.isArray(subObj._array)) {
+                                checkProtoObj(subObj);
+                            } else {
+                                const sKeys = Object.keys(subObj);
+                                for (let si = 0; si < sKeys.length; si++) checkProtoObj(subObj[sKeys[si]]);
+                            }
+                        }
+                    }
+                    if (typeof hbm.getProtoArrayByType === "function") {
+                        const formTypes = [2, 3, 4, 5, 6, 8, 12, 18, 22, 101, 106];
+                        for (let fi = 0; fi < formTypes.length; fi++) {
+                            checkProtoObj(hbm.getProtoArrayByType(formTypes[fi], 1));
+                        }
+                    }
+                } catch (eBk) { }
+                try {
+                    if (allOwned.length < 6 && typeof hbm.getHeroDataItemByHeroBaseId === "function") {
+                        for (let cid = 100; cid <= 650; cid++) {
+                            const hIt = hbm.getHeroDataItemByHeroBaseId(cid);
+                            if (hIt) pushOwnedHero(hIt);
+                        }
+                        for (let cid = 1000; cid <= 4500; cid++) {
+                            const hIt = hbm.getHeroDataItemByHeroBaseId(cid);
+                            if (hIt) pushOwnedHero(hIt);
+                        }
+                    }
+                } catch (eScanId) { }
+                const roleInfoNow = (mm.PlayerModel && typeof mm.PlayerModel.getRoleInfo === "function") ? mm.PlayerModel.getRoleInfo() : null;
+                const playerLvNow = Number((roleInfoNow && typeof roleInfoNow.getLv === "function" ? roleInfoNow.getLv() : (roleInfoNow && roleInfoNow._level)) || (bot.stats && bot.stats.level) || 0);
+                const playerPowNow = Number((roleInfoNow && typeof roleInfoNow.getPower === "function" ? roleInfoNow.getPower() : 0) || (bot.stats && bot.stats.power) || 0);
+                const expectedFullCount = (playerLvNow >= 25 || playerPowNow >= 2000000 || bestBackupHeroes.length >= 6 || allOwned.length >= 6)
+                    ? 6
+                    : Math.min(6, Math.max(1, allOwned.length || 6));
+                if (bestBackupHeroes.length >= expectedFullCount && (!bot.state.savedFullMainArray || !Array.isArray(bot.state.savedFullMainArray.heroes) || bot.state.savedFullMainArray.heroes.length < expectedFullCount)) {
+                    for (let bhi = 0; bhi < bestBackupHeroes.length; bhi++) {
+                        pushOwnedHero({ _id: bestBackupHeroes[bhi]._id });
+                    }
+                }
 
                 const getHeroItemPower = (heroBaseId) => {
                     try {
@@ -10188,7 +10311,7 @@
                 const hbm = mm && mm.HeroBagModel;
                 if (!hbm) return;
                 const snap = bot.captureAndEnsureFullFormation();
-                if (!snap || !Array.isArray(snap.heroes) || snap.heroes.length <= 1) return;
+                if (!snap || !Array.isArray(snap.heroes) || snap.heroes.length < 6) return;
                 bot.state._bootFullSynced = true;
                 const proto1 = (typeof hbm.getProtoArrayByType === "function") ? hbm.getProtoArrayByType(1, 1) : (hbm._heroProtoArray && hbm._heroProtoArray[1] && hbm._heroProtoArray[1][1]);
                 const elfIdxStart = (gm.GameDef && gm.GameDef.FightRowPos && gm.GameDef.FightRowPos.Elf) ? (10 * gm.GameDef.FightRowPos.Elf) : 30;
@@ -10199,9 +10322,10 @@
                     }
                 }
                 if (curHeroCnt > 0 && curHeroCnt < snap.heroes.length && typeof bot.restoreFullCombatArray === "function") {
+                    bot.log(`🛡️ [Khôi Phục Đội Hình] Phát hiện đội hình đầu phiên đang ở ${curHeroCnt}/${snap.heroes.length} tướng (do phiên trước đang dò KNB) -> Khôi phục ngay 6 tướng chuẩn!`);
                     bot.state.isScoutLowPowerActive = true;
                     await bot.restoreFullCombatArray("boot_sync");
-                    await bot.sleep(150);
+                    await bot.sleep(1150);
                     bot.captureAndEnsureFullFormation();
                     if (typeof bot.updateStats === "function") bot.updateStats();
                 }
@@ -11450,8 +11574,8 @@
             const mm = window.ModelManager;
             if (!mm || !mm.HeroBagModel || !mm.PlayerModel) return false;
 
-            // CONDITION-DRIVEN: Chỉ chạy khi có chấm đỏ thăng cấp / đột phá
-            if (!bot.hasRed("V_HeroLvOrStepUp")) return false;
+            // CONDITION-DRIVEN + HEADLESS FALLBACK: Chạy khi có chấm đỏ hoặc kiểm tra định kỳ mỗi 90s trong chế độ chạy ngầm
+            if (!bot.hasRed("V_HeroLvOrStepUp") && !bot.tryDo("headless_heroup_probe", 90)) return false;
 
             // Chống "Thao tác quá nhanh": Bỏ qua nếu có trận chiến đang diễn ra hoặc đang bị khóa nâng cấp
             if (bot.isBattling()) return false;
@@ -11523,7 +11647,7 @@
 
             if (bot.isBattling()) return false;
 
-            const canStar = bot.hasRed("V_HeroStarUp") || bot.hasRed("V_HeroOneKeyStarHavCost");
+            const canStar = bot.hasRed("V_HeroStarUp") || bot.hasRed("V_HeroOneKeyStarHavCost") || bot.tryDo("headless_starup_probe", 90);
             if (!canStar || !bot.canDo("star_up_batch", 20)) return false;
 
             try {
@@ -11573,7 +11697,7 @@
             const hasPet = bot.hasRed("V_PetBookCanUnLockOrCanStarUp");
             const hasRide = bot.hasRed("M_Rides");
 
-            if (!hasHero && !hasArtifact && !hasTalent && !hasLvUp && !hasPet && !hasRide) {
+            if (!hasHero && !hasArtifact && !hasTalent && !hasLvUp && !hasPet && !hasRide && !bot.tryDo("headless_manual_probe", 90)) {
                 return false;
             }
 
@@ -12334,7 +12458,7 @@
                                         }
                                         target._de_luck = 1;
                                         didSomething = true;
-                                        await bot.sleep(800);
+                                        await bot.sleep(1250);
                                     }
                                 }
                             }
@@ -13639,9 +13763,9 @@
             return didSomething;
         },
 
-        runAutoDispatchSmart: async function () {
+        runAutoDispatchSmart: async function (force) {
             if (typeof G_Mapping === "undefined" || !G_Mapping.RPCReq) return false;
-            if (bot.state.exploreCoolDownUntil && Date.now() < bot.state.exploreCoolDownUntil) return false;
+            if (!force && bot.state.exploreCoolDownUntil && Date.now() < bot.state.exploreCoolDownUntil) return false;
 
             const mm = window.ModelManager;
             if (!mm || !mm.ExploreModel) return false;
@@ -13673,7 +13797,13 @@
                     }
                 }
             }
-            if (!hasReward && !hasWeekRed && !hasEmpty) return false;
+            if ((!expModel._exploreEventObj || Object.keys(expModel._exploreEventObj).length === 0) && bot.tryDo("req_explore_info_init", 60)) {
+                if (typeof expModel.reqExploreInfo === "function") expModel.reqExploreInfo();
+                else if (G_Mapping.ExploreInfoCs && G_Mapping.ExploreInfoCs.protocol) G_Mapping.RPCReq.send(G_Mapping.ExploreInfoCs.protocol, {});
+                else G_Mapping.RPCReq.send(12101, {});
+                await bot.sleep(450);
+            }
+            if (!force && !hasReward && !hasWeekRed && !hasEmpty && (!expModel._exploreEventObj || Object.keys(expModel._exploreEventObj).length === 0)) return false;
 
             let didSomething = false;
 
@@ -16373,7 +16503,7 @@
                     if (!bot.isDisconnected() && bot.isReady()) {
                         bot.updateStats();
                         bot.hookGameEngine();
-                        if (bot.state.rescueFightActive || bot.state.rescueInspectingOccupied) {
+                        if (bot.state.rescueFightActive) {
                             return;
                         }
                         bot.checkMainCopyStall();
@@ -16420,9 +16550,11 @@
                                 console.error("[AutoBot] Error in runAutoHostSmart:", e2);
                             }
 
-                            // 2.1 Tự động Farm KNB qua Giải Cứu Gia Viên (50 KNB/lượt không giới hạn)
+                            // 2.1 Tự động Farm KNB qua Giải Cứu Gia Viên (chỉ chạy dự phòng nếu Fast Scanner 380ms/500ms chưa chạy trong 4.5s để KHÔNG làm nghẽn Bước 3..17!)
                             try {
-                                if (bot.state.isAutoRescueKnbActive && typeof bot.runAutoRescueKnbSmart === "function") {
+                                if (bot.state.isAutoRescueKnbActive && typeof bot.runAutoRescueKnbSmart === "function" &&
+                                    (Date.now() - (bot.state._lastFastRescueTickTs || 0) > 4500)) {
+                                    bot.state._lastFastRescueTickTs = Date.now();
                                     await bot.runAutoRescueKnbSmart();
                                 }
                             } catch (eRescue) {
@@ -16588,7 +16720,7 @@
 
                             // 16b. Tự động vào đội Cấm Địa Top SV (kéo max ải)
                             try {
-                                if (bot.settings.auto_jindi_top_team !== false && typeof bot.runAutoJindiTopTeamSmart === "function" && bot.tryDo("loop_jindi_join", 6)) {
+                                if (bot.settings.auto_jindi_top_team !== false && typeof bot.runAutoJindiTopTeamSmart === "function" && bot.tryDo("loop_jindi_join", 45)) {
                                     await bot.runAutoJindiTopTeamSmart();
                                 }
                             } catch (e16b) { }
@@ -16714,6 +16846,7 @@
                     if (window.__BOT_HARD_STOPPED__ || window.__BOT_YIELDING__ || bot.state.kickedByOtherDevice) return;
                     if (bot.state.master === false || bot.state.isAutoRescueKnbActive !== true || bot.settings.auto_rescue_knb === false) return;
                     if (!bot.isDisconnected() && bot.isReady() && !bot.state.rescueChecking && !bot.isBattling()) {
+                        bot.state._lastFastRescueTickTs = Date.now();
                         if (typeof bot.runInBgAutoContext === "function") {
                             bot.runInBgAutoContext(function () { return bot.runAutoRescueKnbSmart(); });
                         } else {
@@ -19111,6 +19244,12 @@
             const serverTime = (stm && typeof stm.getServerTime === "function") ? Number(stm.getServerTime()) : Math.floor(Date.now() / 1000);
             let did = false;
 
+            if ((!cm.caravanTable || Object.keys(cm.caravanTable).length === 0) && bot.tryDo("caravan_init_sync", 90)) {
+                if (typeof cm.reqCaravanInfo === "function") cm.reqCaravanInfo();
+                else if (gm.CaravanInfoCs && gm.CaravanInfoCs.protocol) rpc.send(gm.CaravanInfoCs.protocol, {});
+                await bot.sleep(350);
+            }
+
             // 1. Nhận thưởng toàn bộ Xe Tiêu đã hoàn thành hộ tống
             try {
                 const pickProto = gm.CaravanPickCaravanCs && gm.CaravanPickCaravanCs.protocol;
@@ -19974,6 +20113,7 @@
                 bot.markDone("cw_periodic_sync");
                 if (typeof cwm.reqSiegeInfo === "function") cwm.reqSiegeInfo();
                 else rpc.send(15010, {});
+                await bot.sleep(450);
                 if (typeof cwm.reqMainViewData === "function") cwm.reqMainViewData();
                 else rpc.send(15012, {});
                 if (!siegeInfo || !hasCityMap) {
@@ -20605,6 +20745,7 @@
     bot.runAutoJindiTopTeamSmart = async function () {
         try {
             if (!bot.isReady()) return false;
+            if (bot.state.jindiCoolUntil && Date.now() < bot.state.jindiCoolUntil) return false;
             const gm = window.G_Mapping || {};
             const mm = window.ModelManager || gm.ModelManager;
             const vm = bot.getViewManager ? bot.getViewManager() : window.ViewManager;
@@ -20631,7 +20772,7 @@
             const win = (typeof vm.getView === "function") ? vm.getView("TeamRestricteTeamListView") : null;
             let teams = (win && Array.isArray(win.teamDatas)) ? win.teamDatas : (Array.isArray(window.__QA_JINDI_CACHED_TEAMS__) ? window.__QA_JINDI_CACHED_TEAMS__ : null);
 
-            if ((!teams || teams.length === 0) && typeof tpm.reqTeamListByType === "function" && bot.tryDo("jindi_req_list", 8)) {
+            if ((!teams || teams.length === 0) && typeof tpm.reqTeamListByType === "function" && bot.tryDo("jindi_req_list", 30)) {
                 tpm.reqTeamListByType(mpType);
                 await bot.sleep(600);
                 teams = (win && Array.isArray(win.teamDatas)) ? win.teamDatas : (Array.isArray(window.__QA_JINDI_CACHED_TEAMS__) ? window.__QA_JINDI_CACHED_TEAMS__ : null);
@@ -20642,6 +20783,8 @@
             const myRid = myRoleInfo && typeof myRoleInfo.getRoleId === "function" ? Number(myRoleInfo.getRoleId()) : ((mm.PlayerModel && typeof mm.PlayerModel.getRid === "function") ? Number(mm.PlayerModel.getRid()) : 0);
             const RoleInfoCls = gm.RoleInfo || (safeRequire("RoleInfo") && (safeRequire("RoleInfo").default || safeRequire("RoleInfo").RoleInfo));
 
+            if (!bot.state.jindiAppliedTeams) bot.state.jindiAppliedTeams = {};
+            const nowJindi = Date.now();
             let bestTeam = null;
             let bestPower = -1;
             let bestFloor = 1;
@@ -20652,6 +20795,7 @@
                 const members = Array.isArray(t._member) ? t._member : [];
                 if (members.length >= 3) continue;
                 if (tpm.hasApplyTeamId && tpm.hasApplyTeamId[t._id]) continue;
+                if (bot.state.jindiAppliedTeams[t._id] && (nowJindi - bot.state.jindiAppliedTeams[t._id] < 600000)) continue;
 
                 let alreadyIn = false;
                 let leaderPow = 0;
@@ -20689,10 +20833,12 @@
 
             if (bestTeam && typeof tpm.reqJoinTeam === "function") {
                 const joinType = bestTeam._type || (win && win.multiplayType) || mpType;
+                bot.state.jindiAppliedTeams[bestTeam._id] = nowJindi;
+                if (tpm.hasApplyTeamId) tpm.hasApplyTeamId[bestTeam._id] = true;
                 bot.log(`👑 [Cấm Địa Top SV] Xin vào Đội #${bestTeam._id} (Tầng ${bestFloor} • LC Đội Trưởng: ${bot.formatNumber ? bot.formatNumber(bestPower) : bestPower})`);
                 tpm.reqJoinTeam(joinType, bestTeam._id);
                 return true;
-            } else if (typeof tpm.reqTeamListByType === "function" && bot.tryDo("jindi_refresh_empty", 10)) {
+            } else if (typeof tpm.reqTeamListByType === "function" && bot.tryDo("jindi_refresh_empty", 45)) {
                 tpm.reqTeamListByType(mpType);
             }
         } catch (e) { }
@@ -21694,6 +21840,867 @@
 
     bot.cleanAllDailyAndClaim100 = async function () {
         return await bot.runOneClickAllDailyAndGifts();
+    };
+
+    // =========================================================================
+    // 3QAgentMCP v4.3 — LIVE PLAYER ACTION OBSERVER & AUTO-FLOW SYNTHESIZER
+    // Tham khảo kiến trúc GhostSoul MCPAgent (GALoopbackServer + GAJournalLogger)
+    // Theo dõi thời gian thực thao tác trên iPhone 14 Pro Max & sinh luồng Auto!
+    // =========================================================================
+    bot.mcpAgent = {
+        version: "4.3.0-MCP",
+        sessionId: "mcp_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+        seq: 0,
+        actionSeq: 0,
+        protoMapBuilt: false,
+        protoIdToName: {
+            10100: "HeartBeatCs",
+            10102: "LoginTimeCs",
+            10301: "HeroLvUpCs",
+            10303: "HeroStarUpBatchCs",
+            10320: "HeroManualUpCs",
+            10322: "HeroManualPickHeroCs",
+            10324: "HeroManualPickArtifactCs",
+            10326: "HeroManualPickTalentCs",
+            10332: "HeroSetArrayCs",
+            10334: "HeroRivalCs",
+            10401: "WarStartCs",
+            10409: "WarJumpCs",
+            10411: "WarGiveUpCs",
+            10413: "WarCloseCs",
+            10502: "HostBuildGainCs",
+            10504: "HostLvUpCs",
+            10506: "HostBuildGainAllCs",
+            10508: "HostTaskGainCs",
+            10510: "HostBuildCs",
+            10511: "HostLvUpCs",
+            10514: "HostPickSoldierCs",
+            10520: "HostEventRewardCs",
+            10542: "HostTaskGiftCs",
+            10544: "HostFlowerRewardCs",
+            10550: "HostHostListCs",
+            10552: "HostViewCs",
+            10554: "HostRobLogCs",
+            10556: "HostRobRewardsCs",
+            10558: "HostRobLuckCs",
+            10602: "CopyGetOfflineCs",
+            10702: "ShopListCs",
+            10704: "ShopBuyCs",
+            10802: "MailClaimCs",
+            10903: "RankInfoCs",
+            10905: "RankPageCs",
+            10907: "RankLikeCs",
+            10909: "RankMileGainCs",
+            11010: "TaskCompleteCs",
+            11012: "TaskDailyBoxCs",
+            11014: "TaskMainRewardCs",
+            11016: "TaskAchieveRewardCs",
+            11210: "ActRewardCs",
+            11502: "ArenaInfoCs",
+            11504: "ArenaRivalCs",
+            11508: "ArenaCntRewardsCs",
+            11801: "QueryPlayerInfoCs",
+            13110: "EquipBoxOpenCs",
+            13112: "EquipBoxSelectCs",
+            13113: "EquipBoxSellCs",
+            13114: "ItemSellCs",
+            13404: "FlipGainBoxCs",
+            13406: "FlipGetGainsCs",
+            13408: "FlipClickCs",
+            13410: "FlipResetCs",
+            14701: "CaravanPickCaravanCs",
+            14703: "CaravanSelectCs",
+            14705: "CaravanRefreshSelectCs",
+            14707: "CaravanGuildAskHelpCs",
+            14709: "CaravanPickBonusCs",
+            14713: "CaravanAtkListWinCs",
+            15300: "Siege2SeasonRankCs",
+            15302: "SiegeCityOutputWinCs",
+            15304: "SiegePickCityOutputCs",
+            15306: "SiegeCountryTaskWinCs",
+            15308: "SiegePickCountryTaskCs",
+            15310: "SiegeUpgradeGradeCs"
+        },
+        warTypeNames: {
+            1: "Ải Chính Tuyến",
+            2: "Tháp Thông Thiên",
+            3: "Đấu Trường",
+            4: "Phó Bản Ngày",
+            5: "Tháp Hệ (Ngụy/Thục/Ngô/Quần/Thần)",
+            6: "Tháp Hệ",
+            7: "Thám Hiểm Côn Lôn Khư",
+            8: "Boss Thế Giới",
+            9: "Boss Bang Hội",
+            10: "Tam Quốc Tranh Hùng (Quốc Chiến)",
+            12: "Vận Tiêu Thương Đội",
+            15: "Cấm Địa Tổ Đội",
+            18: "Bí Cảnh Tần Lĩnh",
+            106: "Giải Cứu Gia Viên (+50 KNB)"
+        },
+        ringLogs: [],
+        playerActions: [],
+        autoActionsCount: 0,
+        lastOpenedView: "MainUIView",
+        viewHistory: [],
+        learnedAutoFlow: null,
+        _lastWorldSyncTs: 0,
+        _viewHooked: false,
+
+        getBuildingName: function (bId, plotId) {
+            try {
+                const gm = window.G_Mapping;
+                let resolvedId = Number(bId || 0);
+                if (!resolvedId && plotId) {
+                    const hl = (gm && gm.HomeLandModel && (gm.HomeLandModel.Ins || gm.HomeLandModel)) || window.HomeLandModel;
+                    const builds = hl && (hl.buildList || hl._buildList || hl.buildings);
+                    const bObj = builds && (builds[plotId] || (typeof builds.get === "function" && builds.get(plotId)));
+                    if (bObj && bObj.id) resolvedId = Number(bObj.id);
+                }
+                if (resolvedId > 0) {
+                    const bc = window.BuildingConfiger || (gm && gm.BuildingConfiger);
+                    const cfg = (bc && typeof bc.getBuildingCfgById === "function")
+                        ? bc.getBuildingCfgById(resolvedId)
+                        : ((bc && typeof bc.getBuildingCfg === "function")
+                            ? bc.getBuildingCfg(resolvedId)
+                            : (gm && gm.MaincityConfiger && typeof gm.MaincityConfiger.getBuildingDataById === "function"
+                                ? gm.MaincityConfiger.getBuildingDataById(resolvedId)
+                                : null));
+                    if (cfg && (cfg.name || cfg.building_name || cfg._name)) {
+                        return `${cfg.name || cfg.building_name || cfg._name} (ID:${resolvedId})`;
+                    }
+                    return `Công trình #${resolvedId}`;
+                }
+            } catch (e) { }
+            return plotId ? `Công trình ô #${plotId}` : `Công trình #${bId || 0}`;
+        },
+
+        ensureProtocolMap: function () {
+            if (this.protoMapBuilt) return;
+            const gm = window.G_Mapping;
+            if (!gm || typeof gm !== "object") return;
+            try {
+                const keys = Object.keys(gm);
+                for (let i = 0; i < keys.length; i++) {
+                    const k = keys[i];
+                    if (!k || (!k.endsWith("Cs") && !k.endsWith("Sc"))) continue;
+                    const cls = gm[k];
+                    if (cls && (typeof cls === "function" || typeof cls === "object") && typeof cls.protocol === "number") {
+                        this.protoIdToName[cls.protocol] = k;
+                    }
+                }
+                this.protoMapBuilt = true;
+            } catch (e) { }
+        },
+
+        ensureViewHook: function () {
+            if (this._viewHooked) return;
+            const gm = window.G_Mapping;
+            const vm = (gm && gm.ViewManager && (gm.ViewManager.Ins || gm.ViewManager)) || window.ViewManager;
+            if (!vm) return;
+            const target = (typeof vm.open === "function") ? vm : (vm.prototype && typeof vm.prototype.open === "function" ? vm.prototype : null);
+            if (!target || target.__QA_MCP_VIEW_HOOKED__) return;
+            target.__QA_MCP_VIEW_HOOKED__ = true;
+            this._viewHooked = true;
+            const origOpen = target.open;
+            const selfMcp = this;
+            target.open = function (viewId) {
+                try {
+                    if (bot.state._bgSilentDepth === 0) {
+                        let vName = String(viewId || "");
+                        if (typeof viewId === "object" && viewId) {
+                            vName = String(viewId.name || viewId.prefab || viewId.viewName || viewId._name || "View");
+                        }
+                        if (vName && !vName.includes("RollTips") && !vName.includes("Loading")) {
+                            selfMcp.lastOpenedView = vName;
+                            selfMcp.viewHistory.push({ tsMs: Date.now(), view: vName });
+                            if (selfMcp.viewHistory.length > 60) selfMcp.viewHistory.shift();
+                            selfMcp.recordManualEvent("VIEW_NAV", "ViewManager.open", 0, { view: vName }, `🧭 Mở giao diện [${vName}]`);
+                        }
+                    }
+                } catch (eV) { }
+                return origOpen.apply(this, arguments);
+            };
+        },
+
+        sanitizePayload: function (data) {
+            if (!data || typeof data !== "object") return {};
+            try {
+                const raw = JSON.stringify(data);
+                if (raw && raw.length <= 1200) return JSON.parse(raw);
+                return { _truncated: raw ? raw.slice(0, 1200) : "" };
+            } catch (e) {
+                const out = {};
+                try {
+                    const ks = Object.keys(data).slice(0, 12);
+                    for (let i = 0; i < ks.length; i++) {
+                        const k = ks[i];
+                        const v = data[k];
+                        if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") out[k] = v;
+                        else if (Array.isArray(v)) out[k] = v.slice(0, 10);
+                    }
+                } catch (e2) { }
+                return out;
+            }
+        },
+
+        classifyPacket: function (protoId, protoName, data) {
+            const name = String(protoName || "");
+            const d = data || {};
+            const p = Number(protoId || 0);
+
+            // 1. BUILD (Xây dựng & Gia Viên)
+            if (p === 10510 || name === "HostBuildCs") {
+                const bId = d._id || d._build_id || d._type || 0;
+                const pos = d._plot || d._pos || d._grid_id || d._index || 0;
+                const bName = this.getBuildingName(bId, pos);
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_BUILD",
+                    summaryVi: `🏗️ [Gia Viên] Xây mới ${bName} tại ô #${pos}`,
+                    meta: { buildId: bId, buildName: bName, slot: pos }
+                };
+            }
+            if (p === 10504 || p === 10511 || name === "HostLvUpCs" || name.includes("HostUpgrade")) {
+                const plot = d._plot || d._pos || d._id || d._build_id || 0;
+                const bName = this.getBuildingName(d._id || 0, plot);
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_UPGRADE",
+                    summaryVi: `⬆️ [Gia Viên] Nâng cấp ${bName} (ô #${plot})`,
+                    meta: { buildId: d._id || plot, buildName: bName, slot: plot }
+                };
+            }
+            if (p === 10502 || p === 10506 || name.includes("HostBuildGain")) {
+                const bId = d._plot || d._id || d._build_id || "all";
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_HARVEST",
+                    summaryVi: `🌾 [Gia Viên] Thu hoạch sản lượng công trình (${bId})`,
+                    meta: { buildId: bId }
+                };
+            }
+            if (p === 10514 || name === "HostPickSoldierCs") {
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_SOLDIER",
+                    summaryVi: `🪖 [Gia Viên] Chiêu mộ / Thu hoạch binh lính Gia Viên`,
+                    meta: {}
+                };
+            }
+            if (p === 10544 || name === "HostFlowerRewardCs") {
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_FLOWER",
+                    summaryVi: `🌸 [Gia Viên] Nhận thưởng Hoa Gia Viên (loại ${d._type || 1})`,
+                    meta: { flowerType: d._type || 1 }
+                };
+            }
+            if (p === 10508 || p === 10542 || name.includes("HostTask")) {
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_TASK",
+                    summaryVi: `📋 [Gia Viên] Nhận thưởng Nhiệm vụ Gia Viên (ID=${d._id || 0})`,
+                    meta: { taskId: d._id || 0 }
+                };
+            }
+            if (name.startsWith("Host") && p !== 10550 && p !== 10552) {
+                return {
+                    category: "BUILD",
+                    subKind: "HOMELAND_OTHER",
+                    summaryVi: `🏡 [Gia Viên] Thao tác ${name} (${p})`,
+                    meta: {}
+                };
+            }
+
+            // 2. BUY (Mua sắm, Shop, Điểm Kim, Chiêu Mộ)
+            if (p === 10704 || name.includes("ShopBuy") || name.includes("BuyCs") || name === "DefJzDailyGiftCs") {
+                const shopId = d._shop_id || d._type || d._act_id || 0;
+                const goodsId = d._id || d._goods_id || d._item_id || 0;
+                const cnt = d._num || d._cnt || d._count || 1;
+                return {
+                    category: "BUY",
+                    subKind: "SHOP_PURCHASE",
+                    summaryVi: `🛒 [Mua Sắm] Mua vật phẩm ID=${goodsId} x${cnt} (Tiệm/Gói=${shopId} • ${name})`,
+                    meta: { shopId: shopId, goodsId: goodsId, count: cnt, protoName: name }
+                };
+            }
+            if (name.includes("MoneyTree") || name.includes("GoldBuy") || name.includes("CoinBuy")) {
+                return {
+                    category: "BUY",
+                    subKind: "BUY_GOLD_TREE",
+                    summaryVi: `💰 [Điểm Kim] Mua Vàng Cây Tài Lộc (${name})`,
+                    meta: { type: d._type || 1, count: d._cnt || 1 }
+                };
+            }
+            if (name.includes("Lottery") || name.includes("Recruit")) {
+                return {
+                    category: "BUY",
+                    subKind: "LOTTERY_RECRUIT",
+                    summaryVi: `🎲 [Chiêu Mộ] Quay thưởng / Chiêu mộ (${name} • loại=${d._type || 1} • lượt=${d._cnt || 1})`,
+                    meta: { type: d._type || 1, count: d._cnt || 1 }
+                };
+            }
+
+            // 3. COMBAT (Đánh Ải, Phó Bản, Tháp, Đấu Trường, Côn Lôn, Quốc Chiến, Vận Tiêu, Giải Cứu)
+            if (p === 10401 || p === 10409 || name === "WarStartCs" || name === "WarJumpCs") {
+                const wType = Number(d._type || 1);
+                const wName = this.warTypeNames[wType] || `Chế độ #${wType}`;
+                const targetId = d._id || d._copy_id || d._param || 0;
+                return {
+                    category: "COMBAT",
+                    subKind: wType === 106 ? "RESCUE_KNB_FIGHT" : "BATTLE_START",
+                    summaryVi: `⚔️ [Chiến Đấu] Khiêu chiến ${wName} (type=${wType}, mục tiêu/ải=${targetId})`,
+                    meta: { warType: wType, warTypeName: wName, targetId: targetId }
+                };
+            }
+            if (p === 13408 || p === 13410 || p === 13404 || p === 13406 || name.startsWith("Flip")) {
+                const pos = d._pos !== undefined ? d._pos : (d._index !== undefined ? d._index : d._id);
+                const isReset = (p === 13410 || name === "FlipResetCs");
+                return {
+                    category: "COMBAT",
+                    subKind: isReset ? "KUNLUN_RESET" : "KUNLUN_EXPLORE",
+                    summaryVi: isReset
+                        ? `🔄 [Côn Lôn Khư] Bấm Reset làm mới tầng Côn Lôn!`
+                        : `🏔️ [Côn Lôn Khư] Thao tác ${name} tại ô #${pos !== undefined ? pos : "?"}`,
+                    meta: { cellPos: pos, isReset: isReset, protoName: name }
+                };
+            }
+            if (name.startsWith("Siege")) {
+                return {
+                    category: "COMBAT",
+                    subKind: "COUNTRY_WAR",
+                    summaryVi: `🏯 [3Q Tranh Hùng] Thao tác Quốc Chiến: ${name} (ID=${d._id || d._city_id || 0})`,
+                    meta: { protoName: name, targetId: d._id || d._city_id || 0 }
+                };
+            }
+            if (name.startsWith("Caravan")) {
+                return {
+                    category: "COMBAT",
+                    subKind: "CARAVAN_ESCORT",
+                    summaryVi: `🚚 [Vận Tiêu] Thao tác Thương Đội: ${name} (ID/Phẩm=${d._id || d._quality || d._color || 0})`,
+                    meta: { protoName: name, id: d._id || d._quality || 0 }
+                };
+            }
+            if (name.startsWith("Arena") || name.startsWith("Wboss") || name === "GuildBossQuickWarCs" || name.startsWith("Jindi")) {
+                return {
+                    category: "COMBAT",
+                    subKind: "EVENT_COMBAT",
+                    summaryVi: `🐉 [Phó Bản/PK] Thao tác ${name} (ID=${d._id || d._rival_id || 0})`,
+                    meta: { protoName: name, targetId: d._id || d._rival_id || 0 }
+                };
+            }
+
+            // 4. LINEUP (Xếp Đội Hình & Nâng Tướng/Thần Binh/Thú Cưng)
+            if (p === 10332 || name === "HeroSetArrayCs") {
+                const arr = Array.isArray(d._array) ? d._array : (Array.isArray(d._heros) ? d._heros : []);
+                const heroIds = arr.map(function (x) { return (x && (x._id || x._hero_id)) || x; }).filter(Boolean);
+                return {
+                    category: "LINEUP",
+                    subKind: "SET_FORMATION",
+                    summaryVi: `🛡️ [Đội Hình] Xếp đội hình (${heroIds.length} tướng • loại=${d._type || 1}): [${heroIds.join(", ")}]`,
+                    meta: { arrayType: d._type || 1, heroIds: heroIds, heroCount: heroIds.length }
+                };
+            }
+            if (name.startsWith("Hero") || name.startsWith("Rides") || name.startsWith("Pet") || name.startsWith("Artifact")) {
+                return {
+                    category: "LINEUP",
+                    subKind: "HERO_UPGRADE",
+                    summaryVi: `⬆️ [Nâng Tướng/Đồ Giám] ${name} (ID=${d._id || d._hero_id || 0})`,
+                    meta: { protoName: name, targetId: d._id || d._hero_id || 0 }
+                };
+            }
+
+            // 5. EQUIP_DIG (Đào Bảo & Trang Bị)
+            if (p === 13110 || name === "EquipBoxOpenCs") {
+                const digCnt = d._cnt || d._count || d._num || 1;
+                return {
+                    category: "EQUIP_DIG",
+                    subKind: "TREASURE_DIG",
+                    summaryVi: `⛏️ [Đào Bảo] Đào kho báu x${digCnt} xẻng`,
+                    meta: { count: digCnt, type: d._type || 3 }
+                };
+            }
+            if (p === 13112 || name === "EquipBoxSelectCs") {
+                return {
+                    category: "EQUIP_DIG",
+                    subKind: "EQUIP_WEAR",
+                    summaryVi: `🛡️ [Trang Bị] Mặc trang bị mới ID=${d._id || 0} (bán đồ cũ=${d._sell || 0})`,
+                    meta: { equipId: d._id || 0, sellOld: d._sell || 0 }
+                };
+            }
+            if (p === 13113 || p === 13114 || name === "EquipBoxSellCs" || name === "ItemSellCs") {
+                const cnt = Array.isArray(d._list) ? d._list.length : 1;
+                return {
+                    category: "EQUIP_DIG",
+                    subKind: "EQUIP_SELL",
+                    summaryVi: `♻️ [Trang Bị/Túi] Bán / Tách ${cnt} vật phẩm (${name})`,
+                    meta: { count: cnt, protoName: name }
+                };
+            }
+
+            // 6. REWARD (Nhận Quà, Nhiệm Vụ, Thư, BXH, Bang Hội)
+            if (
+                name.startsWith("Task") ||
+                name.startsWith("Act") ||
+                name.startsWith("Mail") ||
+                name.startsWith("RankLike") ||
+                name.startsWith("RankMile") ||
+                name.startsWith("GuildWish") ||
+                name === "CopyGetOfflineCs" ||
+                name === "RelationAutoPickSendCs" ||
+                name.includes("Reward") ||
+                name.includes("Gain") ||
+                name.includes("Claim") ||
+                name.includes("Gift")
+            ) {
+                return {
+                    category: "REWARD",
+                    subKind: "CLAIM_REWARD",
+                    summaryVi: `🎁 [Nhận Quà] ${name} (${p} • ID=${d._id || d._type || 0})`,
+                    meta: { protoName: name, id: d._id || d._type || 0 }
+                };
+            }
+
+            return {
+                category: "OTHER",
+                subKind: "RPC_ACTION",
+                summaryVi: `📡 [Thao Tác] ${name || ("Proto_" + p)} (${p})`,
+                meta: { protoName: name, protoId: p }
+            };
+        },
+
+        recordManualEvent: function (category, protoName, protoId, payload, summaryVi, extraMeta) {
+            const now = Date.now();
+            this.seq += 1;
+            this.actionSeq += 1;
+            const snapBefore = {
+                stage: Number(bot.stats.stage || 0),
+                towerFloor: Number(bot.stats.towerFloor || 0),
+                level: Number(bot.stats.level || 0),
+                power: Number(bot.stats.power || 0),
+                jade: Number(bot.stats.jade || 0),
+                gold: Number(bot.stats.gold || 0),
+                homelandStage: Number(bot.stats.homelandStage || 0),
+                view: this.lastOpenedView || "MainUIView"
+            };
+            const record = {
+                seq: this.seq,
+                actionSeq: this.actionSeq,
+                tsMs: now,
+                tsIso: new Date(now).toISOString(),
+                sessionId: this.sessionId,
+                source: "MANUAL_PLAYER",
+                category: category,
+                protoId: Number(protoId || 0),
+                protoName: String(protoName || ""),
+                summaryVi: String(summaryVi || ""),
+                view: this.lastOpenedView || "MainUIView",
+                payload: this.sanitizePayload(payload),
+                meta: extraMeta || {},
+                stateBefore: snapBefore,
+                deltas: null
+            };
+
+            this.playerActions.push(record);
+            if (this.playerActions.length > 400) {
+                this.playerActions.shift();
+            }
+
+            this.ringLogs.push({
+                seq: this.seq,
+                tsMs: now,
+                event: "PLAYER_ACTION",
+                category: category,
+                summaryVi: record.summaryVi,
+                protoId: record.protoId,
+                protoName: record.protoName
+            });
+            if (this.ringLogs.length > 250) {
+                this.ringLogs.shift();
+            }
+
+            const selfMcp = this;
+            setTimeout(function () {
+                try {
+                    if (typeof bot.refreshAllGameStats === "function") bot.refreshAllGameStats();
+                    record.deltas = {
+                        jadeDelta: Number(bot.stats.jade || 0) - snapBefore.jade,
+                        goldDelta: Number(bot.stats.gold || 0) - snapBefore.gold,
+                        powerDelta: Number(bot.stats.power || 0) - snapBefore.power,
+                        stageDelta: Number(bot.stats.stage || 0) - snapBefore.stage,
+                        levelDelta: Number(bot.stats.level || 0) - snapBefore.level
+                    };
+                    selfMcp.pushRecordToNative(record);
+                } catch (eDelta) { }
+            }, 1100);
+
+            this.pushRecordToNative(record);
+            return record;
+        },
+
+        onOutgoingRpc: function (protoId, data, source) {
+            this.ensureProtocolMap();
+            this.ensureViewHook();
+            const p = Number(protoId || 0);
+            if (p === 10100 || p === 10102 || p === 11801 || p === 10334 || p === 10550 || p === 10552) {
+                if (source !== "MANUAL_PLAYER" || p === 10100 || p === 10102) return;
+            }
+            const protoName = this.protoIdToName[p] || ("Proto_" + p);
+            if (source === "AUTO_BOT") {
+                this.autoActionsCount += 1;
+                return;
+            }
+            const clsInfo = this.classifyPacket(p, protoName, data);
+            this.recordManualEvent(
+                clsInfo.category,
+                protoName,
+                p,
+                data,
+                clsInfo.summaryVi,
+                clsInfo.meta
+            );
+        },
+
+        getWorldStateSnapshot: function () {
+            try {
+                if (typeof bot.refreshAllGameStats === "function" && bot.isReady()) {
+                    bot.refreshAllGameStats();
+                }
+            } catch (e) { }
+            const countsByCat = { BUILD: 0, BUY: 0, COMBAT: 0, LINEUP: 0, EQUIP_DIG: 0, REWARD: 0, VIEW_NAV: 0, OTHER: 0 };
+            for (let i = 0; i < this.playerActions.length; i++) {
+                const c = this.playerActions[i].category || "OTHER";
+                countsByCat[c] = (countsByCat[c] || 0) + 1;
+            }
+            return {
+                ok: true,
+                version: this.version,
+                sessionId: this.sessionId,
+                nowMs: Date.now(),
+                phase: bot.isReady() ? "GAMEPLAY" : "LOADING",
+                humanOverride: Number(window.__USER_TOUCH_YIELD_UNTIL__ || 0) > Date.now(),
+                player: {
+                    roleId: bot.stats.roleId || 0,
+                    roleName: bot.stats.roleName || "",
+                    serverName: bot.stats.serverName || "",
+                    level: Number(bot.stats.level || 0),
+                    vip: Number(bot.stats.vip || 0),
+                    power: Number(bot.stats.power || 0),
+                    fullCombatPower: Number(bot.state.fullCombatPower || bot.stats.power || 0),
+                    jade: Number(bot.stats.jade || 0),
+                    gold: Number(bot.stats.gold || 0),
+                    stage: Number(bot.stats.stage || 0),
+                    towerFloor: Number(bot.stats.towerFloor || 0),
+                    homelandStage: Number(bot.stats.homelandStage || 0),
+                    rescuedCount: Number(bot.state.rescuedTodayCount || 0),
+                    rescuedKnbTotal: Number(bot.state.rescuedKnbTotal || 0),
+                    scannedHouses: Number(bot.state.totalVisitedHouses || 0)
+                },
+                ui: {
+                    activeView: this.lastOpenedView || "MainUIView",
+                    recentViews: this.viewHistory.slice(-10)
+                },
+                dautoConfig: window.__DAUTO_CONFIG || {},
+                mcpStats: {
+                    latestSeq: this.seq,
+                    totalPlayerActions: this.playerActions.length,
+                    totalAutoActions: this.autoActionsCount,
+                    countsByCategory: countsByCat
+                },
+                recentPlayerActions: this.playerActions.slice(-25)
+            };
+        },
+
+        pushRecordToNative: function (record) {
+            try {
+                if (typeof jsb !== "undefined" && jsb.reflection && typeof jsb.reflection.callStaticMethod === "function") {
+                    jsb.reflection.callStaticMethod("QAUI", "recordMCPAction:", JSON.stringify(record));
+                }
+            } catch (e) { }
+        },
+
+        syncWorldStateToNative: function (forceNow) {
+            try {
+                const now = Date.now();
+                if (!forceNow && (now - this._lastWorldSyncTs < 2500)) return;
+                this._lastWorldSyncTs = now;
+                if (typeof jsb !== "undefined" && jsb.reflection && typeof jsb.reflection.callStaticMethod === "function") {
+                    const snap = this.getWorldStateSnapshot();
+                    jsb.reflection.callStaticMethod("QAUI", "updateMCPWorldState:", JSON.stringify(snap));
+                }
+            } catch (e) { }
+        },
+
+        synthesizeAutoFlow: function (applyNow) {
+            const ws = this.getWorldStateSnapshot();
+            const actions = this.playerActions || [];
+
+            const builtIds = [];
+            const upgradedIds = [];
+            const boughtItems = [];
+            const combatModes = {};
+            const preferredLineups = [];
+            let kunlunClicks = 0;
+            let kunlunResets = 0;
+            let digTimes = 0;
+            let wearTimes = 0;
+            let sellTimes = 0;
+            let goldTreeBuys = 0;
+            let lotteryCount = 0;
+            const rewardProtos = {};
+            const categoryOrder = [];
+
+            for (let i = 0; i < actions.length; i++) {
+                const a = actions[i];
+                const cat = a.category || "OTHER";
+                if (cat !== "VIEW_NAV" && cat !== "OTHER" && categoryOrder[categoryOrder.length - 1] !== cat) {
+                    categoryOrder.push(cat);
+                }
+                const m = a.meta || {};
+                const d = a.deltas || {};
+                if (cat === "BUILD") {
+                    const bLabel = m.buildName || m.buildId || m.slot;
+                    if (bLabel) {
+                        if (String(a.protoName).includes("BuildCs")) builtIds.push(bLabel);
+                        else upgradedIds.push(bLabel);
+                    }
+                } else if (cat === "BUY") {
+                    if (a.protoName && a.protoName.includes("MoneyTree")) {
+                        goldTreeBuys += Number(m.count || 1);
+                    } else if (a.protoName && a.protoName.includes("Lottery")) {
+                        lotteryCount += Number(m.count || 1);
+                    } else {
+                        boughtItems.push({
+                            shopId: m.shopId || 0,
+                            goodsId: m.goodsId || 0,
+                            count: m.count || 1,
+                            protoName: a.protoName,
+                            jadeDelta: Number(d.jadeDelta || 0),
+                            goldDelta: Number(d.goldDelta || 0),
+                            isFreeOrGold: Number(d.jadeDelta || 0) >= 0
+                        });
+                    }
+                } else if (cat === "COMBAT") {
+                    if (a.protoName && a.protoName.startsWith("Flip")) {
+                        if (m.isReset) kunlunResets += 1;
+                        else kunlunClicks += 1;
+                    } else {
+                        const modeKey = m.warTypeName || m.protoName || a.protoName || "Chiến Đấu";
+                        combatModes[modeKey] = (combatModes[modeKey] || 0) + 1;
+                    }
+                } else if (cat === "LINEUP") {
+                    if (Array.isArray(m.heroIds) && m.heroIds.length > 0) {
+                        preferredLineups.push({
+                            arrayType: m.arrayType || 1,
+                            heroIds: m.heroIds
+                        });
+                    }
+                } else if (cat === "EQUIP_DIG") {
+                    if (a.protoName === "EquipBoxOpenCs") digTimes += Number(m.count || 1);
+                    else if (a.protoName === "EquipBoxSelectCs") wearTimes += 1;
+                    else sellTimes += Number(m.count || 1);
+                } else if (cat === "REWARD") {
+                    const rk = a.protoName || ("Proto_" + a.protoId);
+                    rewardProtos[rk] = (rewardProtos[rk] || 0) + 1;
+                }
+            }
+
+            const uniqueUpgrades = [];
+            for (let i = 0; i < upgradedIds.length; i++) {
+                if (uniqueUpgrades.indexOf(upgradedIds[i]) === -1) uniqueUpgrades.push(upgradedIds[i]);
+            }
+            const freeGoodsWhitelist = [];
+            for (let i = 0; i < boughtItems.length; i++) {
+                const it = boughtItems[i];
+                if (it.isFreeOrGold && it.goodsId && freeGoodsWhitelist.indexOf(it.goodsId) === -1) {
+                    freeGoodsWhitelist.push(it.goodsId);
+                }
+            }
+
+            const recommendedToggles = {
+                FEAT_SKIP_BATTLE: true,
+                FEAT_SKIP_ADS: true,
+                FEAT_AUTO_HOST: true,
+                FEAT_AUTO_DAILY_3Q: true,
+                FEAT_AUTO_RANK: true,
+                FEAT_AUTO_RESCUE_KNB: true,
+                FEAT_AUTO_CARAVAN: true,
+                FEAT_AUTO_GUILD_MINE: true,
+                FEAT_AUTO_COUNTRY_WAR: true,
+                FEAT_AUTO_BOSS_KUNLUN: true,
+                FEAT_AUTO_JINDI_TOP_TEAM: true,
+                FEAT_AUTO_RECYCLE_FRAGMENTS: true,
+                FEAT_AUTO_BUY_GOLD: goldTreeBuys > 0,
+                FEAT_AUTO_STAGE: Boolean(combatModes["Ải Chính Tuyến"]),
+                FEAT_AUTO_TOWER: Boolean(combatModes["Tháp Thông Thiên"] || combatModes["Tháp Hệ (Ngụy/Thục/Ngô/Quần/Thần)"])
+            };
+
+            const bestLineup = preferredLineups.length > 0
+                ? preferredLineups[preferredLineups.length - 1].heroIds
+                : (Array.isArray(bot.state.fullCombatArray) ? bot.state.fullCombatArray : []);
+
+            const flowObj = {
+                schemaVersion: "4.3-MCP",
+                generatedAtMs: Date.now(),
+                generatedAtIso: new Date().toISOString(),
+                deviceTarget: "iPhone 14 Pro Max (Test Device)",
+                playerSummary: ws.player,
+                observedTotalActions: actions.length,
+                observedCategorySequence: categoryOrder.slice(0, 20),
+                recommendedToggles: recommendedToggles,
+                homelandFlow: {
+                    builtIds: builtIds,
+                    preferredUpgradeOrder: uniqueUpgrades,
+                    autoHarvestResources: true,
+                    autoRecruitSoldiers: true,
+                    autoClaimFlowersAndTasks: true
+                },
+                shopFlow: {
+                    zeroKnbStrict: true,
+                    freeOrGoldGoodsWhitelist: freeGoodsWhitelist,
+                    observedPurchases: boughtItems.slice(-20),
+                    autoBuyGoldTree: goldTreeBuys > 0,
+                    freeLotteryClaim: true
+                },
+                combatFlow: {
+                    modesPlayed: combatModes,
+                    preferredFullLineup: bestLineup,
+                    kunlunStrategy: {
+                        observedClicks: kunlunClicks,
+                        observedResets: kunlunResets,
+                        autoLootAndFightMonsters: true,
+                        autoResetWhenNoMovesLeft: true
+                    },
+                    rescueKnbStrategy: {
+                        scoutTiers: "1..5 tướng UCB1 (64 rổ LC)",
+                        maxRobberPowerRatio: 1.03
+                    }
+                },
+                equipFlow: {
+                    observedDigs: digTimes,
+                    observedWears: wearTimes,
+                    observedSells: sellTimes,
+                    autoWearWhenPowerHigher: true,
+                    autoSellWhenPowerLowerOrEqual: true
+                },
+                rewardFlow: {
+                    claimedProtocols: rewardProtos,
+                    executionOrder: [
+                        "1. Thu hoạch Gia Viên, Chiêu Binh, Hoa & Nhiệm vụ nhà (Host*Cs)",
+                        "2. Nhận thưởng Treo máy AFK, Thư, Tặng/Nhận Tim Bạn bè & Bái kiến 7 BXH",
+                        "3. Quét 100/100 Nhiệm vụ Ngày/Tuần/Chính tuyến & mở 4 Rương Năng Động (25/50/75/100)",
+                        "4. Mua gói Miễn phí 0 KNB & Điểm Kim Cây Tài Lộc + Quay tướng Free",
+                        "5. Thám hiểm Côn Lôn Khư (Nhặt rương -> Đánh quái vừa sức -> Hết đường tự Reset tầng)",
+                        "6. Tam Quốc Tranh Hùng (Nhận lộc thành trì, Chiêu binh 4x, Nhiệm vụ Quốc chiến & Canh tác ruộng)",
+                        "7. Vận Tiêu Thương Đội (Nhận tiêu, Xin Bang hộ tống, Phái xe phẩm cao 0 KNB) & Mỏ Bang 2 Đội",
+                        "8. Đấu Trường (Đánh hết lượt Free + nhận rương mốc) & Xin vào Đội Cấm Địa Top SV Carry",
+                        "9. Đào Bảo Tự Động (Mặc đồ tăng LC, bán sạch đồ thấp qua 13113) & Tách mảnh tướng ≤ Cam",
+                        "10. Tuần tra Liên Server & Giải cứu Gia Viên (+50 KNB/trận, lọc ≤ 103% LC)"
+                    ]
+                }
+            };
+
+            const modeLines = Object.keys(combatModes).map(function (k) {
+                return `  • ${k}: ${combatModes[k]} lượt`;
+            }).join("\n") || "  • (Đang chờ thao tác đánh ải/phó bản mới từ người chơi)";
+
+            const rewardLines = Object.keys(rewardProtos).map(function (k) {
+                return `  • ${k}: ${rewardProtos[k]} lần`;
+            }).join("\n") || "  • Tự động nhận full quà ngày / mốc năng động 0 KNB";
+
+            const reportVi = [
+                "==========================================================",
+                "🤖 BÁO CÁO MCP-AGENT 3Q ĐÀO ĐÀO ĐÀO (MÁY TEST IPHONE 14 PRO MAX)",
+                "==========================================================",
+                `👤 Nhân vật: ${ws.player.roleName || "Chưa rõ"} (${ws.player.serverName || "SV"}) | Lv.${ws.player.level} | LC: ${bot.formatNumber ? bot.formatNumber(ws.player.power) : ws.player.power}`,
+                `💎 KNB: ${bot.formatNumber ? bot.formatNumber(ws.player.jade) : ws.player.jade} (+${ws.player.rescuedKnbTotal} KNB cứu) | Ải: ${ws.player.stage} | Gia Viên: GĐ ${ws.player.homelandStage}`,
+                `📊 Tổng thao tác tay đã ghi nhận: ${actions.length} hành động (Xây: ${ws.mcpStats.countsByCategory.BUILD || 0} • Mua: ${ws.mcpStats.countsByCategory.BUY || 0} • Đánh: ${ws.mcpStats.countsByCategory.COMBAT || 0} • Đội hình: ${ws.mcpStats.countsByCategory.LINEUP || 0} • Đào bảo: ${ws.mcpStats.countsByCategory.EQUIP_DIG || 0} • Nhận quà: ${ws.mcpStats.countsByCategory.REWARD || 0})`,
+                "",
+                "1️⃣ LUỒNG XÂY DỰNG & GIA VIÊN ĐÃ QUAN SÁT:",
+                `  • Công trình xây mới: ${builtIds.length > 0 ? builtIds.join(", ") : "Đã xây đủ ô cơ bản"}`,
+                `  • Thứ tự ưu tiên nâng cấp: ${uniqueUpgrades.length > 0 ? uniqueUpgrades.join(" -> ") : "Tự động nâng công trình đủ điều kiện"}`,
+                "",
+                "2️⃣ LUỒNG MUA SẮM & TIÊU DÙNG ĐÃ QUAN SÁT:",
+                `  • Vật phẩm Tiệm đã mua: ${boughtItems.length} lượt (Whitelist Free/Vàng: [${freeGoodsWhitelist.join(", ") || "Mặc định 0 KNB"}])`,
+                `  • Điểm Kim Cây Tài Lộc: ${goldTreeBuys} lần | Chiêu Mộ/Quay Thưởng: ${lotteryCount} lần`,
+                "",
+                "3️⃣ LUỒNG ĐÁNH ẢI, PHÓ BẢN & CÔN LÔN ĐÃ QUAN SÁT:",
+                modeLines,
+                `  • Đội hình tướng chủ lực: [${bestLineup.join(", ") || "Giữ nguyên 6 tướng mạnh nhất"}]`,
+                `  • Thám hiểm Côn Lôn: Lật/Đánh ${kunlunClicks} ô, Reset ${kunlunResets} lần -> Luồng Auto: Tự nhặt rương + đánh quái, kẹt/hết quái tự Reset!`,
+                "",
+                "4️⃣ LUỒNG ĐÀO BẢO & TRANG BỊ:",
+                `  • Đào bảo: ${digTimes} xẻng | Mặc đồ mới: ${wearTimes} lần | Bán đồ cũ: ${sellTimes} lần`,
+                "",
+                "5️⃣ LUỒNG NHẬN QUÀ & NHIỆM VỤ:",
+                rewardLines,
+                "",
+                "6️⃣ LUỒNG AUTO TỐI ƯU ĐÃ SINH RA (10 BƯỚC CHUẨN):",
+                flowObj.rewardFlow.executionOrder.map(function (s) { return "  " + s; }).join("\n"),
+                "=========================================================="
+            ].join("\n");
+
+            flowObj.reportVi = reportVi;
+            this.learnedAutoFlow = flowObj;
+
+            try {
+                if (typeof localStorage !== "undefined") {
+                    localStorage.setItem("__3Q_MCP_LEARNED_FLOW__", JSON.stringify(flowObj));
+                }
+            } catch (eLs) { }
+
+            try {
+                if (typeof jsb !== "undefined" && jsb.reflection && typeof jsb.reflection.callStaticMethod === "function") {
+                    jsb.reflection.callStaticMethod("QAUI", "receiveMCPFlowReport:", JSON.stringify(flowObj));
+                }
+            } catch (eN) { }
+
+            if (applyNow) {
+                this.applyLearnedAutoFlow(flowObj);
+            }
+            return flowObj;
+        },
+
+        applyLearnedAutoFlow: function (flowObj) {
+            const flow = flowObj || this.learnedAutoFlow || this.synthesizeAutoFlow(false);
+            if (!flow) return { ok: false, error: "no_flow" };
+            const toggles = flow.recommendedToggles || {};
+            const keys = Object.keys(toggles);
+            for (let i = 0; i < keys.length; i++) {
+                const k = keys[i];
+                if (typeof window.__dauto_toggle === "function") {
+                    window.__dauto_toggle(k, !!toggles[k], true);
+                }
+            }
+            if (flow.homelandFlow && Array.isArray(flow.homelandFlow.preferredUpgradeOrder) && flow.homelandFlow.preferredUpgradeOrder.length > 0) {
+                bot.state.mcpPreferredHomelandUpgrades = flow.homelandFlow.preferredUpgradeOrder.slice();
+            }
+            if (flow.shopFlow && Array.isArray(flow.shopFlow.freeOrGoldGoodsWhitelist) && flow.shopFlow.freeOrGoldGoodsWhitelist.length > 0) {
+                bot.state.mcpShopWhitelist = flow.shopFlow.freeOrGoldGoodsWhitelist.slice();
+            }
+            bot.log("🤖 [MCPAgent] Đã áp dụng & kích hoạt Luồng Auto học từ máy test iPhone 14 Pro Max!");
+            if (bot.isReady() && typeof bot.runOneClickAllDailyAndGifts === "function") {
+                bot.runInBgAutoContext(function () { return bot.runOneClickAllDailyAndGifts(); });
+            }
+            if (typeof bot.syncLiveStatusToNative === "function") {
+                bot.syncLiveStatusToNative(true);
+            }
+            return { ok: true, appliedToggles: toggles, sessionId: this.sessionId };
+        }
+    };
+
+    window.__dauto_mcpSynthesizeFlow = function (applyNow) {
+        if (window.AutoBot && window.AutoBot.mcpAgent) {
+            return window.AutoBot.mcpAgent.synthesizeAutoFlow(!!applyNow);
+        }
+        return null;
+    };
+
+    window.__dauto_mcpGetSnapshot = function () {
+        if (window.AutoBot && window.AutoBot.mcpAgent) {
+            return window.AutoBot.mcpAgent.getWorldStateSnapshot();
+        }
+        return { ok: false };
     };
 
 
