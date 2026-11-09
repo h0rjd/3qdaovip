@@ -54,7 +54,7 @@
     "auto_country_war": true,
     "auto_soldier_train": true,
     "auto_caravan": true,
-    "auto_jindi_top_team": false,
+    "auto_jindi_top_team": true,
     "mod_skin": true,
     "mod_headframe_title": true,
     "auto_boss_kunlun": true,
