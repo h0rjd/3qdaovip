@@ -137,7 +137,23 @@
     const bot = {
         canNativeSkipBattle: canNativeSkipBattle,
         isAutoStageOn: function () {
-            return !!(bot.state && bot.state.isAutoStageActive && bot.settings && bot.settings.auto_stage && window.__AUTO_STAGE_ENABLED__);
+            if (!(bot.state && bot.state.isAutoStageActive && bot.settings && bot.settings.auto_stage && window.__AUTO_STAGE_ENABLED__)) {
+                return false;
+            }
+            try {
+                const gm = window.G_Mapping || {};
+                const mm = window.ModelManager || (gm && gm.ModelManager);
+                const mum = (mm && mm.MainUIModel) || (gm && gm.MainUIModel);
+                const restraint = (mum && typeof mum.getRestraintLv === "function") ? Number(mum.getRestraintLv() || 0) : 0;
+                if (restraint > 0) {
+                    return false; // Đang bị Áp Chế Cấp (thiếu cấp mở ải) -> Tạm nhường 100% cho Farm KNB 1..5 tướng & chặn lỗi 66!
+                }
+                const maxStageFailBeforePause = (bot.state.isAutoRescueKnbActive && bot.settings.auto_rescue_knb !== false) ? 3 : 10;
+                if ((bot.state.stageFailCount || 0) >= maxStageFailBeforePause && (Date.now() - (bot.state.lastStageFailTime || 0) < 60000)) {
+                    return false; // Đang trong thời gian nghỉ Defeat Guard 60s -> Nhường cho Farm KNB hạ LC dò 1..5 tướng!
+                }
+            } catch (eStgOn) { }
+            return true;
         },
         logs: [],
         settings: {
@@ -10290,7 +10306,7 @@
                     winRatioLimit: Number((bot.settings && bot.settings.rescue_max_power_ratio) || 1.03),
                     currentHeroCount: Number(bot.state.currentScoutHeroCount || 6),
                     currentScoutPower: Number((bot.stats && bot.stats.power) || 0),
-                    totalScoutCombos: Number(bot.state.totalScoutCombos || 0),
+                    totalScoutCombos: Number(bot.state.totalScoutCombos || (typeof bot.getScoutHeroCombinations === "function" ? bot.getScoutHeroCombinations().length : 0)),
                     hotVictimCount: Object.keys(bot.state.hotCrossServerVictims || {}).length,
                     patrolPoolSize: Array.isArray(bot.state.activePatrolPool) ? bot.state.activePatrolPool.length : 0,
                     dailyMaxedCount: dailyMaxedCount,
@@ -17869,10 +17885,28 @@
 
             const tType = Number(teamType || 1);
             const sId = Number(subId || 1);
+            if (tType === 1) {
+                return true; // TUYỆT ĐỐI KHÔNG ghi đè Đội Hình Chính (_type = 1) bằng ensureGameplayTeamReady!
+            }
             const campFilter = Array.isArray(limitCamps) && limitCamps.length > 0 ? limitCamps.map(Number) : null;
             const exclMap = {};
             if (Array.isArray(excludeHeroIds)) {
                 for (let i = 0; i < excludeHeroIds.length; i++) exclMap[Number(excludeHeroIds[i])] = true;
+            }
+            const protoExisting = (typeof hbm.getProtoArrayByType === "function")
+                ? hbm.getProtoArrayByType(tType, sId)
+                : (hbm._heroProtoArray && hbm._heroProtoArray[tType] && hbm._heroProtoArray[tType][sId]);
+            if (protoExisting && Array.isArray(protoExisting._array) && !campFilter) {
+                let validCnt = 0;
+                let hasExcl = false;
+                for (let pi = 0; pi < protoExisting._array.length; pi++) {
+                    const pe = protoExisting._array[pi];
+                    if (pe && Number(pe._idx) > 0 && Number(pe._idx) < 30 && Number(pe._id) > 0) {
+                        validCnt++;
+                        if (exclMap[Number(pe._id)]) hasExcl = true;
+                    }
+                }
+                if (validCnt > 0 && !hasExcl) return true;
             }
 
             const getHeroCamp = function (h) {
