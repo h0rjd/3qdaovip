@@ -337,6 +337,46 @@ async function fetchRemoteYieldEndTime(sessionState) {
     return 0;
 }
 
+async function fetchRemoteIosPresence() {
+    if (typeof fetch !== 'function') return null;
+    const token = process.env.GH_TOKEN || '';
+    const repo = process.env.GH_REPO || 'h0rjd/3qdaovip';
+    try {
+        const localPresencePath = path.join(__dirname, '..', 'logs', 'mcp_iphone14prm', 'ios_presence.json');
+        if (!isGitHubActions && fs.existsSync(localPresencePath)) {
+            const rawLocal = fs.readFileSync(localPresencePath, 'utf8');
+            const parsedLocal = JSON.parse(rawLocal);
+            if (parsedLocal && parsedLocal.lastSeenMs) {
+                const ageMs = Date.now() - Number(parsedLocal.lastSeenMs || 0);
+                return Object.assign({}, parsedLocal, { ageMs, isLiveActive: ageMs >= 0 && ageMs < 150000 });
+            }
+        }
+        if (!token || !repo) return null;
+        const getRes = await fetch(`https://api.github.com/repos/${repo}/contents/ios_presence.json?ref=telemetry`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+                'User-Agent': '3Q-AutoBot-Presence/4.3'
+            },
+            signal: AbortSignal.timeout(6000)
+        });
+        if (getRes.status === 200) {
+            const getJson = await getRes.json();
+            if (getJson && getJson.content) {
+                const raw = Buffer.from(getJson.content, 'base64').toString('utf8');
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.lastSeenMs) {
+                    const ageMs = Date.now() - Number(parsed.lastSeenMs || 0);
+                    return Object.assign({}, parsed, { ageMs, isLiveActive: ageMs >= 0 && ageMs < 150000 });
+                }
+            }
+        }
+    } catch (e) { }
+    return null;
+}
+
 function saveConfigToDisk() {
     try {
         if (!isGitHubActions) {
@@ -2445,7 +2485,13 @@ async function run() {
         }
         if (initialYieldEnd > Date.now() + 5000) {
             try {
-                const yEnd = initialYieldEnd;
+                let yEnd = initialYieldEnd;
+                const initPresence = await fetchRemoteIosPresence();
+                if (initPresence && !initPresence.isLiveActive && initPresence.ageMs >= 180000) {
+                    writeLog(`🟢 [Nhường Máy Thông Minh] Phát hiện iPhone 14 Pro Max đã đóng game (${Math.round(initPresence.ageMs / 60000)} phút trước) -> Bỏ qua thời gian chờ cũ và vào game ngay!`);
+                    yEnd = 0;
+                    try { fs.unlinkSync(yieldFile); } catch (e) {}
+                }
                 const remainingMs = yEnd - Date.now();
                 if (remainingMs > 5000) {
                     const remM = Math.ceil(remainingMs / 60000);
@@ -2453,8 +2499,29 @@ async function run() {
                     sessionState.isYielding = true;
                     sessionState.yieldEndTime = yEnd;
                     let lastYLog = Date.now();
+                    let lastPresenceCheck = Date.now();
+                    let sawIosActiveHere = !!(initPresence && initPresence.isLiveActive);
+                    const yLoopStart = Date.now();
                     while (Date.now() < yEnd && Date.now() < endTime && !sessionState.forceResumeFromYield && !sessionState.stopRequested) {
                         await new Promise(r => setTimeout(r, 2000));
+                        if (Date.now() - lastPresenceCheck >= 30000) {
+                            lastPresenceCheck = Date.now();
+                            const pres = await fetchRemoteIosPresence();
+                            if (pres) {
+                                if (pres.isLiveActive) {
+                                    sawIosActiveHere = true;
+                                    if (yEnd - Date.now() < 5 * 60 * 1000) {
+                                        yEnd = Date.now() + 5 * 60 * 1000;
+                                        sessionState.yieldEndTime = yEnd;
+                                        try { fs.writeFileSync(yieldFile, String(yEnd), 'utf8'); } catch (eW) {}
+                                        writeLog(`📱 [Nhường Máy Thông Minh] iPhone 14 Pro Max vẫn đang chơi (${Math.round(pres.ageMs / 1000)}s trước) -> Tự động gia hạn nhường máy thêm 5 phút (Tuyệt đối không vào tranh phiên)!`);
+                                    }
+                                } else if (sawIosActiveHere && (Date.now() - yLoopStart >= 180000) && pres.ageMs >= 180000) {
+                                    writeLog(`🟢 [Nhường Máy Thông Minh] iPhone 14 Pro Max đã đóng game được ${Math.round(pres.ageMs / 60000)} phút -> Tự động kết thúc chờ sớm và đăng nhập lại ngay!`);
+                                    break;
+                                }
+                            }
+                        }
                         if (Date.now() - lastYLog >= 60000) {
                             lastYLog = Date.now();
                             const remSec = Math.max(0, Math.round((yEnd - Date.now()) / 1000));
@@ -2631,7 +2698,10 @@ async function run() {
                 );
                 await sendTelegramMessage(kickHtml, null, sessionState);
 
-                const waitEnd = Date.now() + (waitMin * 60 * 1000);
+                let waitEnd = Date.now() + (waitMin * 60 * 1000);
+                const yieldLoopStartAt = Date.now();
+                let sawIosActiveDuringWait = false;
+                let lastIosPresenceCheckAt = Date.now();
                 sessionState.yieldEndTime = waitEnd;
                 try { fs.writeFileSync(yieldFile, String(waitEnd), 'utf8'); } catch (e) {}
                 if (isGitHubActions && process.env.GH_TOKEN && process.env.GH_REPO) {
@@ -2667,10 +2737,28 @@ async function run() {
                     } catch (ePushY) {}
                 }
 
-                writeLog(`⏳ [Nhường Máy] Đang chờ ${waitMin} phút (hoặc bấm "▶️ Chạy Lại Ngay" / "🛑 Dừng Hẳn Bot" trên GUI / Telegram)...`);
+                writeLog(`⏳ [Nhường Máy] Đang chờ ${waitMin} phút (Tự động gia hạn nếu iPhone 14 Pro Max còn mở game, hoặc vào lại sớm sau 3 phút khi iPhone đóng game)...`);
                 let lastCountdownLog = Date.now();
                 while (Date.now() < waitEnd && Date.now() < endTime && !sessionState.forceResumeFromYield && !sessionState.stopRequested) {
                     await new Promise(r => setTimeout(r, 2000));
+                    if (Date.now() - lastIosPresenceCheckAt >= 30000) {
+                        lastIosPresenceCheckAt = Date.now();
+                        const presNow = await fetchRemoteIosPresence();
+                        if (presNow) {
+                            if (presNow.isLiveActive) {
+                                sawIosActiveDuringWait = true;
+                                if (waitEnd - Date.now() < 5 * 60 * 1000) {
+                                    waitEnd = Date.now() + 5 * 60 * 1000;
+                                    sessionState.yieldEndTime = waitEnd;
+                                    try { fs.writeFileSync(yieldFile, String(waitEnd), 'utf8'); } catch (eW) {}
+                                    writeLog(`📱 [Nhường Máy Thông Minh] Phát hiện iPhone 14 Pro Max vẫn đang chơi (${Math.round(presNow.ageMs / 1000)}s trước) -> Tự động gia hạn nhường máy thêm 5 phút (Tuyệt đối không vào tranh phiên)!`);
+                                }
+                            } else if (sawIosActiveDuringWait && (Date.now() - yieldLoopStartAt >= 180000) && presNow.ageMs >= 180000) {
+                                writeLog(`🟢 [Nhường Máy Thông Minh] Phát hiện iPhone 14 Pro Max đã đóng game được ${Math.round(presNow.ageMs / 60000)} phút -> Tự động kết thúc chờ sớm và đăng nhập lại ngay!`);
+                                break;
+                            }
+                        }
+                    }
                     if (Date.now() - lastCountdownLog >= 60000) {
                         lastCountdownLog = Date.now();
                         const remSec = Math.max(0, Math.round((waitEnd - Date.now()) / 1000));
