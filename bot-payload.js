@@ -18353,7 +18353,7 @@
                                 if (mm.MainUIModel && typeof mm.MainUIModel.reqMainHangReward === "function" && bot.tryDo("q_nudge_hang", 45)) {
                                     mm.MainUIModel.reqMainHangReward();
                                 }
-                                if (mm.FriendModel && gm.RelationAutoPickSendCs && gm.RelationAutoPickSendCs.protocol && bot.tryDo("q_nudge_friend", 120)) {
+                                if (mm.FriendModel && gm.RelationAutoPickSendCs && gm.RelationAutoPickSendCs.protocol && bot.tryDo("friend_autopick_send", 900)) {
                                     rpc.send(gm.RelationAutoPickSendCs.protocol, {});
                                 }
                             }
@@ -22052,7 +22052,7 @@
                 if (typeof bot.runAutoMcpLearnedFlowsSmart === "function") await bot.runAutoMcpLearnedFlowsSmart(true);
                 if (typeof bot.runAutoDefJzSmart === "function") await bot.runAutoDefJzSmart(true);
                 if (typeof bot.runAutoRankSmart === "function") await bot.runAutoRankSmart(true);
-                if (rpc && typeof rpc.send === "function") {
+                if (rpc && typeof rpc.send === "function" && bot.tryDo("friend_autopick_send", 900)) {
                     const relProto = (gm.RelationAutoPickSendCs && gm.RelationAutoPickSendCs.protocol) || 14217;
                     rpc.send(relProto, {});
                 }
