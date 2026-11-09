@@ -21514,9 +21514,12 @@
                     const waitWarMs = minNextWarTs - Date.now();
                     if (waitWarMs > 0) await bot.sleep(Math.min(waitWarMs, 2600));
 
-                    const arenaType = (gm.e_GameplayDataGameplay && gm.e_GameplayDataGameplay.Arena) ? gm.e_GameplayDataGameplay.Arena : 2;
+                    const gdMod = safeRequire("t_GameplayData");
+                    const egd = gm.e_GameplayDataGameplay || (gdMod && gdMod.e_GameplayDataGameplay);
+                    const arenaType = (egd && egd.Arena) ? egd.Arena : 101;
                     const startTs = Date.now();
                     bot.state.battleInProgress = true;
+                    bot.state.autoArenaFighting = true;
                     bot.state.lastBattleStartTime = startTs;
                     bot.state._lastArenaRid = targetRid;
                     bot.state._lastArenaTime = startTs;
@@ -21542,7 +21545,7 @@
                                 rpc.send(gm.WarJumpCs.protocol, { _type: arenaType, _id: targetRid, _cli: 1, _ext: [] });
                             }
                         }
-                        // Đợi trận Đấu Trường hoàn tất (WarCloseCs / lastBattleByType[2]) trước khi trả về để vòng lặp 3 trận không bao giờ bị lỗi mã 66!
+                        // Đợi trận Đấu Trường hoàn tất (WarCloseCs / lastBattleByType[101]) trước khi trả về để vòng lặp 3 trận không bao giờ bị lỗi mã 66!
                         for (let w = 0; w < 32; w++) {
                             await bot.sleep(100);
                             const lastAr = bot.state.lastBattleByType && bot.state.lastBattleByType[arenaType];
@@ -21566,6 +21569,7 @@
                         bot.closeBattleViews();
                     } finally {
                         bot.state.battleInProgress = false;
+                        bot.state.autoArenaFighting = false;
                         bot.state.lastBattleEndTime = Date.now();
                     }
                 }
@@ -22375,25 +22379,43 @@
         },
         warTypeNames: {
             1: "Ải Chính Tuyến",
-            2: "Tháp Thông Thiên / Đấu Trường",
-            3: "Tháp Hệ / Phó Bản Ngày",
-            4: "Phó Bản Ngày",
-            5: "Tháp Hệ (Ngụy/Thục/Ngô/Quần/Thần)",
-            6: "Tháp Hệ",
-            7: "Thám Hiểm Côn Lôn Khư",
-            8: "Boss Thế Giới / Phó Bản",
+            2: "Tháp Thông Thiên",
+            3: "Phó Bản Ngày",
+            4: "Mê Cung",
+            5: "Boss Sự Kiện",
+            6: "Boss Bang Hội",
+            7: "Mỏ Bang Hội",
+            8: "Boss Thế Giới",
             9: "Bảo Vệ Kiếm Các (Thủ Thành)",
-            10: "Côn Lôn Khư / Quốc Chiến",
-            12: "Boss Thế Giới / Vận Tiêu",
-            14: "Tháp Trận Doanh (Tháp Hệ)",
-            15: "Cấm Địa Tổ Đội",
-            17: "Bí Cảnh Tần Lĩnh",
-            18: "Quần Hùng Trục Lộc / Bí Cảnh",
-            20: "Cấm Địa Tổ Đội (Khiêu Chiến)",
+            10: "Thám Hiểm Côn Lôn Khư",
+            11: "Công Thành",
+            12: "Tháp Trận Doanh #1",
+            13: "Tháp Trận Doanh #2",
+            14: "Tháp Trận Doanh #3",
+            15: "Tháp Trận Doanh #4",
+            16: "Tháp Trận Doanh #5",
+            17: "Boss Sự Kiện 2",
+            18: "Bách Chiến Thị Triều (Shichao)",
+            19: "Bí Cảnh Thị Triều",
+            20: "Cấm Địa Tổ Đội",
+            21: "Âm Phù",
+            22: "Phó Bản Thử Thách",
+            23: "Diễn Nghĩa Tam Quốc (Yyzq)",
+            24: "Boss Diễn Nghĩa",
+            25: "BXH Boss Diễn Nghĩa",
+            100: "PK Thường",
+            101: "Đấu Trường",
+            102: "Quyết Đấu",
             103: "Đấu Trường Liên Server",
-            104: "Phản Kích Gia Viên",
-            105: "Quần Hùng Trục Lộc (Liên SV)",
-            106: "Giải Cứu Gia Viên (+50 KNB)"
+            104: "Cướp Gia Viên",
+            105: "Quần Hùng Trục Lộc (Ladder)",
+            106: "Giải Cứu Gia Viên (+50 KNB)",
+            107: "Bang Chiến",
+            108: "Thời Không Đối Quyết (SkVs)",
+            109: "Vận Tiêu Thương Đội",
+            110: "Quốc Chiến Công Thành",
+            111: "Cướp Tiêu Thương Đội",
+            112: "BXH Thiên Sư"
         },
         ringLogs: [],
         playerActions: [],
