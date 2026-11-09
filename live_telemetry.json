@@ -2,11 +2,13 @@
   "schemaVersion": "3.8",
   "runNumber": 415,
   "runId": 42665333571,
-  "updatedAtIso": "2026-11-09T18:13:37.353Z",
-  "updatedAtVn": "2026-11-10 01:13:37",
-  "uptimeMin": 42.35,
+  "updatedAtIso": "2026-11-09T18:13:39.381Z",
+  "updatedAtVn": "2026-11-10 01:13:39",
+  "uptimeMin": 42.38,
   "server": "Tam Quốc S6",
-  "isLobbyHealthy": true,
+  "isLobbyHealthy": false,
+  "isYielding": true,
+  "yieldEndTime": 1794249819380,
   "roleName": "s6.TàoPhi",
   "level": 109,
   "stage": 7738,
@@ -15,138 +17,9 @@
   "currentPower": 351213345,
   "initialJade": 56239,
   "jade": 27078,
-  "deltaJade": -29161,
   "totalRescued": 30,
   "totalRescuedKnb": 1500,
-  "knbPerHour": 2125.2,
-  "rescuesPerHour": 42.5,
   "totalScanned": 4546,
-  "scansPerMin": 107,
-  "rescueTelemetry": {
-    "rescuedCount": 0,
-    "rescuedKnbTotal": 0,
-    "totalRescueScanned": 93,
-    "totalWaves": 19,
-    "occupiedFound": 5,
-    "winnableFights": 0,
-    "winCount": 0,
-    "lossCount": 0,
-    "skippedStrongRobbers": 5,
-    "code66Count": 0,
-    "myFullPower": 470395127,
-    "winRatioLimit": 1.03,
-    "currentHeroCount": 5,
-    "currentScoutPower": 351213345,
-    "totalScoutCombos": 62,
-    "hotVictimCount": 57,
-    "patrolPoolSize": 101,
-    "dailyMaxedCount": 4,
-    "rankPagesCrawled": 6,
-    "tierStats": {
-      "1": {
-        "waves": 3,
-        "unique": 6,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 57659683
-      },
-      "2": {
-        "waves": 5,
-        "unique": 14,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 114949579
-      },
-      "3": {
-        "waves": 5,
-        "unique": 13,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 191546127
-      },
-      "4": {
-        "waves": 5,
-        "unique": 11,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 272302095
-      },
-      "5": {
-        "waves": 1,
-        "unique": 4,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 351213345
-      }
-    },
-    "recentRescueEvents": [
-      {
-        "t": 1794248007034,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra Bạn Bè",
-        "victim": "s6.Mix",
-        "robber": "s2.KaTaKuRi",
-        "robPow": 741676239
-      },
-      {
-        "t": 1794248009735,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra Bạn Bè",
-        "victim": "s6.Viêmhọng",
-        "robber": "s2.ThiênHành",
-        "robPow": 547195244
-      },
-      {
-        "t": 1794248011370,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s12.TiểuMã",
-        "robber": "s12.TM⭐️Girl500K",
-        "robPow": 919610512
-      },
-      {
-        "t": 1794248011371,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s2.KaTaKuRi",
-        "robber": "s12.TiểuMã",
-        "robPow": 833395477
-      },
-      {
-        "t": 1794248016169,
-        "kind": "too_strong",
-        "tier": 4,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s6.ATxMèo",
-        "robber": "s2.khoine",
-        "robPow": 510495387
-      }
-    ]
-  },
   "toggles": {
     "auto_stage": true,
     "auto_tower": false,
@@ -183,12 +56,6 @@
     "mod_headframe_title": true
   },
   "recentLogs": [
-    "[2026-11-10 01:13:15] [Server] Đang chọn máy chủ: [Tam Quốc S6] và kích hoạt Vào Game...",
-    "[2026-11-10 01:13:15] [Server] Kết quả chọn máy chủ: {\"selectedServer\":\"Tam Quốc S6\",\"triggeredEnter\":true}",
-    "[2026-11-10 01:13:15] [Game] Đang đợi tải tài nguyên và chuyển tiếp vào sảnh...",
-    "[2026-11-10 01:13:19] [Lobby] ✅ Đã xác nhận vào game thành công: s6.TàoPhi (Lv.109, ID: 305598234810, MainUI=true)",
-    "[2026-11-10 01:13:19] [Bot] Đang nạp mã nguồn injected_agent.js (AutoBot v4.1 Final)...",
-    "[2026-11-10 01:13:19] [AutoBot] 6:13:19 PM 🚀 [D-AUTO] Hệ thống Tự Động Hóa Thông Minh v3.0 Final (Bản Chính Thức) đã khởi động trơn tru!",
     "[2026-11-10 01:13:19] [AutoBot] 6:13:19 PM ⚡ [Tính Năng] Quà Ngày & Mốc: BẬT | Bỏ qua QC: BẬT | Mở 2 Đội Mỏ: BẬT | Bypass All Locks: BẬT | Thu Hoạch Mỏ: BẬT | Skip Battle: BẬT | Gia Viên: BẬT | Cây Tiền/Shop Free: BẬT | Mod Skin & Khung: BẬT | Speed 2.0x: BẬT",
     "[2026-11-10 01:13:19] [AutoBot] 6:13:19 PM ⚡ [Engine v3.9] Farm KNB Tối Đa (Dò 1..5 Tướng UCB1 • Lọc 103% LC Thắng Chắc • Đào Bảo Chuẩn • Chạy Ẩn 100% • 0 KNB Quest).",
     "[2026-11-10 01:13:19] [Bot] ✅ AutoBot v4.1 Final (Anti-Lag Stop & Pre-Unlock Bypass Edition) đã kích hoạt!",
@@ -217,6 +84,12 @@
     "[2026-11-10 01:13:32] [AutoBot] 6:13:32 PM 🌾 [Chiếm Mỏ] Đội hình 2 đã đào được 5.8 phút -> Tự động thu hoạch tài nguyên mỏ...",
     "[2026-11-10 01:13:34] [AutoBot] 6:13:34 PM 🌾 [Chiếm Mỏ] Đội hình 1 đã đào được 6.7 phút -> Tự động thu hoạch tài nguyên mỏ...",
     "[2026-11-10 01:13:35] [AutoBot] 6:13:35 PM ⚔️ [Farm KNB • Tuần Tra BXH Liên SV] Phát hiện gia viên [s6.ATxMèo] (ID: 301303267522) đang bị cướp bởi [s2.khoine]! Đang kiểm tra LC kẻ địch...",
-    "[2026-11-10 01:13:36] [AutoBot] 6:13:36 PM 🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [s2.khoine] có LC 510,495,387 > 103% LC mình (470,395,127) -> Bỏ qua ngay, không tốn trận!"
+    "[2026-11-10 01:13:36] [AutoBot] 6:13:36 PM 🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [s2.khoine] có LC 510,495,387 > 103% LC mình (470,395,127) -> Bỏ qua ngay, không tốn trận!",
+    "[2026-11-10 01:13:37] [AutoBot] 6:13:37 PM ⛰️ [Côn Lôn] Đã thu hoạch rương Treo Máy Côn Lôn Khư (Tầng 49)!",
+    "[2026-11-10 01:13:37] [AutoBot] 6:13:37 PM ⏳ [Côn Lôn] Đã dọn sạch rương & hết thể lực lật ô tại Tầng 50 -> Ước tính tạm nghỉ 15 phút chờ hồi thể lực (không spam)!",
+    "[2026-11-10 01:13:38] [AutoBot] 6:13:38 PM 📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=1) -> Nhường máy ngay!",
+    "[2026-11-10 01:13:38] 📱 [Nhường Máy] Nhận tín hiệu KICK thiết bị khác từ game -> Ngắt tiến trình Chromium ngay lập tức (0ms) để giải phóng kết nối cho Điện thoại!",
+    "[2026-11-10 01:13:38] 📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC! Đóng trình duyệt ngay, tạm dừng 30 phút rồi tự động kết nối lại...",
+    "[2026-11-10 01:13:39] [Telegram] ✅ Đã gửi báo cáo & bảng điều khiển về Telegram thành công!"
   ]
 }
