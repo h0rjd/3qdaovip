@@ -1,6 +1,14 @@
 name: 3Q Dao Dao Dao - Cloud AutoBot v4.0 Final (24/7 Farm KNB & Telegram)
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bot-payload.js'
+      - 'injected_agent.js'
+      - 'runner.js'
+      - '.github/workflows/auto.yml'
   schedule:
     # Watchdog tự động kích hoạt mỗi 6 giờ phòng ngừa sự cố mạng làm đứt chuỗi nối tiếp
     - cron: '15 */6 * * *'
@@ -28,7 +36,7 @@ permissions:
 
 concurrency:
   group: 3q-autobot-session
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   run-bot:
@@ -97,6 +105,17 @@ jobs:
           pkill -f chrome || true
           node runner.js
 
+      - name: 📸 Lưu nhật ký & ảnh chụp màn hình phiên chạy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobot-report-${{ github.run_number }}
+          path: |
+            screenshots/
+            bot.log
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: 💾 Lưu lại cài đặt Bật/Tắt đã chỉnh qua Telegram & Tự động nối tiếp phiên mới 24/7
         if: ${{ !cancelled() }}
         env:
@@ -126,14 +145,3 @@ jobs:
             echo "🔄 Tự động nối tiếp phiên mới 24/7 (330 phút)..."
             gh workflow run auto.yml -f duration="330" -f server="${{ github.event.inputs.server || secrets.GAME_SERVER || 'Tam Quốc S6' }}" || gh workflow run auto.yml || true
           fi
-
-      - name: 📸 Lưu nhật ký & ảnh chụp màn hình phiên chạy
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: autobot-report-${{ github.run_number }}
-          path: |
-            screenshots/
-            bot.log
-          if-no-files-found: ignore
-          retention-days: 3

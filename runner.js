@@ -1008,12 +1008,33 @@ function startTelegramCommandPoller(sessionState, getActivePage) {
 
 // Kiểm tra nếu người dùng sửa file config.json trực tiếp trên web GitHub và bấm Commit (KHÔNG ghi đè nút vừa bật/tắt qua Telegram!)
 let lastGitConfigHash = '';
+let lastGitPayloadHash = '';
 let lastGitRemoteParsed = null;
 async function checkGitConfigHotReload(page, sessionState) {
     try {
         if (isGitHubActions) {
             try {
                 execSync('git fetch -q origin HEAD 2>/dev/null || git fetch -q origin 2>/dev/null', { cwd: __dirname, timeout: 8000, stdio: ['ignore', 'ignore', 'ignore'] });
+                try {
+                    const remotePayloadRaw = execSync('git show FETCH_HEAD:bot-payload.js 2>/dev/null', { cwd: __dirname, timeout: 6000, maxBuffer: 10 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8');
+                    if (remotePayloadRaw && remotePayloadRaw.length > 100000) {
+                        const pHash = crypto.createHash('md5').update(remotePayloadRaw).digest('hex');
+                        if (!lastGitPayloadHash) {
+                            const localP = fs.existsSync(path.join(__dirname, 'bot-payload.js')) ? fs.readFileSync(path.join(__dirname, 'bot-payload.js'), 'utf8') : '';
+                            lastGitPayloadHash = localP ? crypto.createHash('md5').update(localP).digest('hex') : pHash;
+                        }
+                        if (pHash !== lastGitPayloadHash) {
+                            lastGitPayloadHash = pHash;
+                            fs.writeFileSync(path.join(__dirname, 'bot-payload.js'), remotePayloadRaw, 'utf8');
+                            fs.writeFileSync(path.join(__dirname, 'injected_agent.js'), remotePayloadRaw, 'utf8');
+                            writeLog('🚀 [Git Hot-Reload] Phát hiện bản cập nhật mã nguồn bot-payload.js mới trên GitHub -> Tự động nạp nóng ngay!');
+                            if (sessionState) {
+                                sessionState.freshReloginRequested = true;
+                                sessionState.freshReloginReason = 'Cập nhật mã nguồn AutoBot mới từ GitHub (Hot-Reload)';
+                            }
+                        }
+                    }
+                } catch (ePay) {}
                 let remoteCfgRaw = '';
                 try {
                     remoteCfgRaw = execSync('git show FETCH_HEAD:config.json 2>/dev/null', { cwd: __dirname, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8');
