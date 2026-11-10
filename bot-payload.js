@@ -18991,21 +18991,25 @@
             try {
                 const djm = mm.DefJzModel;
                 if (djm) {
-                    if (bot.tryDo("mcp_defjz_sync_info", 300)) {
+                    if (bot.tryDo("mcp_defjz_sync_info", 1800)) {
                         const infoProto = (gm.DefJzInfoCs && gm.DefJzInfoCs.protocol) || 13300;
                         if (typeof djm.requestDefJzInfo === "function") {
-                            try { djm.requestDefJzInfo(1); djm.requestDefJzInfo(2); } catch (e) { }
+                            try { djm.requestDefJzInfo(1); } catch (e) { }
+                            await bot.sleep(1350);
+                            try { djm.requestDefJzInfo(2); } catch (e) { }
                         } else {
                             rpc.send(infoProto, { _type: 1 });
+                            await bot.sleep(1350);
                             rpc.send(infoProto, { _type: 2 });
                         }
-                        await bot.sleep(240);
+                        await bot.sleep(350);
                     }
-                    if (gm.DefJzDailyGiftCs && gm.DefJzDailyGiftCs.protocol && bot.tryDo("mcp_defjz_daily_gift", 1800)) {
+                    if (gm.DefJzDailyGiftCs && gm.DefJzDailyGiftCs.protocol && bot.tryDo("mcp_defjz_daily_gift", 7200)) {
                         rpc.send(gm.DefJzDailyGiftCs.protocol, { _type: 1 });
+                        await bot.sleep(1350);
                         rpc.send(gm.DefJzDailyGiftCs.protocol, { _type: 2 });
                         did = true;
-                        await bot.sleep(180);
+                        await bot.sleep(350);
                     }
                     const rewProto = (gm.DefJzGetRewardCs && gm.DefJzGetRewardCs.protocol) || 13312;
                     for (let mode = 1; mode <= 2; mode++) {
