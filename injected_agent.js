@@ -19069,10 +19069,10 @@
             try {
                 const ldm = mm.LadderModel || gm.LadderModel;
                 if (ldm) {
-                    if (bot.tryDo("mcp_ladder_sync", 300)) {
+                    if (bot.tryDo("mcp_ladder_sync", 1800)) {
                         if (typeof ldm.reqLadderInfo === "function") ldm.reqLadderInfo();
                         else rpc.send((gm.LadderInfoCs && gm.LadderInfoCs.protocol) || 13502, {});
-                        await bot.sleep(220);
+                        await bot.sleep(1250);
                     }
                     const canLadderQuick = (typeof ldm.checkQuickRed === "function" && ldm.checkQuickRed()) ||
                         (typeof ldm.canQuick === "function" && ldm.canQuick()) ||
@@ -19102,10 +19102,11 @@
             // 5. ĐẤU TRƯỜNG LIÊN SERVER (ArenaCrossModel — 11732 ArenaCrossInfoCs & Nhiệm vụ 5101..5105)
             try {
                 const acm = mm.ArenaCrossModel || mm.CrossArenaModel || gm.ArenaCrossModel;
-                if (acm && bot.tryDo("mcp_arenacross_sync", 300)) {
+                if (acm && bot.tryDo("mcp_arenacross_sync", 2100)) {
+                    await bot.sleep(1250);
                     if (typeof acm.reqArenaCrossInfo === "function") acm.reqArenaCrossInfo();
                     else rpc.send((gm.ArenaCrossInfoCs && gm.ArenaCrossInfoCs.protocol) || 11732, {});
-                    await bot.sleep(200);
+                    await bot.sleep(1250);
                 }
                 if (tm && typeof tm.getTaskState === "function" && bot.tryDo("mcp_cross_tasks", 30)) {
                     const crossTaskIds = [5101, 5102, 5103, 5104, 5105, 10101, 10102, 10103, 10104, 10105];
