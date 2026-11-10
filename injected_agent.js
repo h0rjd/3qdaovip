@@ -20379,12 +20379,9 @@
                         if (!info) {
                             if (typeof klm.requestInfo === "function" && bot.tryDo("kunlun_req_init", 20)) {
                                 klm.requestInfo();
-                                if (typeof klm.requestShop === "function") klm.requestShop();
                                 await bot.sleep(450);
                                 info = (typeof klm.getFilpInfo === "function") ? klm.getFilpInfo() : klm.info;
                             }
-                        } else if (typeof klm.requestShop === "function" && bot.tryDo("kunlun_req_shop_sync", 90)) {
-                            klm.requestShop();
                         }
                         if (info) {
                             // Khởi tạo mảng rương Côn Lôn & bọc an toàn setBoxItemGainMsg để mở Rương Kho Báu ngầm không bao giờ lỗi undefined.concat!
@@ -20456,13 +20453,15 @@
                                 const sm = mm.ShopModel;
                                 const scMod = safeRequire("ShopConfiger");
                                 const sc = gm.ShopConfiger || window.ShopConfiger || (scMod && (scMod.ShopConfiger || scMod.default));
-                                if (sm && typeof sm.getGoodsListByType === "function" && typeof sm.reqShopBuy === "function" && bot.tryDo("kunlun_free_shop_check", 60)) {
-                                    if (typeof klm.requestShop === "function" && bot.tryDo("kunlun_req_shop_sync", 900)) {
+                                if (sm && typeof sm.getGoodsListByType === "function" && typeof sm.reqShopBuy === "function" && bot.tryDo("kunlun_free_shop_check", 120)) {
+                                    let goodsWrap = sm.getGoodsListByType(13);
+                                    let gList = Array.isArray(goodsWrap) ? (Array.isArray(goodsWrap[0]) ? goodsWrap[0] : goodsWrap) : [];
+                                    if (gList.length === 0 && typeof klm.requestShop === "function" && bot.tryDo("kunlun_req_shop_sync", 1800)) {
                                         klm.requestShop();
-                                        await bot.sleep(300);
+                                        await bot.sleep(350);
+                                        goodsWrap = sm.getGoodsListByType(13);
+                                        gList = Array.isArray(goodsWrap) ? (Array.isArray(goodsWrap[0]) ? goodsWrap[0] : goodsWrap) : [];
                                     }
-                                    const goodsWrap = sm.getGoodsListByType(13);
-                                    const gList = Array.isArray(goodsWrap) ? (Array.isArray(goodsWrap[0]) ? goodsWrap[0] : goodsWrap) : [];
                                     for (let gi = 0; gi < gList.length; gi++) {
                                         const gItem = gList[gi];
                                         const gCfg = (gItem && typeof gItem === "object")
