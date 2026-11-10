@@ -1,14 +1,14 @@
 {
   "schemaVersion": "4.3-MCP",
-  "updatedAtMs": 1794273558975,
-  "updatedIso": "2026-11-10T08:19:18+0700",
-  "primaryUrl": "https://humanitarian-default-calm-won.trycloudflare.com/api/3q_mcp/ingest",
+  "updatedAtMs": 1794288374552,
+  "updatedIso": "2026-11-10T12:26:14+0700",
+  "primaryUrl": "https://media-purple-hip-scientists.trycloudflare.com/api/3q_mcp/ingest",
   "endpoints": [
-    "https://humanitarian-default-calm-won.trycloudflare.com/api/3q_mcp/ingest",
-    "https://guarantee-liked-hosted-laugh.trycloudflare.com/api/3q_mcp/ingest",
+    "https://media-purple-hip-scientists.trycloudflare.com/api/3q_mcp/ingest",
+    "https://experiment-directory-antarctica-beaver.trycloudflare.com/api/3q_mcp/ingest",
     "http://192.168.0.21:8088/api/3q_mcp/ingest",
     "http://192.168.0.143:8088/api/3q_mcp/ingest"
   ],
-  "esignPortal": "https://humanitarian-default-calm-won.trycloudflare.com",
-  "esignSource": "https://humanitarian-default-calm-won.trycloudflare.com/esign_source.json"
+  "esignPortal": "https://media-purple-hip-scientists.trycloudflare.com",
+  "esignSource": "https://media-purple-hip-scientists.trycloudflare.com/esign_source.json"
 }
