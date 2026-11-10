@@ -19491,7 +19491,7 @@
                             const dCfg = drugs[dKey];
                             if (!dCfg || !dCfg.id || !Array.isArray(dCfg.cost)) continue;
                             const dId = Number(dCfg.id);
-                            const itemCode = Number(dCfg.cost[0] || 0);
+                            const itemCode = Number(Array.isArray(dCfg.cost[0]) ? dCfg.cost[0][0] : dCfg.cost[0]) || 0;
                             const haveNum = Number(pm.getItemNum(itemCode) || 0);
                             const usedNum = (typeof cm.getDrugsUseCount === "function") ? Number(cm.getDrugsUseCount(dId) || 0) : 0;
                             const limNum = (typeof cm.getDrugsLimitCount === "function") ? Number(cm.getDrugsLimitCount(dId) || 0) : 999;
