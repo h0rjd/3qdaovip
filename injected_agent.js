@@ -19534,11 +19534,16 @@
                 // 7d. Tọa Kỵ Toàn Diện: Ghép Trang Bị (14922), Mặc Đồ Tốt Hơn (14918), Nâng Cấp/Sao (14910) & Kích Hoạt Đồ Giám Tọa Kỵ (0 KNB)
                 const ridM = mm.RidesModel || gm.RidesModel;
                 if (ridM && bot.tryDo("mcp_rides_scan", 35)) {
-                    const canComb = (typeof ridM.checkCanEquipCompose === "function" && ridM.checkCanEquipCompose(true)) ||
-                        (bot.hasRed && (bot.hasRed("V_RidesEquipCompose") || bot.hasRed("V_RidesEquipCombine")));
-                    if (canComb) {
+                    const compRes = (typeof ridM.checkCanEquipCompose === "function") ? ridM.checkCanEquipCompose(true) : null;
+                    const canComb = (compRes === true) ||
+                        (compRes && typeof compRes === "object" && Object.keys(compRes).length > 0) ||
+                        !!(bot.hasRed && (bot.hasRed("V_RidesEquipCompose") || bot.hasRed("V_RidesEquipCombine")));
+                    if (canComb && bot.tryDo("mcp_rides_combine_14922", 600)) {
                         const ridCombProto = (gm.RidesCombineEquipCs && gm.RidesCombineEquipCs.protocol) || 14922;
                         rpc.send(ridCombProto, { _num: 0, _type: 0, _item_id: 0 });
+                        if (typeof ridM.checkCanEquipComposeRedPoint === "function") {
+                            try { ridM.checkCanEquipComposeRedPoint(); } catch (e) { }
+                        }
                         bot.log("🐎 [Tọa Kỵ] Tự động ghép nhanh Trang Bị Tọa Kỵ (14922 • 0 KNB)!");
                         did = true;
                         await bot.sleep(220);
