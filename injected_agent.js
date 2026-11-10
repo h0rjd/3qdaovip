@@ -19348,11 +19348,24 @@
                 // 5c. Cấm Địa Toàn Server: Like Top 1 (14623 JindiGlobalLikeCs), Nhận thưởng Toàn Server (JindiPickGlobalCs) & Rương Điểm Trợ Chiến (JindiPickHelpScoreCs)
                 const trmJd = mm.TeamRestricteModel;
                 if (trmJd) {
-                    if (bot.tryDo("mcp_jindi_global_like", 1800)) {
-                        if (typeof trmJd.reqGlobalViewData === "function") trmJd.reqGlobalViewData(0);
+                    const hasCurTypeGetter = typeof trmJd.getCurTypeData === "function";
+                    let curJdData = hasCurTypeGetter ? trmJd.getCurTypeData() : null;
+                    if (hasCurTypeGetter && !curJdData && typeof trmJd.reqGlobalViewData === "function" && bot.tryDo("mcp_jindi_global_view", 1800)) {
+                        trmJd.reqGlobalViewData(0);
                         await bot.sleep(250);
+                        curJdData = trmJd.getCurTypeData();
+                    }
+                    const notLikedYet = hasCurTypeGetter
+                        ? (curJdData ? Number(curJdData._global_like || 0) === 0 : !!(bot.hasRed && bot.hasRed("V_JindiGlobalLike")))
+                        : true;
+                    if (notLikedYet && bot.tryDo("mcp_jindi_global_like", 1800)) {
+                        if (!hasCurTypeGetter && typeof trmJd.reqGlobalViewData === "function") {
+                            trmJd.reqGlobalViewData(0);
+                            await bot.sleep(250);
+                        }
                         if (typeof trmJd.reqGlobalLike === "function") trmJd.reqGlobalLike();
                         else rpc.send((gm.JindiGlobalLikeCs && gm.JindiGlobalLikeCs.protocol) || 14623, {});
+                        if (curJdData) curJdData._global_like = 1;
                         did = true;
                         await bot.sleep(200);
                     }
@@ -19479,7 +19492,8 @@
                 // 7c. Sử dụng Thuốc Bổ Chúa Công (12012 MasterUseDrugCs), Tăng Tốc Tu Luyện bằng Cuộn (10720 CopyHastenCs) & Cộng Hưởng Cấp Tướng (CareerModel — 0 KNB)
                 const cm = mm.CareerModel || mm.MasterModel;
                 if (cm && bot.tryDo("mcp_career_master_scan", 40)) {
-                    if (typeof cm.masterDrugReuest === "function" && bot.tryDo("mcp_career_drug_info", 600)) {
+                    const needDrugInfo = !Array.isArray(cm.drugsUseInfo);
+                    if (needDrugInfo && typeof cm.masterDrugReuest === "function" && bot.tryDo("mcp_career_drug_info", 1800)) {
                         cm.masterDrugReuest();
                         await bot.sleep(250);
                     }
