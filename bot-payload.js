@@ -19069,22 +19069,26 @@
             try {
                 const djm = mm.DefJzModel;
                 if (djm) {
-                    if (bot.tryDo("mcp_defjz_sync_info", 1800)) {
+                    const info1Pre = (typeof djm.getDefJzInfo === "function") ? djm.getDefJzInfo(1) : (djm.defJzInfo && djm.defJzInfo[1]);
+                    const info2Pre = (typeof djm.getDefJzInfo === "function") ? djm.getDefJzInfo(2) : (djm.defJzInfo && djm.defJzInfo[2]);
+                    if ((!info1Pre || !info2Pre) && bot.tryDo("mcp_defjz_sync_info", 1800)) {
                         const infoProto = (gm.DefJzInfoCs && gm.DefJzInfoCs.protocol) || 13300;
-                        if (typeof djm.requestDefJzInfo === "function") {
-                            try { djm.requestDefJzInfo(1); } catch (e) { }
-                            await bot.sleep(1350);
-                            try { djm.requestDefJzInfo(2); } catch (e) { }
-                        } else {
-                            rpc.send(infoProto, { _type: 1 });
-                            await bot.sleep(1350);
-                            rpc.send(infoProto, { _type: 2 });
+                        if (!info1Pre) {
+                            if (typeof djm.requestDefJzInfo === "function") { try { djm.requestDefJzInfo(1); } catch (e) { } }
+                            else rpc.send(infoProto, { _type: 1 });
+                            await bot.sleep(2600);
                         }
-                        await bot.sleep(350);
+                        if (!info2Pre) {
+                            if (typeof djm.requestDefJzInfo === "function") { try { djm.requestDefJzInfo(2); } catch (e) { } }
+                            else rpc.send(infoProto, { _type: 2 });
+                            await bot.sleep(600);
+                        }
                     }
-                    if (gm.DefJzDailyGiftCs && gm.DefJzDailyGiftCs.protocol && bot.tryDo("mcp_defjz_daily_gift", 7200)) {
+                    const hasDefJzGiftRed = (bot.hasRed && (bot.hasRed("V_DefJzDailyGift") || bot.hasRed("V_DefJzTeamCanGet") || bot.hasRed("V_DefJzDuoCanGet"))) ||
+                        (info1Pre && info1Pre._daily_gift === 0) || (info2Pre && info2Pre._daily_gift === 0);
+                    if (hasDefJzGiftRed && gm.DefJzDailyGiftCs && gm.DefJzDailyGiftCs.protocol && bot.tryDo("mcp_defjz_daily_gift", 7200)) {
                         rpc.send(gm.DefJzDailyGiftCs.protocol, { _type: 1 });
-                        await bot.sleep(1350);
+                        await bot.sleep(2600);
                         rpc.send(gm.DefJzDailyGiftCs.protocol, { _type: 2 });
                         did = true;
                         await bot.sleep(350);
