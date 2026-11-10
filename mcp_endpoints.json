@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "4.3-MCP",
+  "updatedAtMs": 1794273558975,
+  "updatedIso": "2026-11-10T08:19:18+0700",
+  "primaryUrl": "https://humanitarian-default-calm-won.trycloudflare.com/api/3q_mcp/ingest",
+  "endpoints": [
+    "https://humanitarian-default-calm-won.trycloudflare.com/api/3q_mcp/ingest",
+    "https://guarantee-liked-hosted-laugh.trycloudflare.com/api/3q_mcp/ingest",
+    "http://192.168.0.21:8088/api/3q_mcp/ingest",
+    "http://192.168.0.143:8088/api/3q_mcp/ingest"
+  ],
+  "esignPortal": "https://humanitarian-default-calm-won.trycloudflare.com",
+  "esignSource": "https://humanitarian-default-calm-won.trycloudflare.com/esign_source.json"
+}
