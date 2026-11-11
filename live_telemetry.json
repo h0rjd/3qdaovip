@@ -2,11 +2,13 @@
   "schemaVersion": "3.8",
   "runNumber": 434,
   "runId": 43046248607,
-  "updatedAtIso": "2026-11-11T18:13:31.848Z",
-  "updatedAtVn": "2026-11-12 01:13:31",
-  "uptimeMin": 179.46,
+  "updatedAtIso": "2026-11-11T18:13:34.181Z",
+  "updatedAtVn": "2026-11-12 01:13:34",
+  "uptimeMin": 179.49,
   "server": "Tam Quốc S6",
-  "isLobbyHealthy": true,
+  "isLobbyHealthy": false,
+  "isYielding": true,
+  "yieldEndTime": 1794422914180,
   "roleName": "s6.TàoPhi",
   "level": 110,
   "stage": 7860,
@@ -15,228 +17,9 @@
   "currentPower": 270620354,
   "initialJade": 50299,
   "jade": 38935,
-  "deltaJade": -11364,
   "totalRescued": 28,
   "totalRescuedKnb": 1400,
-  "knbPerHour": 468.1,
-  "rescuesPerHour": 9.36,
   "totalScanned": 22016,
-  "scansPerMin": 123,
-  "rescueTelemetry": {
-    "rescuedCount": 9,
-    "rescuedKnbTotal": 450,
-    "totalRescueScanned": 2000,
-    "totalWaves": 1168,
-    "occupiedFound": 44,
-    "winnableFights": 11,
-    "winCount": 9,
-    "lossCount": 1,
-    "skippedStrongRobbers": 34,
-    "code66Count": 0,
-    "myFullPower": 519589549,
-    "winRatioLimit": 1.03,
-    "currentHeroCount": 3,
-    "currentScoutPower": 270620354,
-    "totalScoutCombos": 62,
-    "hotVictimCount": 169,
-    "patrolPoolSize": 850,
-    "dailyMaxedCount": 56,
-    "rankPagesCrawled": 281,
-    "tierStats": {
-      "1": {
-        "waves": 273,
-        "unique": 212,
-        "burning": 2,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 79356213
-      },
-      "2": {
-        "waves": 193,
-        "unique": 131,
-        "burning": 1,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 162966763
-      },
-      "3": {
-        "waves": 252,
-        "unique": 179,
-        "burning": 1,
-        "occupied": 1,
-        "winnable": 1,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 270620354
-      },
-      "4": {
-        "waves": 187,
-        "unique": 117,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 344264727
-      },
-      "5": {
-        "waves": 263,
-        "unique": 182,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 1,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 433809355
-      }
-    },
-    "recentRescueEvents": [
-      {
-        "t": 1794420397958,
-        "kind": "too_strong",
-        "tier": 5,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s28.K9",
-        "robber": "s14.MrKim",
-        "robPow": 926200290
-      },
-      {
-        "t": 1794420400046,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s1.Canh_Duc",
-        "robber": "s7.⚡️Camapzz⚡️",
-        "robPow": 1209508410
-      },
-      {
-        "t": 1794420400238,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s43.suzukibútbi",
-        "robber": "s45.Mab",
-        "robPow": 786710041
-      },
-      {
-        "t": 1794420402352,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s50.Babarian",
-        "robber": "s45.Họclớp5A1",
-        "robPow": 869261141
-      },
-      {
-        "t": 1794420402352,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s49.Gián•Đáng•Yêu",
-        "robber": "s52.Magnus",
-        "robPow": 727218930
-      },
-      {
-        "t": 1794420404653,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s5.1không2",
-        "robber": "s10.MilkBoy",
-        "robPow": 749678717
-      },
-      {
-        "t": 1794420404858,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s50.HầuCa",
-        "robber": "s43.•Gián•Đáng•Iu•",
-        "robPow": 541193591
-      },
-      {
-        "t": 1794420406907,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s10.MilkBoy",
-        "robber": "s10.HạChiVân",
-        "robPow": 891146876
-      },
-      {
-        "t": 1794420407112,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s46.Chuois",
-        "robber": "s47.Knight",
-        "robPow": 623252031
-      },
-      {
-        "t": 1794420407312,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s10.NA",
-        "robber": "s9.LọVươngChíTôn",
-        "robPow": 554008804
-      },
-      {
-        "t": 1794420422527,
-        "kind": "too_strong",
-        "tier": 4,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s7.ThânainấyLo",
-        "robber": "s8.꧁OKê꧂",
-        "robPow": 999694479
-      },
-      {
-        "t": 1794420428170,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s13.ATDZ",
-        "robber": "s23.Cọp√Tiger",
-        "robPow": 978560241
-      },
-      {
-        "t": 1794420428171,
-        "kind": "too_strong",
-        "tier": 2,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s3.BaCuBơ",
-        "robber": "s10.HoàngThắng",
-        "robPow": 2669231225
-      },
-      {
-        "t": 1794420430205,
-        "kind": "too_strong",
-        "tier": 3,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s23.Cọp√Tiger",
-        "robber": "s13.Khánhđậpzai",
-        "robPow": 845610893
-      },
-      {
-        "t": 1794420430205,
-        "kind": "too_strong",
-        "tier": 3,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s23.Dị",
-        "robber": "s23.BMxMaFia",
-        "robPow": 912330028
-      }
-    ]
-  },
   "toggles": {
     "auto_stage": true,
     "auto_tower": false,
@@ -273,10 +56,6 @@
     "mod_headframe_title": true
   },
   "recentLogs": [
-    "[2026-11-12 01:08:07] [AutoBot] 6:08:07 PM 📊 [Farm KNB] Đã quét: 606 nhà (Đội dò: 3 tướng • Kho Liên SV: 301) | Giải cứu: 9 lượt (+450 KNB • Bỏ qua quá LC: 34) | KNB: 38,934",
-    "[2026-11-12 01:08:11] [AutoBot] 6:08:11 PM 🟢 [Hệ Thống] Trực chiến: Ải [7860] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 519,589,549 (Hạ LC dò: 433,809,355 • 5 tướng) | Tự động: BẬT",
-    "[2026-11-12 01:08:32] [AutoBot] 6:08:32 PM 🟢 [Hệ Thống] Trực chiến: Ải [7860] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 519,589,549 (Hạ LC dò: 59,394,588 • 1 tướng) | Tự động: BẬT",
-    "[2026-11-12 01:08:33] [AutoBot] 6:08:33 PM 📊 [Farm KNB] Đã quét: 740 nhà (Đội dò: 1 tướng • Kho Liên SV: 389) | Giải cứu: 9 lượt (+450 KNB • Bỏ qua quá LC: 34) | KNB: 38,934",
     "[2026-11-12 01:08:54] [AutoBot] 6:08:54 PM 🟢 [Hệ Thống] Trực chiến: Ải [7860] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 519,589,549 (Hạ LC dò: 77,438,026 • 1 tướng) | Tự động: BẬT",
     "[2026-11-12 01:08:56] [AutoBot] 6:08:56 PM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
     "[2026-11-12 01:09:00] [AutoBot] 6:09:00 PM 📊 [Farm KNB] Đã quét: 887 nhà (Đội dò: 2 tướng • Kho Liên SV: 530) | Giải cứu: 9 lượt (+450 KNB • Bỏ qua quá LC: 34) | KNB: 38,934",
@@ -307,6 +86,10 @@
     "[2026-11-12 01:12:52] [AutoBot] 6:12:52 PM 📊 [Farm KNB] Đã quét: 1,843 nhà (Đội dò: 1 tướng • Kho Liên SV: 850) | Giải cứu: 9 lượt (+450 KNB • Bỏ qua quá LC: 34) | KNB: 38,935",
     "[2026-11-12 01:13:04] [AutoBot] 6:13:04 PM 🟢 [Hệ Thống] Trực chiến: Ải [7860] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 519,589,549 (Hạ LC dò: 377,756,030 • 5 tướng) | Tự động: BẬT",
     "[2026-11-12 01:13:17] [AutoBot] 6:13:17 PM 📊 [Farm KNB] Đã quét: 1,938 nhà (Đội dò: 5 tướng • Kho Liên SV: 850) | Giải cứu: 9 lượt (+450 KNB • Bỏ qua quá LC: 34) | KNB: 38,935",
-    "[2026-11-12 01:13:24] [AutoBot] 6:13:24 PM 🟢 [Hệ Thống] Trực chiến: Ải [7860] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 519,589,549 (Hạ LC dò: 79,356,213 • 1 tướng) | Tự động: BẬT"
+    "[2026-11-12 01:13:24] [AutoBot] 6:13:24 PM 🟢 [Hệ Thống] Trực chiến: Ải [7860] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 15 | LC: 519,589,549 (Hạ LC dò: 79,356,213 • 1 tướng) | Tự động: BẬT",
+    "[2026-11-12 01:13:32] [AutoBot] 6:13:32 PM 📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=1) -> Nhường máy ngay!",
+    "[2026-11-12 01:13:32] 📱 [Nhường Máy] Nhận tín hiệu KICK thiết bị khác từ game -> Ngắt tiến trình Chromium ngay lập tức (0ms) để giải phóng kết nối cho Điện thoại!",
+    "[2026-11-12 01:13:33] 📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC! Đóng trình duyệt ngay, tạm dừng 35 phút rồi tự động kết nối lại...",
+    "[2026-11-12 01:13:34] [Telegram] ✅ Đã gửi báo cáo & bảng điều khiển về Telegram thành công!"
   ]
 }
