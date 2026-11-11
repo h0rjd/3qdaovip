@@ -19154,11 +19154,13 @@
                         if (typeof clm.reqCopyEntry === "function") clm.reqCopyEntry();
                         else rpc.send((gm.LadderInfoCs && gm.LadderInfoCs.protocol) || 13502, {});
                         await bot.sleep(320);
-                        if (typeof clm.reqMainData === "function") clm.reqMainData();
-                        else rpc.send((gm.LadderInfo2Cs && gm.LadderInfo2Cs.protocol) || 13520, {});
-                        await bot.sleep(320);
+                        if (!clm._like_list && bot.canDo("ladder_req_main", 180)) {
+                            if (typeof clm.reqMainData === "function") clm.reqMainData();
+                            else rpc.send((gm.LadderInfo2Cs && gm.LadderInfo2Cs.protocol) || 13520, {});
+                            await bot.sleep(320);
+                        }
                         if (typeof clm.reqHisRank === "function") clm.reqHisRank();
-                        else rpc.send((gm.LadderHisRankCs && gm.LadderHisRankCs.protocol) || 13510, {});
+                        else rpc.send((gm.LadderHisRankCs && gm.LadderInfoCs && gm.LadderHisRankCs.protocol) || 13510, {});
                         await bot.sleep(350);
                     }
                     const canFightLadder = (typeof clm.checkCanFight === "function") ? !!clm.checkCanFight(false) : true;
