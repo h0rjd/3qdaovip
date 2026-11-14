@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.3-MCP",
   "active": true,
-  "lastSeenMs": 1794679479162,
-  "lastSeenIso": "2026-11-15T01:04:39+0700",
-  "updatedAtMs": 1794679483365,
-  "ageMs": 4203,
+  "lastSeenMs": 1794679523212,
+  "lastSeenIso": "2026-11-15T01:05:23+0700",
+  "updatedAtMs": 1794679528371,
+  "ageMs": 5159,
   "device": "iPhone 14 Pro Max",
   "udidHint": "00008120-00027CC811E0C01E",
   "roleName": "s6.TàoPhi",
-  "stage": 8045,
+  "stage": 8046,
   "towerFloor": 1009,
-  "power": 537914196,
-  "jade": 99051
+  "power": 539083143,
+  "jade": 99052
 }
