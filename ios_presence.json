@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.3-MCP",
-  "active": false,
-  "lastSeenMs": 1794311277115,
-  "lastSeenIso": "2026-11-10T18:47:57+0700",
-  "updatedAtMs": 1794311380957,
-  "ageMs": 103842,
+  "active": true,
+  "lastSeenMs": 1794679243981,
+  "lastSeenIso": "2026-11-15T01:00:43+0700",
+  "updatedAtMs": 1794679243988,
+  "ageMs": 7,
   "device": "iPhone 14 Pro Max",
   "udidHint": "00008120-00027CC811E0C01E",
-  "roleName": "s6.TàoPhi",
-  "stage": 7738,
-  "towerFloor": 969,
-  "power": 351549216,
-  "jade": 42094
+  "roleName": "Đang tải...",
+  "stage": 1,
+  "towerFloor": 1,
+  "power": 0,
+  "jade": 0
 }
