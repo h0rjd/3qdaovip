@@ -1,10 +1,10 @@
 {
   "schemaVersion": "4.3-MCP",
-  "active": true,
+  "active": false,
   "lastSeenMs": 1794679523212,
   "lastSeenIso": "2026-11-15T01:05:23+0700",
-  "updatedAtMs": 1794679573391,
-  "ageMs": 50179,
+  "updatedAtMs": 1794679618411,
+  "ageMs": 95199,
   "device": "iPhone 14 Pro Max",
   "udidHint": "00008120-00027CC811E0C01E",
   "roleName": "s6.TàoPhi",
