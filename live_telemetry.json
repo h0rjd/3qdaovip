@@ -2,241 +2,24 @@
   "schemaVersion": "3.8",
   "runNumber": 505,
   "runId": 45577515873,
-  "updatedAtIso": "2026-11-25T11:01:27.509Z",
-  "updatedAtVn": "2026-11-25 18:01:27",
-  "uptimeMin": 146.13,
+  "updatedAtIso": "2026-11-25T11:01:44.559Z",
+  "updatedAtVn": "2026-11-25 18:01:44",
+  "uptimeMin": 146.41,
   "server": "Tam Quốc S6",
-  "isLobbyHealthy": true,
+  "isLobbyHealthy": false,
+  "isYielding": true,
+  "yieldEndTime": 1795605704559,
   "roleName": "s6.TàoPhi",
   "level": 120,
   "stage": 8920,
   "towerFloor": 1069,
   "basePower": 645589442,
-  "currentPower": 98747600,
+  "currentPower": 83191693,
   "initialJade": 45478,
   "jade": 46919,
-  "deltaJade": 1441,
   "totalRescued": 36,
   "totalRescuedKnb": 1800,
-  "knbPerHour": 739.1,
-  "rescuesPerHour": 14.78,
-  "totalScanned": 32269,
-  "scansPerMin": 221,
-  "rescueTelemetry": {
-    "rescuedCount": 36,
-    "rescuedKnbTotal": 1800,
-    "totalRescueScanned": 32269,
-    "totalWaves": 17918,
-    "occupiedFound": 111,
-    "winnableFights": 39,
-    "winCount": 36,
-    "lossCount": 3,
-    "skippedStrongRobbers": 72,
-    "code66Count": 0,
-    "myFullPower": 645589442,
-    "winRatioLimit": 1.03,
-    "currentHeroCount": 1,
-    "currentScoutPower": 98747600,
-    "totalScoutCombos": 62,
-    "hotVictimCount": 194,
-    "patrolPoolSize": 1649,
-    "dailyMaxedCount": 132,
-    "rankPagesCrawled": 825,
-    "tierStats": {
-      "1": {
-        "waves": 6568,
-        "unique": 3772,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 147832568
-      },
-      "2": {
-        "waves": 2786,
-        "unique": 1271,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 176336497
-      },
-      "3": {
-        "waves": 2785,
-        "unique": 1343,
-        "burning": 0,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 280556543
-      },
-      "4": {
-        "waves": 2787,
-        "unique": 1323,
-        "burning": 1,
-        "occupied": 0,
-        "winnable": 0,
-        "wins": 0,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 388423691
-      },
-      "5": {
-        "waves": 2992,
-        "unique": 1264,
-        "burning": 6,
-        "occupied": 1,
-        "winnable": 1,
-        "wins": 1,
-        "losses": 0,
-        "tooStrong": 0,
-        "lastRealPow": 528737075
-      }
-    },
-    "recentRescueEvents": [
-      {
-        "t": 1795603540241,
-        "kind": "win",
-        "tier": 5,
-        "src": "Mục Tiêu Nóng Liên SV",
-        "victim": "s9.NhậtTríViễn",
-        "robber": "s1.CáBiếtBay✓",
-        "robPow": 332839032
-      },
-      {
-        "t": 1795603578264,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s1.longgd",
-        "robber": "s1.CáBiếtBay✓",
-        "robPow": 332839032
-      },
-      {
-        "t": 1795603895104,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s27.QuẪy",
-        "robber": "s45.OaOaBáCháy",
-        "robPow": 1746950350
-      },
-      {
-        "t": 1795603907539,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s32.HiệpQuỳÂm",
-        "robber": "s26.winner",
-        "robPow": 365742189
-      },
-      {
-        "t": 1795603910428,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s26.winner",
-        "robber": "s43.HáchNộVương",
-        "robPow": 439881290
-      },
-      {
-        "t": 1795604075834,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s24.BinDoan",
-        "robber": "s24.ManhVoDich",
-        "robPow": 358531089
-      },
-      {
-        "t": 1795604097512,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s6.kaiser",
-        "robber": "s24.ManhVoDich",
-        "robPow": 358531089
-      },
-      {
-        "t": 1795604169092,
-        "kind": "win",
-        "tier": 5,
-        "src": "Hàng Xóm Bị Chiếm Đóng",
-        "victim": "s6.TOMATO",
-        "robber": "s16.Lynk",
-        "robPow": 540089096
-      },
-      {
-        "t": 1795604172067,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Bang",
-        "victim": "s6.DưaLưới",
-        "robber": "s16.Lynk",
-        "robPow": 540089096
-      },
-      {
-        "t": 1795604178333,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s24.Bốđây",
-        "robber": "s24.ManhVoDich",
-        "robPow": 358531089
-      },
-      {
-        "t": 1795604184177,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Liên SV",
-        "victim": "s24.MiuYêuDấu❤️",
-        "robber": "s16.Lynk",
-        "robPow": 540089096
-      },
-      {
-        "t": 1795604219120,
-        "kind": "win",
-        "tier": 5,
-        "src": "Tuần Tra Bang",
-        "victim": "s6.HânVôSắc",
-        "robber": "s6.Mỡ",
-        "robPow": 361697463
-      },
-      {
-        "t": 1795604280834,
-        "kind": "win",
-        "tier": 5,
-        "src": "Mục Tiêu Nóng Liên SV",
-        "victim": "s6.kaiser",
-        "robber": "s6.Mỡ",
-        "robPow": 361697463
-      },
-      {
-        "t": 1795604300409,
-        "kind": "too_strong",
-        "tier": 1,
-        "src": "Tuần Tra BXH Liên SV",
-        "victim": "s65.Shin",
-        "robber": "s65.ÔngChú1993",
-        "robPow": 905991612
-      },
-      {
-        "t": 1795604402672,
-        "kind": "win",
-        "tier": 5,
-        "src": "Mục Tiêu Nóng Liên SV",
-        "victim": "s24.ManhVoDich",
-        "robber": "s6.Mỡ",
-        "robPow": 361691007
-      }
-    ]
-  },
+  "totalScanned": 32331,
   "toggles": {
     "auto_stage": true,
     "auto_tower": false,
@@ -273,14 +56,6 @@
     "mod_headframe_title": true
   },
   "recentLogs": [
-    "[2026-11-25 17:57:59] [AutoBot] 10:57:59 AM ⚔️ [Farm KNB • Mục Tiêu Nóng Liên SV] Phát hiện gia viên [s6.kaiser] (ID: 301303268469) đang bị cướp bởi [s6.Mỡ]! Đang kiểm tra LC kẻ địch...",
-    "[2026-11-25 17:57:59] [AutoBot] 10:57:59 AM ⚔️ [Farm KNB • Mục Tiêu Nóng Liên SV] Chuẩn bị giải cứu [s6.kaiser] (Đánh đuổi [s6.Mỡ]) (+50 KNB)...",
-    "[2026-11-25 17:57:59] [AutoBot] 10:57:59 AM ⚔️ [Farm KNB] Đã khôi phục 100% full đội hình (6 tướng • LC 645,589,442) sẵn sàng chiến đấu!",
-    "[2026-11-25 17:58:00] [AutoBot] 10:58:00 AM 💎 [Farm KNB] 🎉 GIẢI CỨU THÀNH CÔNG [s6.kaiser] (Đánh đuổi [s6.Mỡ])! +50 KNB (Tổng: 1,750 KNB • 35 lượt)!",
-    "[2026-11-25 17:58:01] [AutoBot] 10:58:01 AM 🟢 [Hệ Thống] Trực chiến: Ải [8920] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 18 | LC: 645,589,442 | Tự động: BẬT",
-    "[2026-11-25 17:58:07] [AutoBot] 10:58:07 AM 📊 [Farm KNB] Đã quét: 31,464 nhà (Đội dò: 5 tướng • Kho Liên SV: 1649) | Giải cứu: 35 lượt (+1,750 KNB • Bỏ qua quá LC: 71) | KNB: 47,418",
-    "[2026-11-25 17:58:20] [AutoBot] 10:58:20 AM ⚔️ [Farm KNB • Tuần Tra BXH Liên SV] Phát hiện gia viên [s65.Shin] (ID: 301305201021) đang bị cướp bởi [s65.ÔngChú1993]! Đang kiểm tra LC kẻ địch...",
-    "[2026-11-25 17:58:20] [AutoBot] 10:58:20 AM 🛡️ [Farm KNB • Bỏ Qua] Kẻ cướp [s65.ÔngChú1993] có LC 905,991,612 > 103% LC mình (645,589,442) -> Bỏ qua ngay, không tốn trận!",
     "[2026-11-25 17:58:21] [AutoBot] 10:58:21 AM 🟢 [Hệ Thống] Trực chiến: Ải [8920] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 18 | LC: 645,589,442 (Hạ LC dò: 528,737,075 • 5 tướng) | Tự động: BẬT",
     "[2026-11-25 17:58:33] [AutoBot] 10:58:33 AM 📊 [Farm KNB] Đã quét: 31,595 nhà (Đội dò: 1 tướng • Kho Liên SV: 1649) | Giải cứu: 35 lượt (+1,750 KNB • Bỏ qua quá LC: 72) | KNB: 47,418",
     "[2026-11-25 17:58:42] [AutoBot] 10:58:42 AM 🟢 [Hệ Thống] Trực chiến: Ải [8920] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 18 | LC: 645,589,442 (Hạ LC dò: 546,604,643 • 5 tướng) | Tự động: BẬT",
@@ -307,6 +82,14 @@
     "[2026-11-25 18:00:47] [AutoBot] 11:00:47 AM 🌾 Gia Viên: Tự động thu hoạch sản lượng công trình (Gỗ, Vàng...) & Binh lính!",
     "[2026-11-25 18:01:06] [AutoBot] 11:01:06 AM 🟢 [Hệ Thống] Trực chiến: Ải [8920] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 18 | LC: 645,589,442 (Hạ LC dò: 539,321,604 • 5 tướng) | Tự động: BẬT",
     "[2026-11-25 18:01:06] [AutoBot] 11:01:06 AM 📊 [Farm KNB] Đã quét: 32,161 nhà (Đội dò: 5 tướng • Kho Liên SV: 1649) | Giải cứu: 36 lượt (+1,800 KNB • Bỏ qua quá LC: 72) | KNB: 46,919",
-    "[2026-11-25 18:01:27] [AutoBot] 11:01:27 AM 🟢 [Hệ Thống] Trực chiến: Ải [8920] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 18 | LC: 645,589,442 (Hạ LC dò: 528,737,075 • 5 tướng) | Tự động: BẬT"
+    "[2026-11-25 18:01:27] [AutoBot] 11:01:27 AM 🟢 [Hệ Thống] Trực chiến: Ải [8920] (Đợt 1/5) [Tự vượt ải: TẮT] | Gia Viên: Giai Đoạn 18 | LC: 645,589,442 (Hạ LC dò: 528,737,075 • 5 tướng) | Tự động: BẬT",
+    "[2026-11-25 18:01:33] [AutoBot] 11:01:33 AM 📊 [Farm KNB] Đã quét: 32,301 nhà (Đội dò: 1 tướng • Kho Liên SV: 1649) | Giải cứu: 36 lượt (+1,800 KNB • Bỏ qua quá LC: 72) | KNB: 46,919",
+    "[2026-11-25 18:01:43] [AutoBot] 11:01:43 AM 📱 [Nhường Máy] Bắt được sự kiện đăng nhập trùng thiết bị (evt_LoginKickSc _res=1) -> Nhường máy ngay!",
+    "[2026-11-25 18:01:43] 📱 [Nhường Máy] Nhận tín hiệu KICK thiết bị khác từ game -> Ngắt tiến trình Chromium ngay lập tức (0ms) để giải phóng kết nối cho Điện thoại!",
+    "[2026-11-25 18:01:43] [AutoBot] 11:01:43 AM 📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại (Dispatcher evt_LoginKickSc (_res=1))! Cắt toàn bộ mạng & đóng trình duyệt ngay...",
+    "[2026-11-25 18:01:43] [AutoBot] 11:01:43 AM 📱 [Nhường Máy] Khẩn cấp: Đóng browser ngay lập tức (Dispatcher evt_LoginKickSc (_res=1))",
+    "[2026-11-25 18:01:43] [AutoBot]  📱 [Nhường Máy] Early LoginKickSc _res=1",
+    "[2026-11-25 18:01:43] 📱 [Nhường Máy] Phát hiện tài khoản đăng nhập từ Điện thoại/PC! Đóng trình duyệt ngay, tạm dừng 20 phút rồi tự động kết nối lại...",
+    "[2026-11-25 18:01:44] [Telegram] ✅ Đã gửi báo cáo & bảng điều khiển về Telegram thành công!"
   ]
 }
